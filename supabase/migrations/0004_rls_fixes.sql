@@ -3,12 +3,6 @@
 --   #01 Supervisor: restricción de visibilidad en documents y storage (solo propio)
 --   #04 Storage INSERT: permitir al admin subir a la carpeta de cualquier empleado
 
--- ─── storage.objects: habilitar RLS explícitamente ───────────────────────────
--- En Supabase real ya viene habilitado; se deja explícito para alinear la
--- migración con el mock de tests (setup.sql) y cumplir el DoD de auditoría.
-
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
-
 -- ─── documents_select: Supervisor solo ve sus propios documentos ─────────────
 -- (Supervisor mantiene SELECT de profiles de su equipo vía policy profiles_select,
 --  pero no puede leer los documentos de sus subordinados desde esta tabla.)
