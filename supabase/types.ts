@@ -117,9 +117,13 @@ export type Database = {
       }
       documents: {
         Row: {
+          certificado_otros_texto: string | null
+          certificado_tipo: Database["public"]["Enums"]["certificado_tipo"] | null
           created_at: string
           document_type: string
           estado: Database["public"]["Enums"]["approval_status"]
+          fecha_vencimiento: string | null
+          file_purged_at: string | null
           file_size: number | null
           filename: string
           id: string
@@ -133,9 +137,13 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          certificado_otros_texto?: string | null
+          certificado_tipo?: Database["public"]["Enums"]["certificado_tipo"] | null
           created_at?: string
           document_type: string
           estado?: Database["public"]["Enums"]["approval_status"]
+          fecha_vencimiento?: string | null
+          file_purged_at?: string | null
           file_size?: number | null
           filename: string
           id?: string
@@ -149,9 +157,13 @@ export type Database = {
           user_id: string
         }
         Update: {
+          certificado_otros_texto?: string | null
+          certificado_tipo?: Database["public"]["Enums"]["certificado_tipo"] | null
           created_at?: string
           document_type?: string
           estado?: Database["public"]["Enums"]["approval_status"]
+          fecha_vencimiento?: string | null
+          file_purged_at?: string | null
           file_size?: number | null
           filename?: string
           id?: string
@@ -314,46 +326,58 @@ export type Database = {
       }
       profiles: {
         Row: {
+          apellido: string | null
           created_at: string
+          cuit: string | null
           dni: string | null
           email: string
           entrevista_tecnica: Json | null
           fecha_ingreso: string | null
           full_name: string | null
           id: string
+          nombre: string | null
           phone: string | null
           role: Database["public"]["Enums"]["user_role"]
           status: Database["public"]["Enums"]["employee_status"]
           supervisor_id: string | null
           updated_at: string
+          winda_id: string | null
         }
         Insert: {
+          apellido?: string | null
           created_at?: string
+          cuit?: string | null
           dni?: string | null
           email: string
           entrevista_tecnica?: Json | null
           fecha_ingreso?: string | null
           full_name?: string | null
           id: string
+          nombre?: string | null
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           status?: Database["public"]["Enums"]["employee_status"]
           supervisor_id?: string | null
           updated_at?: string
+          winda_id?: string | null
         }
         Update: {
+          apellido?: string | null
           created_at?: string
+          cuit?: string | null
           dni?: string | null
           email?: string
           entrevista_tecnica?: Json | null
           fecha_ingreso?: string | null
           full_name?: string | null
           id?: string
+          nombre?: string | null
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           status?: Database["public"]["Enums"]["employee_status"]
           supervisor_id?: string | null
           updated_at?: string
+          winda_id?: string | null
         }
         Relationships: [
           {
@@ -464,6 +488,13 @@ export type Database = {
     }
     Enums: {
       approval_status: "pendiente" | "aprobado" | "rechazado"
+      certificado_tipo:
+        | "gwo"
+        | "cursos_elevadores"
+        | "espacio_confinado"
+        | "manejo_defensivo"
+        | "cursos_vestas"
+        | "otros"
       employee_status: "activo" | "inactivo" | "pendiente"
       estado_dia:
         | "trabajando"

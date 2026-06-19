@@ -22,6 +22,7 @@ export const copy = {
     required:  'Campo requerido',
     yes:       'Sí',
     no:        'No',
+    logoAlt:   'Logo First Blades',
   },
 
   auth: {
@@ -130,6 +131,172 @@ export const copy = {
     confirmDeactivate: '¿Desactivar este usuario?',
   },
 
+  miPerfil: {
+    title:    'Mi Perfil',
+    subtitle: 'Tus datos personales y documentos',
+    sectionDatos: 'Datos personales',
+    sectionDocumentos: 'Documentos',
+    fields: {
+      nombre:        'Nombre',
+      apellido:      'Apellido',
+      email:         'Correo electrónico',
+      telefono:      'Teléfono',
+      cuit:          'CUIT',
+      windaId:       'Winda ID',
+      dni:           'DNI',
+      fechaIngreso:  'Fecha de ingreso',
+      rol:           'Rol',
+      estado:        'Estado',
+      supervisor:    'Supervisor',
+    },
+    adminFields: {
+      entrevistaTecnica: 'Entrevista técnica',
+      tiposTrabajoTitle: 'Tipos de trabajo habilitados',
+      tiposTrabajo: {
+        aerogeneradores:     'Aerogeneradores',
+        palas_eolicas:       'Palas eólicas',
+        trabajo_en_altura:   'Trabajo en altura',
+        escalada_industrial: 'Escalada industrial',
+        inspeccion_visual:   'Inspección visual',
+      },
+    },
+    placeholders: {
+      nombre:    'Nombre',
+      apellido:  'Apellido',
+      telefono:  'Ej: +54 9 261 000-0000',
+      cuit:      'Ej: 20-12345678-9',
+      windaId:   'ID Winda',
+      dni:       'Número de DNI',
+    },
+    readOnly: 'Solo lectura. Los cambios deben solicitarse a Administración.',
+    editButton: 'Editar perfil',
+    saveButton: 'Guardar cambios',
+    messages: {
+      updateSuccess: 'Perfil actualizado correctamente.',
+      updateError:   'Error al actualizar el perfil.',
+      noValue:       'Sin datos',
+    },
+  },
+
+  documentos: {
+    sectionTitle:  'Documentos',
+    uploadButton:  'Subir documento',
+    previewButton: 'Ver documento',
+    noDocuments:   'No hay documentos cargados aún.',
+    uploadModalTitle: 'Subir documento',
+    fields: {
+      tipo:             'Tipo de documento',
+      certificadoTipo:  'Tipo de certificado',
+      otrosTexto:       'Descripción del certificado',
+      fechaVencimiento: 'Fecha de vencimiento',
+      archivo:          'Archivo',
+    },
+    placeholders: {
+      tipo:            'Seleccioná el tipo',
+      certificadoTipo: 'Seleccioná el tipo de certificado',
+      otrosTexto:      'Describí el certificado (máx. 80 caracteres)',
+      fechaVencimiento:'Fecha de vencimiento',
+    },
+    tipos: {
+      dni:           'DNI',
+      licencia:      'Licencia de conducir',
+      foto_carnet:   'Foto carnet 4×4',
+      certificado:   'Certificado',
+      estudio_medico:'Estudio médico',
+    },
+    certificadoTipos: {
+      gwo:               'GWO',
+      cursos_elevadores: 'Cursos elevadores',
+      espacio_confinado: 'Espacio confinado',
+      manejo_defensivo:  'Manejo defensivo',
+      cursos_vestas:     'Cursos Vestas',
+      otros:             'Otros',
+    },
+    hints: {
+      otrosTexto:       'Requerido cuando el tipo es "Otros".',
+      fechaVencimiento: 'Requerida para certificados con vencimiento.',
+      archivo:          'PDF o imagen, máximo 10 MB.',
+      purgatorio:       'Tu documento será revisado por Administración.',
+    },
+    messages: {
+      uploadSuccess: 'Documento enviado. Quedará Pendiente hasta que Administración lo apruebe.',
+      uploadError:   'Error al subir el documento.',
+      uploadingMsg:  'Subiendo documento...',
+    },
+    table: {
+      tipo:             'Tipo',
+      archivo:          'Archivo',
+      vencimiento:      'Vencimiento',
+      estado:           'Estado',
+      fecha:            'Fecha de carga',
+      acciones:         'Acciones',
+    },
+    statusBanner: {
+      pendiente: 'Pendiente de aprobación.',
+      aprobado:  'Documento aprobado.',
+      rechazado: 'Documento rechazado.',
+    },
+    rechazadoBanner: 'Motivo del rechazo',
+    archivoEliminado: 'Archivo eliminado por retención (30 días)',
+    errors: {
+      archivoRequerido:         'Seleccioná un archivo para subir.',
+      tipoNoPermitido:          'Tipo de documento no permitido.',
+      certificadoTipoRequerido: 'Seleccioná el tipo de certificado.',
+      descripcionRequerida:     'La descripción del certificado es requerida.',
+      descripcionMaxima:        'La descripción no puede superar los 80 caracteres.',
+      archivoDemasiadoGrande:   'El archivo excede el límite de 10 MB.',
+      tipoArchivoNoPermitido:   'Tipo de archivo no permitido:',
+      urlNoDisponible:          'No se pudo generar la URL de acceso.',
+    },
+  },
+
+  adminEmpleado: {
+    selectorTitle:       'Administrar perfil de empleado',
+    selectorPlaceholder: 'Buscar por nombre, apellido o correo…',
+    selectorHint:        'Ingresá al menos 2 caracteres.',
+    noResults:           'Sin resultados.',
+    pageTitle:           'Perfil de empleado',
+    backButton:          'Volver a Mi Perfil',
+    adminUploadHint:     'Como administrador, el archivo quedará aprobado directamente.',
+  },
+
+  aprobaciones: {
+    title:    'Aprobaciones',
+    subtitle: 'Bandeja única de solicitudes pendientes',
+    noItems:  'No hay solicitudes pendientes.',
+    table: {
+      tipo:       'Tipo',
+      usuario:    'Usuario',
+      detalle:    'Detalle',
+      fecha:      'Fecha',
+      estado:     'Estado',
+      acciones:   'Acciones',
+    },
+    tipos: {
+      documento:  'Documento',
+      pasaje:     'Pasaje',
+      ausencia:   'Ausencia',
+    },
+    actions: {
+      aprobar:   'Aprobar',
+      rechazar:  'Rechazar',
+      ver:       'Ver',
+    },
+    rejectModal: {
+      title:       'Rechazar solicitud',
+      motivoLabel: 'Motivo del rechazo',
+      motivoPlaceholder: 'Explicá el motivo para que el usuario pueda corregir y reenviar.',
+      motivoRequired: 'El motivo del rechazo es requerido.',
+      confirm:     'Confirmar rechazo',
+    },
+    messages: {
+      approveSuccess: 'Solicitud aprobada.',
+      approveError:   'Error al aprobar la solicitud.',
+      rejectSuccess:  'Solicitud rechazada.',
+      rejectError:    'Error al rechazar la solicitud.',
+    },
+  },
+
   errors: {
     unauthorized:   'No tenés permiso para acceder a esta sección.',
     sessionExpired: 'Tu sesión expiró. Iniciá sesión nuevamente.',
@@ -140,6 +307,7 @@ export const copy = {
   topbar: {
     notifications: 'Notificaciones',
     userMenu:      'Menú de usuario',
+    menuButton:    'Menú',
   },
 
   pages: {

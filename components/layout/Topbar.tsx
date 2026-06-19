@@ -53,7 +53,7 @@ export function Topbar({ onMenuToggle, userName }: TopbarProps) {
       <button
         onClick={onMenuToggle}
         className="p-2 rounded-lg text-secondary hover:bg-surface transition-colors"
-        aria-label="Menú"
+        aria-label={copy.topbar.menuButton}
       >
         <Menu size={20} />
       </button>

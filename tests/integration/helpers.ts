@@ -32,12 +32,30 @@ export async function setupTestDb(): Promise<Client> {
   const setupSql = readFileSync(resolve('./tests/integration/setup.sql'), 'utf8');
   await client.query(setupSql);
 
-  // 2. Migración principal
-  const migrationSql = readFileSync(
+  // 2. Migraciones en orden
+  const migration0001 = readFileSync(
     resolve('./supabase/migrations/0001_init.sql'),
     'utf8'
   );
-  await client.query(migrationSql);
+  await client.query(migration0001);
+
+  const migration0002 = readFileSync(
+    resolve('./supabase/migrations/0002_fase1_perfil.sql'),
+    'utf8'
+  );
+  await client.query(migration0002);
+
+  const migration0003 = readFileSync(
+    resolve('./supabase/migrations/0003_documents_purge.sql'),
+    'utf8'
+  );
+  await client.query(migration0003);
+
+  const migration0004 = readFileSync(
+    resolve('./supabase/migrations/0004_rls_fixes.sql'),
+    'utf8'
+  );
+  await client.query(migration0004);
 
   // 3. Grants para el rol authenticated (usuarios normales)
   await client.query(`

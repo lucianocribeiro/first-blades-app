@@ -67,7 +67,7 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
       <div className="flex items-center justify-center h-16 bg-white shrink-0 px-4">
         <Image
           src="/logo.fb.png"
-          alt="First Blades"
+          alt={copy.general.logoAlt}
           width={140}
           height={40}
           className="object-contain max-h-10"

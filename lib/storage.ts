@@ -3,6 +3,7 @@
 // El flujo de carga de documentos (UI) vive en Fase 1 (Mi Perfil).
 
 import { createAdminClient } from '@/lib/supabase/admin';
+import { copy } from '@/lib/copy';
 
 export const DOCUMENTS_BUCKET = 'documents';
 const SIGNED_URL_EXPIRY_SECONDS = 3600; // 1 hora
@@ -22,10 +23,10 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export function validateDocumentFile(file: { size: number; type: string }): void {
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    throw new Error('El archivo excede el límite de 10 MB.');
+    throw new Error(copy.documentos.errors.archivoDemasiadoGrande);
   }
   if (!ALLOWED_MIME_TYPES.has(file.type)) {
-    throw new Error(`Tipo de archivo no permitido: ${file.type}`);
+    throw new Error(`${copy.documentos.errors.tipoArchivoNoPermitido} ${file.type}`);
   }
 }
 
@@ -42,7 +43,7 @@ export async function createSignedUrl(storagePath: string): Promise<string> {
     .createSignedUrl(storagePath, SIGNED_URL_EXPIRY_SECONDS);
 
   if (error) throw new Error(error.message);
-  if (!data?.signedUrl) throw new Error('No se pudo generar la URL de acceso.');
+  if (!data?.signedUrl) throw new Error(copy.documentos.errors.urlNoDisponible);
 
   return data.signedUrl;
 }

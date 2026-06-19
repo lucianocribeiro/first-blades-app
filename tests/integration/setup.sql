@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS storage.objects (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+
 -- storage.foldername: devuelve los componentes de la ruta
 CREATE OR REPLACE FUNCTION storage.foldername(name TEXT)
 RETURNS TEXT[]

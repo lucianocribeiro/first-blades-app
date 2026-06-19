@@ -1,0 +1,214 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { requireAdmin, requireAuth } from '@/lib/auth';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { uploadDocument as storageUpload, createSignedUrl, validateDocumentFile } from '@/lib/storage';
+import type { ProfileUpdate, CertificadoTipo, EntrevistaTecnica, DocumentType, DocumentInsert } from '@/lib/db-types';
+import { DOCUMENT_TYPES } from '@/lib/db-types';
+import { copy } from '@/lib/copy';
+
+// ─── Actualizar perfil (solo admin) ──────────────────────────
+
+export type UpdateProfileInput = {
+  id: string;
+  nombre?: string;
+  apellido?: string;
+  phone?: string;
+  cuit?: string;
+  winda_id?: string;
+  dni?: string;
+  fecha_ingreso?: string;
+  // Campos solo-admin
+  status?: 'activo' | 'inactivo' | 'pendiente';
+  entrevista_tecnica?: EntrevistaTecnica;
+};
+
+export async function updateProfile(input: UpdateProfileInput) {
+  await requireAdmin();
+  const admin = createAdminClient();
+
+  const update: ProfileUpdate = {
+    nombre:       input.nombre       || null,
+    apellido:     input.apellido     || null,
+    phone:        input.phone        || null,
+    cuit:         input.cuit         || null,
+    winda_id:     input.winda_id     || null,
+    dni:          input.dni          || null,
+    fecha_ingreso: input.fecha_ingreso || null,
+    status:       input.status,
+    entrevista_tecnica: input.entrevista_tecnica ?? null,
+    updated_at:   new Date().toISOString(),
+  };
+
+  const { error } = await admin
+    .from('profiles')
+    .update(update)
+    .eq('id', input.id);
+
+  if (error) throw new Error(error.message);
+  revalidatePath('/mi-perfil');
+}
+
+// ─── Subir documento (usuario propio) ────────────────────────
+
+const ALLOWED_DOCUMENT_TYPES: DocumentType[] = ['dni', 'licencia', 'foto_carnet', 'certificado'];
+
+export async function handleDocumentUpload(formData: FormData): Promise<void> {
+  const profile = await requireAuth();
+
+  const file          = formData.get('file') as File | null;
+  const documentType  = formData.get('document_type') as string;
+  const certTipo      = formData.get('certificado_tipo') as CertificadoTipo | null;
+  const certOtrosText = (formData.get('certificado_otros_texto') as string | null)?.trim() || null;
+  const fechaVenc     = (formData.get('fecha_vencimiento') as string | null) || null;
+
+  if (!file || file.size === 0) throw new Error(copy.documentos.errors.archivoRequerido);
+
+  if (!ALLOWED_DOCUMENT_TYPES.includes(documentType as DocumentType)) {
+    throw new Error(copy.documentos.errors.tipoNoPermitido);
+  }
+
+  // Validar campos de certificado
+  if (documentType === 'certificado') {
+    if (!certTipo) throw new Error(copy.documentos.errors.certificadoTipoRequerido);
+    if (certTipo === 'otros' && !certOtrosText) throw new Error(copy.documentos.errors.descripcionRequerida);
+    if (certOtrosText && certOtrosText.length > 80) throw new Error(copy.documentos.errors.descripcionMaxima);
+  }
+
+  // Validar archivo
+  validateDocumentFile({ size: file.size, type: file.type });
+
+  // Subir a Storage (admin client: validación ya hecha, path enforces userId)
+  const { storagePath } = await storageUpload(profile.id, file, documentType);
+
+  // Insertar en documents vía admin client (server action ya validó identidad y constraints).
+  // estado forzado a 'pendiente' en código; el admin client garantiza que el write no falla
+  // por RLS mientras la lógica de autorización ya fue verificada arriba.
+  const adminClient = createAdminClient();
+  const insertData: DocumentInsert = {
+    user_id:                profile.id,
+    uploaded_by:            profile.id,
+    document_type:          documentType,
+    filename:               file.name,
+    storage_path:           storagePath,
+    file_size:              file.size,
+    mime_type:              file.type,
+    estado:                 'pendiente',
+    certificado_tipo:       documentType === 'certificado' ? (certTipo ?? null) : null,
+    certificado_otros_texto: documentType === 'certificado' && certTipo === 'otros' ? certOtrosText : null,
+    fecha_vencimiento:      fechaVenc || null,
+  };
+  const { error } = await adminClient.from('documents').insert(insertData);
+
+  if (error) {
+    // Si el INSERT falla, borrar el objeto de Storage para no dejar huérfanos
+    const admin = createAdminClient();
+    await admin.storage.from('documents').remove([storagePath]);
+    throw new Error(error.message);
+  }
+
+  revalidatePath('/mi-perfil');
+}
+
+// ─── Generar signed URLs para documentos (servidor) ──────────
+
+export async function getSignedUrls(
+  paths: string[]
+): Promise<Record<string, string>> {
+  if (paths.length === 0) return {};
+  const result: Record<string, string> = {};
+  await Promise.all(
+    paths.map(async (path) => {
+      try {
+        result[path] = await createSignedUrl(path);
+      } catch {
+        // Si falla la URL firmada, no bloquear el render
+        result[path] = '';
+      }
+    })
+  );
+  return result;
+}
+
+// ─── Buscar empleados (solo admin) ───────────────────────────
+
+export type EmployeeSearchResult = {
+  id: string;
+  nombre: string | null;
+  apellido: string | null;
+  email: string;
+  role: string;
+};
+
+export async function searchEmployees(q: string): Promise<EmployeeSearchResult[]> {
+  await requireAdmin();
+  if (q.trim().length < 2) return [];
+
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from('profiles')
+    .select('id, nombre, apellido, email, role')
+    .neq('role', 'admin')
+    .or(`nombre.ilike.%${q}%,apellido.ilike.%${q}%,email.ilike.%${q}%`)
+    .limit(10);
+
+  return (data ?? []) as EmployeeSearchResult[];
+}
+
+// ─── Cargar documento para empleado (solo admin, aprobado directo) ───
+
+export async function uploadDocumentForEmployee(
+  formData: FormData,
+  employeeId: string
+): Promise<void> {
+  const adminProfile = await requireAdmin();
+
+  const file          = formData.get('file') as File | null;
+  const documentType  = formData.get('document_type') as string;
+  const certTipo      = formData.get('certificado_tipo') as CertificadoTipo | null;
+  const certOtrosText = (formData.get('certificado_otros_texto') as string | null)?.trim() || null;
+  const fechaVenc     = (formData.get('fecha_vencimiento') as string | null) || null;
+
+  if (!file || file.size === 0) throw new Error(copy.documentos.errors.archivoRequerido);
+
+  if (!DOCUMENT_TYPES.includes(documentType as DocumentType)) {
+    throw new Error(copy.documentos.errors.tipoNoPermitido);
+  }
+
+  if (documentType === 'certificado') {
+    if (!certTipo) throw new Error(copy.documentos.errors.certificadoTipoRequerido);
+    if (certTipo === 'otros' && !certOtrosText) throw new Error(copy.documentos.errors.descripcionRequerida);
+    if (certOtrosText && certOtrosText.length > 80) throw new Error(copy.documentos.errors.descripcionMaxima);
+  }
+
+  validateDocumentFile({ size: file.size, type: file.type });
+
+  const { storagePath } = await storageUpload(employeeId, file, documentType);
+
+  const adminClient = createAdminClient();
+  const insertData: DocumentInsert = {
+    user_id:                employeeId,
+    uploaded_by:            adminProfile.id,
+    document_type:          documentType,
+    filename:               file.name,
+    storage_path:           storagePath,
+    file_size:              file.size,
+    mime_type:              file.type,
+    estado:                 'aprobado',
+    reviewed_by:            adminProfile.id,
+    reviewed_at:            new Date().toISOString(),
+    certificado_tipo:       documentType === 'certificado' ? (certTipo ?? null) : null,
+    certificado_otros_texto: documentType === 'certificado' && certTipo === 'otros' ? certOtrosText : null,
+    fecha_vencimiento:      fechaVenc || null,
+  };
+
+  const { error } = await adminClient.from('documents').insert(insertData);
+
+  if (error) {
+    await adminClient.storage.from('documents').remove([storagePath]);
+    throw new Error(error.message);
+  }
+
+  revalidatePath(`/admin/empleado/${employeeId}`);
+}

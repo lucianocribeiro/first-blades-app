@@ -12,7 +12,7 @@ export default function LoginPage() {
       <div className="hidden lg:flex lg:w-1/2 bg-secondary flex-col items-center justify-center p-12">
         <Image
           src="/logo.fb.png"
-          alt="First Blades"
+          alt={copy.general.logoAlt}
           width={200}
           height={70}
           className="object-contain mb-8"
@@ -31,7 +31,7 @@ export default function LoginPage() {
             <div className="flex justify-center mb-6 lg:hidden">
               <Image
                 src="/logo.fb.png"
-                alt="First Blades"
+                alt={copy.general.logoAlt}
                 width={140}
                 height={50}
                 className="object-contain"
