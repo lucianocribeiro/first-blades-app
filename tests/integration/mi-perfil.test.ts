@@ -56,8 +56,8 @@ beforeAll(async () => {
       id, user_id, document_type, filename, storage_path,
       uploaded_by, estado, certificado_tipo, fecha_vencimiento
     )
-    VALUES ($1, $2, 'certificado', 'gwo.pdf', $2 || '/certificado-gwo.pdf',
-            $2, 'pendiente', 'gwo', '2027-01-01')
+    VALUES ($1::uuid, $2::uuid, 'certificado', 'gwo.pdf', $2::text || '/certificado-gwo.pdf',
+            $2::uuid, 'pendiente', 'gwo', '2027-01-01')
     ON CONFLICT DO NOTHING
   `, [DOC_CERT_ID, IDS.employee1]);
 
@@ -67,8 +67,8 @@ beforeAll(async () => {
       id, user_id, document_type, filename, storage_path,
       uploaded_by, estado, certificado_tipo, certificado_otros_texto
     )
-    VALUES ($1, $2, 'certificado', 'otros.pdf', $2 || '/certificado-otros.pdf',
-            $2, 'pendiente', 'otros', 'Habilitación especial GN')
+    VALUES ($1::uuid, $2::uuid, 'certificado', 'otros.pdf', $2::text || '/certificado-otros.pdf',
+            $2::uuid, 'pendiente', 'otros', 'Habilitación especial GN')
     ON CONFLICT DO NOTHING
   `, [DOC_OTROS_ID, IDS.employee1]);
 
@@ -78,8 +78,8 @@ beforeAll(async () => {
       id, user_id, document_type, filename, storage_path,
       uploaded_by, estado
     )
-    VALUES ($1, $2, 'estudio_medico', 'estudio.pdf', $2 || '/estudio_medico.pdf',
-            $3, 'pendiente')
+    VALUES ($1::uuid, $2::uuid, 'estudio_medico', 'estudio.pdf', $2::text || '/estudio_medico.pdf',
+            $3::uuid, 'pendiente')
     ON CONFLICT DO NOTHING
   `, [DOC_ESTUDIO_ID, IDS.employee1, IDS.admin]);
 }, 30_000);
@@ -219,7 +219,7 @@ describe.skipIf(!dbAvailable)('documents: nuevos campos Fase 1 (certificado_tipo
             user_id, document_type, filename, storage_path, uploaded_by,
             estado, certificado_tipo, fecha_vencimiento
           )
-          VALUES ($1, 'certificado', 'gwo2.pdf', $1 || '/certificado-gwo2.pdf', $1,
+          VALUES ($1::uuid, 'certificado', 'gwo2.pdf', $1::text || '/certificado-gwo2.pdf', $1::uuid,
                   'pendiente', 'gwo', '2028-06-01')`,
           [IDS.employee1]
         )
@@ -235,7 +235,7 @@ describe.skipIf(!dbAvailable)('documents: nuevos campos Fase 1 (certificado_tipo
             user_id, document_type, filename, storage_path, uploaded_by,
             estado, certificado_tipo
           )
-          VALUES ($1, 'certificado', 'elev.pdf', $1 || '/certificado-elev.pdf', $1,
+          VALUES ($1::uuid, 'certificado', 'elev.pdf', $1::text || '/certificado-elev.pdf', $1::uuid,
                   'pendiente', 'cursos_elevadores')`,
           [IDS.employee1]
         )
@@ -251,7 +251,7 @@ describe.skipIf(!dbAvailable)('documents: nuevos campos Fase 1 (certificado_tipo
             user_id, document_type, filename, storage_path, uploaded_by,
             estado, certificado_tipo
           )
-          VALUES ($1, 'certificado', 'vestas.pdf', $1 || '/certificado-vestas.pdf', $1,
+          VALUES ($1::uuid, 'certificado', 'vestas.pdf', $1::text || '/certificado-vestas.pdf', $1::uuid,
                   'pendiente', 'cursos_vestas')`,
           [IDS.employee1]
         )
@@ -264,7 +264,7 @@ describe.skipIf(!dbAvailable)('documents: nuevos campos Fase 1 (certificado_tipo
       await expectPermissionError(
         c,
         `INSERT INTO documents (user_id, document_type, filename, storage_path, uploaded_by, estado)
-         VALUES ($1, 'dni', 'hack.pdf', $1 || '/hack.pdf', $2, 'pendiente')`,
+         VALUES ($1::uuid, 'dni', 'hack.pdf', $1::text || '/hack.pdf', $2, 'pendiente')`,
         [IDS.employee2, IDS.employee1]
       );
     });
@@ -275,7 +275,7 @@ describe.skipIf(!dbAvailable)('documents: nuevos campos Fase 1 (certificado_tipo
       await expectPermissionError(
         c,
         `INSERT INTO documents (user_id, document_type, filename, storage_path, uploaded_by, estado)
-         VALUES ($1, 'licencia', 'lic.pdf', $1 || '/lic.pdf', $1, 'aprobado')`,
+         VALUES ($1::uuid, 'licencia', 'lic.pdf', $1::text || '/lic.pdf', $1::uuid, 'aprobado')`,
         [IDS.employee1]
       );
     });

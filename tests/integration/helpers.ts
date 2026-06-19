@@ -1,6 +1,4 @@
 import { Client } from 'pg';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 
 export const DB_URL =
   process.env.TEST_DATABASE_URL ||
@@ -16,85 +14,89 @@ export const IDS = {
   employee3:   'a0000000-0000-0000-0001-000000000006', // bajo supervisor2
 };
 
-/** Configura la base de datos de test (aplica setup + migración + grants + seed). */
+/**
+ * Limpia y re-siembra la base de datos de test.
+ * Requiere que las migraciones ya estén aplicadas (supabase start las aplica).
+ * No toca los esquemas auth ni storage: solo trunca datos públicos y
+ * elimina/re-inserta los usuarios de test en auth.users.
+ */
 export async function setupTestDb(): Promise<Client> {
   const client = new Client({ connectionString: DB_URL });
   await client.connect();
 
-  // Reset completo de esquemas
-  await client.query('DROP SCHEMA IF EXISTS public CASCADE');
-  await client.query('DROP SCHEMA IF EXISTS auth CASCADE');
-  await client.query('DROP SCHEMA IF EXISTS storage CASCADE');
-  await client.query('CREATE SCHEMA public');
-  await client.query('GRANT ALL ON SCHEMA public TO public');
+  // 1. Limpiar tablas públicas en orden de dependencia (CASCADE maneja el resto)
+  await client.query(`
+    TRUNCATE TABLE
+      audit_log, procedures, rotation_assignments, rotation_groups,
+      ausencia_requests, pasaje_requests, documents, profiles
+    RESTART IDENTITY CASCADE
+  `);
 
-  // 1. Setup previo (auth mock, storage mock, roles)
-  const setupSql = readFileSync(resolve('./tests/integration/setup.sql'), 'utf8');
-  await client.query(setupSql);
-
-  // 2. Migraciones en orden
-  const migration0001 = readFileSync(
-    resolve('./supabase/migrations/0001_init.sql'),
-    'utf8'
+  // 2. Limpiar objetos de Storage de tests anteriores
+  await client.query(
+    `DELETE FROM storage.objects WHERE bucket_id = 'documents'`
   );
-  await client.query(migration0001);
 
-  const migration0002 = readFileSync(
-    resolve('./supabase/migrations/0002_fase1_perfil.sql'),
-    'utf8'
+  // 3. Eliminar usuarios de test previos de auth.users (cascade a profiles, ya vacío)
+  await client.query(
+    `DELETE FROM auth.users WHERE id = ANY($1::uuid[])`,
+    [[...Object.values(IDS)]]
   );
-  await client.query(migration0002);
 
-  const migration0003 = readFileSync(
-    resolve('./supabase/migrations/0003_documents_purge.sql'),
-    'utf8'
+  // 4. Insertar usuarios de test en auth.users.
+  //    El trigger on_auth_user_created (migración 0001) crea el perfil automáticamente.
+  for (const id of Object.values(IDS)) {
+    await client.query(`
+      INSERT INTO auth.users (
+        id, aud, role, email, encrypted_password,
+        email_confirmed_at, created_at, updated_at,
+        raw_app_meta_data, raw_user_meta_data,
+        is_sso_user, is_anonymous
+      ) VALUES (
+        $1::uuid, 'authenticated', 'authenticated', $2, '',
+        now(), now(), now(),
+        '{"provider":"email","providers":["email"]}', '{}',
+        false, false
+      ) ON CONFLICT (id) DO NOTHING
+    `, [id, `${id}@test.com`]);
+  }
+
+  // 5. Corregir roles y datos en los perfiles creados por el trigger (default: 'empleado')
+  await client.query(`
+    UPDATE profiles AS p SET
+      email     = v.email,
+      full_name = v.full_name,
+      role      = v.role::user_role,
+      status    = 'activo'::employee_status
+    FROM (VALUES
+      ($1::uuid, 'admin@test.com',       'Admin Test',       'admin'),
+      ($2::uuid, 'supervisor@test.com',  'Supervisor Test',  'supervisor'),
+      ($3::uuid, 'supervisor2@test.com', 'Supervisor2 Test', 'supervisor'),
+      ($4::uuid, 'emp1@test.com',        'Empleado 1',       'empleado'),
+      ($5::uuid, 'emp2@test.com',        'Empleado 2',       'empleado'),
+      ($6::uuid, 'emp3@test.com',        'Empleado 3',       'empleado')
+    ) AS v(id, email, full_name, role)
+    WHERE p.id = v.id
+  `, [IDS.admin, IDS.supervisor, IDS.supervisor2, IDS.employee1, IDS.employee2, IDS.employee3]);
+
+  // 6. Asignar supervisor_id
+  await client.query(
+    'UPDATE profiles SET supervisor_id = $1::uuid WHERE id IN ($2::uuid, $3::uuid)',
+    [IDS.supervisor, IDS.employee1, IDS.employee2]
   );
-  await client.query(migration0003);
-
-  const migration0004 = readFileSync(
-    resolve('./supabase/migrations/0004_rls_fixes.sql'),
-    'utf8'
+  await client.query(
+    'UPDATE profiles SET supervisor_id = $1::uuid WHERE id = $2::uuid',
+    [IDS.supervisor2, IDS.employee3]
   );
-  await client.query(migration0004);
 
-  // 3. Grants para el rol authenticated (usuarios normales)
+  // 7. Grants para el rol authenticated (necesario para que RLS se evalúe en tests)
   await client.query(`
     GRANT USAGE ON SCHEMA public TO authenticated;
     GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
     GRANT USAGE ON SCHEMA storage TO authenticated;
-    GRANT SELECT, INSERT, DELETE ON storage.objects TO authenticated;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects TO authenticated;
   `);
-
-  // 4. Seed: crear filas en auth.users (FK constraint de profiles)
-  for (const [, id] of Object.entries(IDS)) {
-    await client.query(
-      'INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-      [id, `${id}@test.com`]
-    );
-  }
-
-  // 5. Seed: perfiles
-  await client.query(`
-    INSERT INTO profiles (id, email, full_name, role, status) VALUES
-      ($1, 'admin@test.com',       'Admin Test',       'admin',      'activo'),
-      ($2, 'supervisor@test.com',  'Supervisor Test',  'supervisor', 'activo'),
-      ($3, 'supervisor2@test.com', 'Supervisor2 Test', 'supervisor', 'activo'),
-      ($4, 'emp1@test.com',        'Empleado 1',       'empleado',   'activo'),
-      ($5, 'emp2@test.com',        'Empleado 2',       'empleado',   'activo'),
-      ($6, 'emp3@test.com',        'Empleado 3',       'empleado',   'activo')
-    ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, status = EXCLUDED.status
-  `, [IDS.admin, IDS.supervisor, IDS.supervisor2, IDS.employee1, IDS.employee2, IDS.employee3]);
-
-  // 6. Asignar supervisor_id
-  await client.query(
-    'UPDATE profiles SET supervisor_id = $1 WHERE id IN ($2, $3)',
-    [IDS.supervisor, IDS.employee1, IDS.employee2]
-  );
-  await client.query(
-    'UPDATE profiles SET supervisor_id = $1 WHERE id = $2',
-    [IDS.supervisor2, IDS.employee3]
-  );
 
   return client;
 }

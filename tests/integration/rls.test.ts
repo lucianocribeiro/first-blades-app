@@ -57,7 +57,7 @@ beforeAll(async () => {
   // Seed de datos de prueba (como superuser, bypass RLS)
   await db.query(`
     INSERT INTO documents (id, user_id, document_type, filename, storage_path, uploaded_by, estado)
-    VALUES ($1, $2, 'dni', 'doc.pdf', $2 || '/dni-123.pdf', $2, 'pendiente')
+    VALUES ($1::uuid, $2::uuid, 'dni', 'doc.pdf', $2::text || '/dni-123.pdf', $2::uuid, 'pendiente')
     ON CONFLICT DO NOTHING
   `, [DOC_EMP1_ID, IDS.employee1]);
 
@@ -89,7 +89,7 @@ beforeAll(async () => {
 
   await db.query(`
     INSERT INTO storage.objects (bucket_id, name, owner)
-    VALUES ('documents', $1 || '/dni-123.pdf', $1) ON CONFLICT DO NOTHING
+    VALUES ('documents', $1::text || '/dni-123.pdf', $1::uuid) ON CONFLICT DO NOTHING
   `, [IDS.employee1]);
 
   // Fila conocida en audit_log para tests de lectura real (servicio superuser, bypass RLS)
@@ -133,7 +133,7 @@ describe.skipIf(!dbAvailable)('service_role: bypass RLS (confirmación de acceso
       await expect(
         c.query(
           `INSERT INTO documents (user_id, document_type, filename, storage_path, uploaded_by, estado)
-           VALUES ($1, 'test', 'bypass.pdf', $1 || '/bypass.pdf', $1, 'aprobado')`,
+           VALUES ($1::uuid, 'test', 'bypass.pdf', $1::text || '/bypass.pdf', $1::uuid, 'aprobado')`,
           [IDS.employee1]
         )
       ).resolves.toBeDefined();
@@ -260,7 +260,7 @@ describe.skipIf(!dbAvailable)('RLS: documents', () => {
       await expect(
         c.query(
           `INSERT INTO documents (user_id, document_type, filename, storage_path, uploaded_by, estado)
-           VALUES ($1, 'carnet', 'carnet.pdf', $1 || '/carnet.pdf', $1, 'pendiente')`,
+           VALUES ($1::uuid, 'carnet', 'carnet.pdf', $1::text || '/carnet.pdf', $1::uuid, 'pendiente')`,
           [IDS.employee1]
         )
       ).resolves.toBeDefined();
@@ -273,7 +273,7 @@ describe.skipIf(!dbAvailable)('RLS: documents', () => {
       await expectPermissionError(
         c,
         `INSERT INTO documents (user_id, document_type, filename, storage_path, uploaded_by, estado)
-         VALUES ($1, 'dni', 'hack.pdf', $1 || '/hack.pdf', $1, 'aprobado')`,
+         VALUES ($1::uuid, 'dni', 'hack.pdf', $1::text || '/hack.pdf', $1::uuid, 'aprobado')`,
         [IDS.employee1]
       );
     });

@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Instalar dependencias
@@ -45,26 +45,11 @@ jobs:
           SUPABASE_PROJECT_REF: placeholder-ref
           FIRST_ADMIN_EMAIL: admin@example.com
 
-# ─── Job 2: Tests de integración RLS contra PostgreSQL real ───
+# ─── Job 2: Tests de integración RLS contra Supabase local ────
 
   integration:
-    name: Tests de integración RLS (Postgres)
+    name: Tests de integración RLS (Supabase local)
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_first_blades
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
 
     steps:
       - name: Checkout
@@ -73,13 +58,21 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
 
       - name: Instalar dependencias
         run: npm ci
 
+      - name: Levantar Supabase local
+        run: supabase start
+
       - name: Tests de integración RLS
         run: npm run test:integration
         env:
-          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_first_blades
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:54322/postgres

@@ -1,15 +1,12 @@
 /**
  * Test de migración limpia — Portal First Blades
  *
- * Verifica que 0001_init.sql aplica sin errores en una base de datos fresca,
- * ejecutando los statements top-to-bottom tal como lo haría `supabase db push`.
- * Este test captura bugs de orden de dependencia (ej: función que referencia
- * una tabla que todavía no fue creada).
+ * Verifica que las migraciones (0001–0004) dejaron el esquema correcto.
+ * Con Supabase local (supabase start), las migraciones ya se aplicaron al
+ * iniciar; este test solo comprueba el estado resultante.
  */
 
 import { Client } from 'pg';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DB_URL } from './helpers';
 
@@ -21,42 +18,6 @@ beforeAll(async () => {
   if (!dbAvailable) return;
   client = new Client({ connectionString: DB_URL });
   await client.connect();
-
-  // Reseteo completo — simula una DB fresca
-  await client.query('DROP SCHEMA IF EXISTS public CASCADE');
-  await client.query('DROP SCHEMA IF EXISTS auth CASCADE');
-  await client.query('DROP SCHEMA IF EXISTS storage CASCADE');
-  await client.query('CREATE SCHEMA public');
-  await client.query('GRANT ALL ON SCHEMA public TO public');
-
-  // 1. Mocks de Supabase (auth, storage, roles) — mismo setup que rls.test.ts
-  const setupSql = readFileSync(resolve('./tests/integration/setup.sql'), 'utf8');
-  await client.query(setupSql);
-
-  // 2. Migraciones en orden — si hay error de orden aquí, el test falla
-  const migration0001 = readFileSync(
-    resolve('./supabase/migrations/0001_init.sql'),
-    'utf8'
-  );
-  await client.query(migration0001);
-
-  const migration0002 = readFileSync(
-    resolve('./supabase/migrations/0002_fase1_perfil.sql'),
-    'utf8'
-  );
-  await client.query(migration0002);
-
-  const migration0003 = readFileSync(
-    resolve('./supabase/migrations/0003_documents_purge.sql'),
-    'utf8'
-  );
-  await client.query(migration0003);
-
-  const migration0004 = readFileSync(
-    resolve('./supabase/migrations/0004_rls_fixes.sql'),
-    'utf8'
-  );
-  await client.query(migration0004);
 }, 30_000);
 
 afterAll(async () => {
