@@ -15,15 +15,17 @@ CREATE TABLE IF NOT EXISTS auth.users (
   raw_user_meta_data  JSONB DEFAULT '{}'
 );
 
--- auth.uid(): lee el claim 'sub' del JWT simulado en la sesión
+-- auth.uid(): lee el claim 'sub' del JWT simulado en la sesión.
+-- El operador ->> devuelve TEXT; el cast ::uuid final alinea el tipo de retorno
+-- con la declaración RETURNS uuid y evita el error 42P13 en Postgres plano.
 CREATE OR REPLACE FUNCTION auth.uid()
 RETURNS uuid
 LANGUAGE sql
 STABLE
 AS $$
-  SELECT NULLIF(
+  SELECT (NULLIF(
     current_setting('request.jwt.claims', true), ''
-  )::jsonb ->> 'sub'
+  )::jsonb ->> 'sub')::uuid
 $$;
 
 -- ─── Esquema storage (mock mínimo para las policies de Storage) ─
@@ -58,8 +60,13 @@ AS $$
 $$;
 
 -- ─── Roles de Supabase ────────────────────────────────────────
+-- Los roles se crean idempotentemente y se otorgan al usuario conectado.
+-- El GRANT es necesario para que SET [LOCAL] ROLE funcione incluso cuando
+-- el usuario de CI no es superusuario (superusuarios ya pueden SET ROLE libre).
 
 DO $$
+DECLARE
+  v_user TEXT := current_user;
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
     CREATE ROLE authenticated;
@@ -70,5 +77,7 @@ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
     CREATE ROLE service_role BYPASSRLS;
   END IF;
+  -- Grant membership so SET [LOCAL] ROLE works from the test runner connection
+  EXECUTE format('GRANT authenticated, anon, service_role TO %I', v_user);
 END;
 $$;
