@@ -61,22 +61,22 @@ export async function setupTestDb(): Promise<Client> {
     `, [id, `${id}@test.com`]);
   }
 
-  // 5. Corregir roles y datos en los perfiles creados por el trigger (default: 'empleado')
+  // 5. Insertar o actualizar perfiles directamente (no depende del trigger on_auth_user_created).
+  //    ON CONFLICT (id) DO UPDATE cubre tanto el caso "trigger no disparó" como
+  //    "trigger disparó con role='empleado' por defecto".
   await client.query(`
-    UPDATE profiles AS p SET
-      email     = v.email,
-      full_name = v.full_name,
-      role      = v.role::user_role,
-      status    = 'activo'::employee_status
-    FROM (VALUES
-      ($1::uuid, 'admin@test.com',       'Admin Test',       'admin'),
-      ($2::uuid, 'supervisor@test.com',  'Supervisor Test',  'supervisor'),
-      ($3::uuid, 'supervisor2@test.com', 'Supervisor2 Test', 'supervisor'),
-      ($4::uuid, 'emp1@test.com',        'Empleado 1',       'empleado'),
-      ($5::uuid, 'emp2@test.com',        'Empleado 2',       'empleado'),
-      ($6::uuid, 'emp3@test.com',        'Empleado 3',       'empleado')
-    ) AS v(id, email, full_name, role)
-    WHERE p.id = v.id
+    INSERT INTO public.profiles (id, email, full_name, role, status) VALUES
+      ($1::uuid, 'admin@test.com',       'Admin Test',       'admin'::user_role,      'activo'::employee_status),
+      ($2::uuid, 'supervisor@test.com',  'Supervisor Test',  'supervisor'::user_role, 'activo'::employee_status),
+      ($3::uuid, 'supervisor2@test.com', 'Supervisor2 Test', 'supervisor'::user_role, 'activo'::employee_status),
+      ($4::uuid, 'emp1@test.com',        'Empleado 1',       'empleado'::user_role,   'activo'::employee_status),
+      ($5::uuid, 'emp2@test.com',        'Empleado 2',       'empleado'::user_role,   'activo'::employee_status),
+      ($6::uuid, 'emp3@test.com',        'Empleado 3',       'empleado'::user_role,   'activo'::employee_status)
+    ON CONFLICT (id) DO UPDATE SET
+      email     = EXCLUDED.email,
+      full_name = EXCLUDED.full_name,
+      role      = EXCLUDED.role,
+      status    = EXCLUDED.status
   `, [IDS.admin, IDS.supervisor, IDS.supervisor2, IDS.employee1, IDS.employee2, IDS.employee3]);
 
   // 6. Asignar supervisor_id
