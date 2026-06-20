@@ -9,7 +9,12 @@ export default defineConfig({
     globals: true,
     testTimeout: 30_000,
     hookTimeout: 60_000,
-    // Los tests de integración corren en serie para no pisarse en la BD
+    // Integración: un único proceso (singleFork) Y archivos en serie
+    // (fileParallelism:false). Ambos son necesarios: singleFork solo
+    // garantiza un worker; fileParallelism:false garantiza que cada
+    // archivo termine entero antes de que arranque el siguiente, para
+    // que el TRUNCATE de un setupTestDb() no pise el seed de otro archivo.
+    fileParallelism: false,
     pool: 'forks',
     poolOptions: {
       forks: { singleFork: true },

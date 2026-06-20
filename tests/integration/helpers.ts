@@ -98,6 +98,20 @@ export async function setupTestDb(): Promise<Client> {
     GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects TO authenticated;
   `);
 
+  // 8. Tripwire: el seed base debe haber dejado exactamente 6 profiles.
+  //    Corre como postgres (superusuario), así que ve todas las filas sin RLS.
+  //    Si falla, el problema está en el seed o en un TRUNCATE concurrente
+  //    de otro archivo — no lo escondemos en violaciones de FK posteriores.
+  const { rows: tripwire } = await client.query(
+    'SELECT count(*)::int AS n FROM public.profiles'
+  );
+  if (tripwire[0].n !== 6) {
+    throw new Error(
+      `setupTestDb: se esperaban 6 profiles tras el seed, hay ${tripwire[0].n}. ` +
+      `Indica seed incompleto o TRUNCATE concurrente de otro archivo de test.`
+    );
+  }
+
   return client;
 }
 
