@@ -67,7 +67,19 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await db?.end();
+  if (!dbAvailable) return;
+  if (!db) return;
+  try {
+    await db.query('SELECT pg_advisory_unlock_all();');
+  } catch (e) {
+    console.warn('[afterAll] no se pudo liberar el advisory lock:', e);
+  } finally {
+    try {
+      await db.end();
+    } catch (e) {
+      console.warn('[afterAll] no se pudo cerrar la conexión:', e);
+    }
+  }
 });
 
 // ─── Selección de candidatos ──────────────────────────────────
