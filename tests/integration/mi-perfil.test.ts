@@ -30,12 +30,7 @@ const DOC_ESTUDIO_ID = 'dc000000-0000-0000-0001-000000000012';
 
 beforeAll(async () => {
   if (!dbAvailable) return;
-  try {
-    db = await setupTestDb();
-  } catch (err) {
-    console.warn('PostgreSQL no disponible — tests de integración omitidos:', (err as Error).message);
-    return;
-  }
+  db = await setupTestDb();
 
   // Seed: actualizar perfiles con los nuevos campos de Fase 1
   await db.query(`

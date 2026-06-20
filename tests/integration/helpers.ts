@@ -4,6 +4,9 @@ export const DB_URL =
   process.env.TEST_DATABASE_URL ||
   'postgresql://postgres:postgres@localhost:5432/test_first_blades';
 
+// Key fija para serializar la ejecución de archivos de integración a nivel DB.
+const FB_INTEGRATION_LOCK_KEY = 727274;
+
 // UUIDs fijos para los usuarios de test
 export const IDS = {
   admin:       'a0000000-0000-0000-0001-000000000001',
@@ -23,6 +26,13 @@ export const IDS = {
 export async function setupTestDb(): Promise<Client> {
   const client = new Client({ connectionString: DB_URL });
   await client.connect();
+
+  // 0. Advisory lock de sesión: serializa setup+run entre archivos a nivel Postgres,
+  //    independiente del scheduler de Vitest. Se mantiene mientras viva esta conexión
+  //    y se libera solo al cerrarla en afterAll (db.end()). No bloquea SELECT/INSERT
+  //    regulares: solo bloquea a otro setupTestDb() que pida el mismo lock, así que
+  //    las conexiones de asUser()/asServiceRole() no se ven afectadas.
+  await client.query('SELECT pg_advisory_lock($1)', [FB_INTEGRATION_LOCK_KEY]);
 
   // 1. Limpiar tablas públicas en orden de dependencia (CASCADE maneja el resto)
   await client.query(`

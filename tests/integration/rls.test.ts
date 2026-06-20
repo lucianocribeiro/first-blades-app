@@ -47,12 +47,7 @@ const AUDIT_LOG_ID   = 'a1000000-0000-0000-0001-000000000001'; // fila conocida 
 
 beforeAll(async () => {
   if (!dbAvailable) return;
-  try {
-    db = await setupTestDb();
-  } catch (err) {
-    console.warn('PostgreSQL no disponible — tests de integración omitidos:', (err as Error).message);
-    return;
-  }
+  db = await setupTestDb();
 
   // Seed de datos de prueba (como superuser, bypass RLS)
   await db.query(`
