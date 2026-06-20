@@ -8,21 +8,40 @@ export const DB_URL =
 // Key fija para serializar la ejecución de archivos de integración a nivel DB.
 const FB_INTEGRATION_LOCK_KEY = 727274;
 
-// Mismas variables que lib/supabase/admin.ts: URL + service role key del local.
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+/**
+ * Cliente service-role para la Storage API del Supabase local.
+ * Las credenciales las exporta el workflow desde `supabase status`
+ * (TEST_SUPABASE_URL / TEST_SUPABASE_SERVICE_ROLE_KEY) para que el JWT
+ * corresponda exactamente a la instancia levantada en el runner.
+ */
+function createStorageAdminClient(): SupabaseClient {
+  const url = process.env.TEST_SUPABASE_URL;
+  const key = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error(
+      'Faltan TEST_SUPABASE_URL / TEST_SUPABASE_SERVICE_ROLE_KEY. ' +
+      'Exportalas desde `supabase status` (ver workflow de CI / smoke-test local).'
+    );
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
+}
 
 /**
  * Vacía un bucket de Storage usando la Storage API (no SQL directo:
  * storage.protect_delete() prohíbe DELETE sobre storage.objects).
- * Bucket vacío no es error. Recursa por prefijos de user_id.
+ * Bucket vacío o inexistente → no-op. Cualquier otro error → propagar.
+ * Recursa por prefijos de user_id.
  */
 async function emptyStorageBucket(admin: SupabaseClient, bucket: string) {
   async function listAllPaths(prefix = ''): Promise<string[]> {
     const { data, error } = await admin.storage
       .from(bucket)
       .list(prefix, { limit: 1000 });
-    if (error) throw error;
+    if (error) {
+      // Bucket inexistente → nada para limpiar.
+      if (error.message?.toLowerCase().includes('not found')) return [];
+      throw error;
+    }
 
     const paths: string[] = [];
     for (const entry of data ?? []) {
@@ -84,10 +103,7 @@ export async function setupTestDb(): Promise<Client> {
 
     // 2. Limpiar objetos de Storage de tests anteriores (vía Storage API).
     //    storage.protect_delete() prohíbe DELETE directo sobre storage.objects.
-    const storageAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    await emptyStorageBucket(storageAdmin, 'documents');
+    await emptyStorageBucket(createStorageAdminClient(), 'documents');
 
     // 3. Eliminar usuarios de test previos de auth.users (cascade a profiles, ya vacío)
     await client.query(

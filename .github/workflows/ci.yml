@@ -74,11 +74,14 @@ jobs:
       - name: Levantar Supabase local
         run: supabase start
 
+      - name: Exportar credenciales del Supabase local
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env)"
+          echo "TEST_SUPABASE_URL=${API_URL}" >> "$GITHUB_ENV"
+          echo "TEST_SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}" >> "$GITHUB_ENV"
+
       - name: Tests de integración RLS
         run: npm run test:integration
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:54322/postgres
-          # Storage API — mismas variables que lib/supabase/admin.ts.
-          # Valores por defecto del supabase start sin jwt_secret customizado.
-          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
-          SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hj04zWl196z2-SJBo
