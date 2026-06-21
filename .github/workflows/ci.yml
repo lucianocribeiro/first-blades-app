@@ -79,7 +79,9 @@ jobs:
           set -euo pipefail
           eval "$(supabase status -o env)"
           echo "TEST_SUPABASE_URL=${API_URL}" >> "$GITHUB_ENV"
+          echo "TEST_SUPABASE_ANON_KEY=${ANON_KEY}" >> "$GITHUB_ENV"
           echo "TEST_SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}" >> "$GITHUB_ENV"
+          echo "TEST_SUPABASE_JWT_SECRET=${JWT_SECRET}" >> "$GITHUB_ENV"
 
       - name: Tests de integración RLS
         run: npm run test:integration

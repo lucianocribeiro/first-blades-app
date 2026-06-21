@@ -1,5 +1,6 @@
 import { Client } from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
 
 export const DB_URL =
   process.env.TEST_DATABASE_URL ||
@@ -14,7 +15,7 @@ const FB_INTEGRATION_LOCK_KEY = 727274;
  * (TEST_SUPABASE_URL / TEST_SUPABASE_SERVICE_ROLE_KEY) para que el JWT
  * corresponda exactamente a la instancia levantada en el runner.
  */
-function createStorageAdminClient(): SupabaseClient {
+export function createStorageAdminClient(): SupabaseClient {
   const url = process.env.TEST_SUPABASE_URL;
   const key = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
@@ -24,6 +25,43 @@ function createStorageAdminClient(): SupabaseClient {
     );
   }
   return createClient(url, key, { auth: { persistSession: false } });
+}
+
+/** Mintea un access token tipo Supabase (HS256) firmado con el JWT secret local. */
+function mintUserJwt(userId: string): string {
+  const secret = process.env.TEST_SUPABASE_JWT_SECRET;
+  if (!secret) {
+    throw new Error('Falta TEST_SUPABASE_JWT_SECRET (exportar desde `supabase status`).');
+  }
+  const now = Math.floor(Date.now() / 1000);
+  return jwt.sign(
+    { sub: userId, role: 'authenticated', aud: 'authenticated', iat: now, exp: now + 3600 },
+    secret,
+    { algorithm: 'HS256' }
+  );
+}
+
+/** Cliente supabase-js autenticado como el usuario indicado (ejercita RLS vía Storage API). */
+export function storageClientForUser(userId: string): SupabaseClient {
+  const url = process.env.TEST_SUPABASE_URL;
+  const anonKey = process.env.TEST_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error('Faltan TEST_SUPABASE_URL / TEST_SUPABASE_ANON_KEY (exportar desde `supabase status`).');
+  }
+  const token = mintUserJwt(userId);
+  return createClient(url, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+/** Asegura que el bucket 'documents' exista (idempotente). */
+export async function ensureDocumentsBucket(admin: SupabaseClient): Promise<void> {
+  const { data } = await admin.storage.getBucket('documents');
+  if (!data) {
+    const { error } = await admin.storage.createBucket('documents', { public: false });
+    if (error && !/already exists/i.test(error.message)) throw error;
+  }
 }
 
 /**
@@ -101,9 +139,11 @@ export async function setupTestDb(): Promise<Client> {
       RESTART IDENTITY CASCADE
     `);
 
-    // 2. Limpiar objetos de Storage de tests anteriores (vía Storage API).
+    // 2. Asegurar el bucket y limpiar objetos de Storage (vía Storage API).
     //    storage.protect_delete() prohíbe DELETE directo sobre storage.objects.
-    await emptyStorageBucket(createStorageAdminClient(), 'documents');
+    const storageAdmin = createStorageAdminClient();
+    await ensureDocumentsBucket(storageAdmin);
+    await emptyStorageBucket(storageAdmin, 'documents');
 
     // 3. Eliminar usuarios de test previos de auth.users (cascade a profiles, ya vacío)
     await client.query(

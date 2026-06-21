@@ -6,22 +6,18 @@
  *
  * Cobertura: profiles, documents, pasaje_requests, ausencia_requests,
  *             rotation_groups, rotation_assignments, procedures, audit_log,
- *             storage.objects (policies en Postgres mock).
- *
- * LIMITACIÓN CONOCIDA — Storage signed URLs (upload/download real):
- *   El test de storage.objects aquí prueba las políticas RLS en Postgres usando
- *   una tabla mock. El flujo real de Supabase Storage (bucket API, signed URLs)
- *   requiere una instancia Supabase en vivo y se valida en el smoke-test manual
- *   de Fase 1 al conectar el proyecto real.
+ *             storage.objects (testeado contra la Storage API real).
  *
  * Convenciones de aserción:
  *   - expectPermissionError: INSERT bloqueado por RLS → lanza error de permiso.
  *   - expectDeniedSilently:  UPDATE/DELETE filtrado por USING → rowCount = 0, sin error.
  *   - countRows / SELECT directo: verificación de visibilidad (SELECT bloqueado → 0 filas).
+ *   - Storage API: asertar resultado observable (objeto presente/ausente, lista vacía/llena).
  */
 
 import { Client } from 'pg';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   setupTestDb,
   asUser,
@@ -30,6 +26,9 @@ import {
   expectDeniedSilently,
   countRows,
   IDS,
+  createStorageAdminClient,
+  storageClientForUser,
+  ensureDocumentsBucket,
 } from './helpers';
 
 const dbAvailable = process.env.INTEGRATION_DB_AVAILABLE === 'true';
@@ -81,11 +80,6 @@ beforeAll(async () => {
     INSERT INTO procedures (id, title, content, created_by)
     VALUES ($1, 'Manual de Seguridad', 'Contenido...', $2) ON CONFLICT DO NOTHING
   `, [PROCEDURE_ID, IDS.admin]);
-
-  await db.query(`
-    INSERT INTO storage.objects (bucket_id, name, owner)
-    VALUES ('documents', $1::text || '/dni-123.pdf', $1::uuid) ON CONFLICT DO NOTHING
-  `, [IDS.employee1]);
 
   // Fila conocida en audit_log para tests de lectura real (servicio superuser, bypass RLS)
   await db.query(`
@@ -683,74 +677,87 @@ describe.skipIf(!dbAvailable)('RLS: audit_log', () => {
 });
 
 // ============================================================
-// STORAGE — policies RLS sobre storage.objects (mock Postgres)
+// STORAGE — control de acceso vía Storage API real
 //
-// LIMITACIÓN: Estas policies se testean sobre una tabla mock en Postgres.
-// El acceso real al bucket de Supabase Storage (signed URLs, upload/download)
-// requiere el servicio Supabase en vivo y se valida en smoke-test de Fase 1.
+// Políticas activas (migración 0004):
+//   SELECT: uid propio || is_admin()  (supervisor ya NO ve su equipo)
+//   INSERT: uid propio || is_admin()
+//   DELETE: is_admin() únicamente
 // ============================================================
 
-describe.skipIf(!dbAvailable)('RLS: storage.objects (policies en Postgres mock, no bucket real)', () => {
-  it('usuario ve solo sus propios objetos (SELECT → solo carpeta propia)', async () => {
-    await asUser(IDS.employee1, async (c) => {
-      const { rows } = await c.query(
-        `SELECT name FROM storage.objects WHERE bucket_id = 'documents'`
-      );
-      rows.forEach((r: { name: string }) => {
-        expect(r.name.startsWith(IDS.employee1)).toBe(true);
-      });
-    });
+describe.skipIf(!dbAvailable)('storage.objects: control de acceso vía Storage API real', () => {
+  const BUCKET = 'documents';
+  const emp1File = `${IDS.employee1}/own-emp1.pdf`;
+  const emp2File = `${IDS.employee2}/own-emp2.pdf`;
+  const body = Buffer.from('contenido de prueba');
+
+  let admin: SupabaseClient;
+  let asEmp1: SupabaseClient;
+  let asEmp2: SupabaseClient;
+  let asAdminUser: SupabaseClient;
+  let asSupervisor: SupabaseClient;
+
+  beforeAll(async () => {
+    if (!dbAvailable) return;
+    admin = createStorageAdminClient();
+    await ensureDocumentsBucket(admin);
+    asEmp1 = storageClientForUser(IDS.employee1);
+    asEmp2 = storageClientForUser(IDS.employee2);
+    asAdminUser = storageClientForUser(IDS.admin);
+    asSupervisor = storageClientForUser(IDS.supervisor);
+    // Sembrar objetos vía service-role para los tests de lectura y borrado
+    await admin.storage.from(BUCKET).upload(emp1File, body, { upsert: true, contentType: 'application/pdf' });
+    await admin.storage.from(BUCKET).upload(emp2File, body, { upsert: true, contentType: 'application/pdf' });
   });
 
-  it('employee2 NO ve objetos de employee1 (SELECT, caso negativo → 0 filas)', async () => {
-    await asUser(IDS.employee2, async (c) => {
-      const { rows } = await c.query(
-        `SELECT name FROM storage.objects WHERE bucket_id = 'documents' AND owner = $1`,
-        [IDS.employee1]
-      );
-      expect(rows).toHaveLength(0);
-    });
+  it('empleado puede subir a su propia carpeta', async () => {
+    const { error } = await asEmp2.storage.from(BUCKET)
+      .upload(`${IDS.employee2}/nuevo-${Date.now()}.pdf`, body, { contentType: 'application/pdf' });
+    expect(error).toBeNull();
   });
 
-  it('admin ve todos los objetos en Storage (SELECT)', async () => {
-    await asUser(IDS.admin, async (c) => {
-      const { rows } = await c.query(
-        `SELECT COUNT(*) AS n FROM storage.objects WHERE bucket_id = 'documents'`
-      );
-      expect(parseInt(rows[0].n, 10)).toBeGreaterThanOrEqual(1);
-    });
+  it('empleado NO puede subir a carpeta ajena (WITH CHECK deniega con error)', async () => {
+    const { error } = await asEmp2.storage.from(BUCKET)
+      .upload(`${IDS.employee1}/hack.pdf`, body, { contentType: 'application/pdf' });
+    expect(error).not.toBeNull();
   });
 
-  // DELETE filtrado por USING → rowCount = 0, sin error
-  it('usuario NO puede DELETE objetos ajenos (DELETE denegado silenciosamente → rowCount=0)', async () => {
-    await asUser(IDS.employee2, async (c) => {
-      await expectDeniedSilently(
-        c,
-        `DELETE FROM storage.objects WHERE bucket_id = 'documents' AND owner = $1`,
-        [IDS.employee1]
-      );
-    });
+  it('empleado ve su propio objeto (list carpeta propia)', async () => {
+    const { data, error } = await asEmp1.storage.from(BUCKET).list(IDS.employee1);
+    expect(error).toBeNull();
+    expect((data ?? []).some((o) => o.name === 'own-emp1.pdf')).toBe(true);
   });
 
-  it('usuario puede INSERT en su propia carpeta', async () => {
-    await asUser(IDS.employee2, async (c) => {
-      await expect(
-        c.query(
-          `INSERT INTO storage.objects (bucket_id, name, owner) VALUES ('documents', $1, $2)`,
-          [`${IDS.employee2}/nuevo.pdf`, IDS.employee2]
-        )
-      ).resolves.toBeDefined();
-    });
+  it('empleado NO ve objetos de carpeta ajena (SELECT filtrado → vacío)', async () => {
+    const { data } = await asEmp2.storage.from(BUCKET).list(IDS.employee1);
+    expect((data ?? []).length).toBe(0);
   });
 
-  // WITH CHECK: carpeta ≠ auth.uid() → error
-  it('usuario NO puede INSERT en carpeta ajena (INSERT deniega con error)', async () => {
-    await asUser(IDS.employee2, async (c) => {
-      await expectPermissionError(
-        c,
-        `INSERT INTO storage.objects (bucket_id, name, owner) VALUES ('documents', $1, $2)`,
-        [`${IDS.employee1}/hack.pdf`, IDS.employee2]
-      );
-    });
+  it('supervisor NO ve carpeta de su equipo (0004_rls_fixes: solo lo propio)', async () => {
+    const { data } = await asSupervisor.storage.from(BUCKET).list(IDS.employee1);
+    expect((data ?? []).length).toBe(0);
+  });
+
+  it('admin ve objetos de cualquier carpeta', async () => {
+    const { data, error } = await asAdminUser.storage.from(BUCKET).list(IDS.employee1);
+    expect(error).toBeNull();
+    expect((data ?? []).some((o) => o.name === 'own-emp1.pdf')).toBe(true);
+  });
+
+  it('empleado NO puede borrar objeto ajeno (DELETE solo admin; el objeto persiste)', async () => {
+    // La policy DELETE es is_admin() únicamente: el intento de emp2 no afecta.
+    await asEmp2.storage.from(BUCKET).remove([emp1File]);
+    const { data } = await admin.storage.from(BUCKET).list(IDS.employee1);
+    expect((data ?? []).some((o) => o.name === 'own-emp1.pdf')).toBe(true);
+  });
+
+  it('admin puede borrar objeto de cualquier carpeta', async () => {
+    const tempFile = `${IDS.employee1}/para-borrar-${Date.now()}.pdf`;
+    await admin.storage.from(BUCKET).upload(tempFile, body, { upsert: true, contentType: 'application/pdf' });
+    const { error } = await asAdminUser.storage.from(BUCKET).remove([tempFile]);
+    expect(error).toBeNull();
+    const { data } = await admin.storage.from(BUCKET).list(IDS.employee1);
+    const filename = tempFile.split('/').pop()!;
+    expect((data ?? []).some((o) => o.name === filename)).toBe(false);
   });
 });

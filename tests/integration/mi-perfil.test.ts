@@ -5,6 +5,9 @@
  * fecha_vencimiento, flujo purgatorio (pendiente → aprobar/rechazar),
  * límite de rol para los 3 roles, campo estudio_medico solo admin.
  *
+ * Control de acceso a Storage (storage.objects): ver rls.test.ts, que lo
+ * testea contra la Storage API real (FB-F1-15).
+ *
  * Corre contra PostgreSQL real con la migración completa (0001 + 0002).
  */
 
@@ -456,58 +459,3 @@ describe.skipIf(!dbAvailable)('límite de rol: Mi Perfil (empleado / supervisor 
   });
 });
 
-// ============================================================
-// STORAGE — límite de rol para documentos en bucket
-// ============================================================
-
-describe.skipIf(!dbAvailable)('storage.objects: límite de rol para documentos', () => {
-  it('empleado puede INSERT objeto en su propia carpeta', async () => {
-    await asUser(IDS.employee2, async (c) => {
-      await expect(
-        c.query(
-          `INSERT INTO storage.objects (bucket_id, name, owner) VALUES ('documents', $1, $2)`,
-          [`${IDS.employee2}/certificado-test.pdf`, IDS.employee2]
-        )
-      ).resolves.toBeDefined();
-    });
-  });
-
-  it('empleado NO puede INSERT objeto en carpeta ajena (WITH CHECK falla)', async () => {
-    await asUser(IDS.employee2, async (c) => {
-      await expectPermissionError(
-        c,
-        `INSERT INTO storage.objects (bucket_id, name, owner) VALUES ('documents', $1, $2)`,
-        [`${IDS.employee1}/hack.pdf`, IDS.employee2]
-      );
-    });
-  });
-
-  it('supervisor NO ve objetos de carpetas ajenas — solo la propia (0004_rls_fixes)', async () => {
-    await asUser(IDS.supervisor, async (c) => {
-      const { rows } = await c.query(
-        `SELECT name FROM storage.objects WHERE bucket_id = 'documents' AND owner = $1`,
-        [IDS.employee3] // employee3 es del equipo de supervisor2, no de supervisor
-      );
-      expect(rows).toHaveLength(0);
-    });
-  });
-
-  it('admin ve todos los objetos en Storage', async () => {
-    await asUser(IDS.admin, async (c) => {
-      const { rows } = await c.query(
-        `SELECT COUNT(*) AS n FROM storage.objects WHERE bucket_id = 'documents'`
-      );
-      expect(parseInt(rows[0].n, 10)).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  it('usuario NO puede DELETE objetos ajenos (USING deniega → rowCount=0)', async () => {
-    await asUser(IDS.employee2, async (c) => {
-      await expectDeniedSilently(
-        c,
-        `DELETE FROM storage.objects WHERE bucket_id = 'documents' AND owner = $1`,
-        [IDS.employee1]
-      );
-    });
-  });
-});
