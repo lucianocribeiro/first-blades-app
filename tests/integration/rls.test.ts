@@ -267,6 +267,31 @@ describe.skipIf(!dbAvailable)('RLS: documents', () => {
     });
   });
 
+  it('empleado puede INSERT documento con storage_path de su propia carpeta (CHECK pasa)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expect(
+        c.query(
+          `INSERT INTO documents (user_id, document_type, filename, storage_path, uploaded_by, estado)
+           VALUES ($1::uuid, 'licencia', 'lic.pdf', $1::text || '/licencia.pdf', $1::uuid, 'pendiente')`,
+          [IDS.employee1]
+        )
+      ).resolves.toBeDefined();
+    });
+  });
+
+  // CHECK constraint documents_storage_path_matches_user (migración 0005) → lanza error
+  it('empleado NO puede INSERT documento con storage_path de carpeta ajena (CHECK)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expect(
+        c.query(
+          `INSERT INTO documents (user_id, document_type, filename, storage_path, uploaded_by, estado)
+           VALUES ($1::uuid, 'otros', 'x.pdf', $2::text || '/x.pdf', $1::uuid, 'pendiente')`,
+          [IDS.employee1, IDS.employee2]
+        )
+      ).rejects.toThrow();
+    });
+  });
+
   // WITH CHECK falla → error
   it('empleado NO puede INSERT documento con estado aprobado (INSERT deniega con error)', async () => {
     await asUser(IDS.employee1, async (c) => {

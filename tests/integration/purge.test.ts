@@ -46,11 +46,11 @@ beforeAll(async () => {
       (id, user_id, uploaded_by, document_type, filename, storage_path,
        estado, reviewed_at, file_purged_at)
     VALUES
-      ($1, $6, $6, 'dni',        'dni.pdf',  'emp1/dni-001.pdf',  'rechazado', $7,   NULL),
-      ($2, $6, $6, 'licencia',   'lic.pdf',  'emp1/lic-002.pdf',  'rechazado', $8,   NULL),
-      ($3, $6, $6, 'foto_carnet','foto.jpg',  'emp1/foto-003.jpg', 'pendiente', NULL, NULL),
-      ($4, $6, $6, 'dni',        'dni2.pdf', 'emp1/dni-004.pdf',  'aprobado',  $7,   NULL),
-      ($5, $6, $6, 'licencia',   'lic2.pdf', 'emp1/lic-005.pdf',  'rechazado', $7,   $9)
+      ($1, $6, $6, 'dni',        'dni.pdf',   $6::text || '/dni-001.pdf',  'rechazado', $7,   NULL),
+      ($2, $6, $6, 'licencia',   'lic.pdf',   $6::text || '/lic-002.pdf',  'rechazado', $8,   NULL),
+      ($3, $6, $6, 'foto_carnet','foto.jpg',  $6::text || '/foto-003.jpg', 'pendiente', NULL, NULL),
+      ($4, $6, $6, 'dni',        'dni2.pdf',  $6::text || '/dni-004.pdf',  'aprobado',  $7,   NULL),
+      ($5, $6, $6, 'licencia',   'lic2.pdf',  $6::text || '/lic-005.pdf',  'rechazado', $7,   $9)
   `, [
     DOC_IDS.rechazadoViejo,    // $1
     DOC_IDS.rechazadoReciente, // $2
@@ -159,7 +159,7 @@ describe.skipIf(!dbAvailable)('actualización de file_purged_at', () => {
     expect(rows[0].file_purged_at).not.toBeNull();
     // El row se conserva: estado, storage_path permanecen intactos
     expect(rows[0].estado).toBe('rechazado');
-    expect(rows[0].storage_path).toBe('emp1/dni-001.pdf');
+    expect(rows[0].storage_path).toBe(`${IDS.employee1}/dni-001.pdf`);
   });
 
   it('no afecta el storage_path (queda como auditoría)', async () => {

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdmin, requireAuth } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createServerClient } from '@/lib/supabase/server';
 import { uploadDocument as storageUpload, createSignedUrl, validateDocumentFile } from '@/lib/storage';
 import type { ProfileUpdate, CertificadoTipo, EntrevistaTecnica, DocumentType, DocumentInsert } from '@/lib/db-types';
 import { DOCUMENT_TYPES } from '@/lib/db-types';
@@ -116,18 +117,32 @@ export async function handleDocumentUpload(formData: FormData): Promise<void> {
 export async function getSignedUrls(
   paths: string[]
 ): Promise<Record<string, string>> {
+  await requireAuth();
+
   if (paths.length === 0) return {};
+
+  // Filtrar por lo que el usuario puede ver vía RLS (cliente con sesión, NO admin).
+  // La policy documents_select aplica: empleado ve los suyos, admin ve todos.
+  const supabase = await createServerClient();
+  // La cadena .in() con el generics de postgrest-js puede inferir `never` en TS;
+  // el cast es seguro: estamos seleccionando exactamente storage_path (string NOT NULL).
+  const { data: rawVisibles } = await supabase
+    .from('documents')
+    .select('storage_path')
+    .in('storage_path', paths as readonly string[]);
+  const visibles = rawVisibles as Array<{ storage_path: string }> | null;
+
+  const authorized = new Set((visibles ?? []).map((d) => d.storage_path));
+
   const result: Record<string, string> = {};
-  await Promise.all(
-    paths.map(async (path) => {
-      try {
-        result[path] = await createSignedUrl(path);
-      } catch {
-        // Si falla la URL firmada, no bloquear el render
-        result[path] = '';
-      }
-    })
-  );
+  for (const path of paths) {
+    if (!authorized.has(path)) continue;
+    try {
+      result[path] = await createSignedUrl(path);
+    } catch {
+      result[path] = '';
+    }
+  }
   return result;
 }
 
