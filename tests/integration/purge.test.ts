@@ -41,27 +41,27 @@ beforeAll(async () => {
   const recentDate = daysAgo(10);                // < 30d → no elegible
   const purgedDate = daysAgo(25);                // timestamp de purga previa
 
-  await db.query(`
+  // Construir paths en JS para evitar el error 42P08 (mismo parámetro usado como uuid y text).
+  const userId = IDS.employee1;
+  const paths = {
+    rechazadoViejo:    `${userId}/dni-001.pdf`,
+    rechazadoReciente: `${userId}/lic-002.pdf`,
+    pendiente:         `${userId}/foto-003.jpg`,
+    aprobado:          `${userId}/dni-004.pdf`,
+    yaApurgado:        `${userId}/lic-005.pdf`,
+  };
+
+  const INSERT_DOC = `
     INSERT INTO documents
       (id, user_id, uploaded_by, document_type, filename, storage_path,
        estado, reviewed_at, file_purged_at)
-    VALUES
-      ($1, $6, $6, 'dni',        'dni.pdf',   $6::text || '/dni-001.pdf',  'rechazado', $7,   NULL),
-      ($2, $6, $6, 'licencia',   'lic.pdf',   $6::text || '/lic-002.pdf',  'rechazado', $8,   NULL),
-      ($3, $6, $6, 'foto_carnet','foto.jpg',  $6::text || '/foto-003.jpg', 'pendiente', NULL, NULL),
-      ($4, $6, $6, 'dni',        'dni2.pdf',  $6::text || '/dni-004.pdf',  'aprobado',  $7,   NULL),
-      ($5, $6, $6, 'licencia',   'lic2.pdf',  $6::text || '/lic-005.pdf',  'rechazado', $7,   $9)
-  `, [
-    DOC_IDS.rechazadoViejo,    // $1
-    DOC_IDS.rechazadoReciente, // $2
-    DOC_IDS.pendiente,         // $3
-    DOC_IDS.aprobado,          // $4
-    DOC_IDS.yaApurgado,        // $5
-    IDS.employee1,             // $6
-    oldDate,                   // $7
-    recentDate,                // $8
-    purgedDate,                // $9
-  ]);
+    VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8)
+  `;
+  await db.query(INSERT_DOC, [DOC_IDS.rechazadoViejo,    userId, 'dni',         'dni.pdf',   paths.rechazadoViejo,    'rechazado', oldDate,    null]);
+  await db.query(INSERT_DOC, [DOC_IDS.rechazadoReciente, userId, 'licencia',    'lic.pdf',   paths.rechazadoReciente, 'rechazado', recentDate, null]);
+  await db.query(INSERT_DOC, [DOC_IDS.pendiente,         userId, 'foto_carnet', 'foto.jpg',  paths.pendiente,         'pendiente', null,       null]);
+  await db.query(INSERT_DOC, [DOC_IDS.aprobado,          userId, 'dni',         'dni2.pdf',  paths.aprobado,          'aprobado',  oldDate,    null]);
+  await db.query(INSERT_DOC, [DOC_IDS.yaApurgado,        userId, 'licencia',    'lic2.pdf',  paths.yaApurgado,        'rechazado', oldDate,    purgedDate]);
 
   await db.query('RESET ROLE');
 }, 30_000);
