@@ -459,3 +459,34 @@ describe.skipIf(!dbAvailable)('límite de rol: Mi Perfil (empleado / supervisor 
   });
 });
 
+// ============================================================
+// CONSTRAINT M2 — rechazado exige motivo_rechazo (migración 0006)
+// ============================================================
+
+describe.skipIf(!dbAvailable)('constraint: rechazado requiere motivo_rechazo', () => {
+  it('admin NO puede dejar un documento rechazado sin motivo (CHECK lanza error)', async () => {
+    await asUser(IDS.admin, async (c) => {
+      await expect(
+        c.query(
+          `UPDATE documents SET estado = 'rechazado', motivo_rechazo = NULL,
+                                reviewed_by = $1, reviewed_at = now()
+           WHERE id = $2`,
+          [IDS.admin, DOC_CERT_ID]
+        )
+      ).rejects.toThrow();
+    });
+  });
+
+  it('admin puede rechazar con motivo no vacío (CHECK pasa — caso positivo)', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query(
+        `UPDATE documents SET estado = 'rechazado', motivo_rechazo = $1,
+                              reviewed_by = $2, reviewed_at = now()
+         WHERE id = $3`,
+        ['Motivo válido de rechazo', IDS.admin, DOC_ESTUDIO_ID]
+      );
+      expect(rowCount).toBeGreaterThanOrEqual(1);
+    });
+  });
+});
+

@@ -54,14 +54,15 @@ beforeAll(async () => {
   const INSERT_DOC = `
     INSERT INTO documents
       (id, user_id, uploaded_by, document_type, filename, storage_path,
-       estado, reviewed_at, file_purged_at)
-    VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8)
+       estado, reviewed_at, file_purged_at, motivo_rechazo)
+    VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9)
   `;
-  await db.query(INSERT_DOC, [DOC_IDS.rechazadoViejo,    userId, 'dni',         'dni.pdf',   paths.rechazadoViejo,    'rechazado', oldDate,    null]);
-  await db.query(INSERT_DOC, [DOC_IDS.rechazadoReciente, userId, 'licencia',    'lic.pdf',   paths.rechazadoReciente, 'rechazado', recentDate, null]);
-  await db.query(INSERT_DOC, [DOC_IDS.pendiente,         userId, 'foto_carnet', 'foto.jpg',  paths.pendiente,         'pendiente', null,       null]);
-  await db.query(INSERT_DOC, [DOC_IDS.aprobado,          userId, 'dni',         'dni2.pdf',  paths.aprobado,          'aprobado',  oldDate,    null]);
-  await db.query(INSERT_DOC, [DOC_IDS.yaApurgado,        userId, 'licencia',    'lic2.pdf',  paths.yaApurgado,        'rechazado', oldDate,    purgedDate]);
+  //                                                                                                                                estado       reviewed_at  file_purged_at motivo_rechazo (constraint: rechazado exige motivo)
+  await db.query(INSERT_DOC, [DOC_IDS.rechazadoViejo,    userId, 'dni',         'dni.pdf',   paths.rechazadoViejo,    'rechazado', oldDate,     null,        'Vencimiento superado']);
+  await db.query(INSERT_DOC, [DOC_IDS.rechazadoReciente, userId, 'licencia',    'lic.pdf',   paths.rechazadoReciente, 'rechazado', recentDate,  null,        'Documento ilegible']);
+  await db.query(INSERT_DOC, [DOC_IDS.pendiente,         userId, 'foto_carnet', 'foto.jpg',  paths.pendiente,         'pendiente', null,        null,        null]);
+  await db.query(INSERT_DOC, [DOC_IDS.aprobado,          userId, 'dni',         'dni2.pdf',  paths.aprobado,          'aprobado',  oldDate,     null,        null]);
+  await db.query(INSERT_DOC, [DOC_IDS.yaApurgado,        userId, 'licencia',    'lic2.pdf',  paths.yaApurgado,        'rechazado', oldDate,     purgedDate,  'Datos incorrectos']);
 
   await db.query('RESET ROLE');
 }, 30_000);
