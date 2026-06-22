@@ -25,10 +25,9 @@ export default async function MiPerfilPage() {
 
   const allDocs = (docsRaw as Document[] | null) ?? [];
 
-  // Filtrar estudio_medico para no-admin (restricción de visibilidad en app layer)
-  const documents = isAdmin
-    ? allDocs
-    : allDocs.filter((d) => d.document_type !== 'estudio_medico');
+  // El empleado ve su propio estudio_medico (contrato A3).
+  // RLS de 0004_rls_fixes ya impide que otros empleados y el supervisor lo vean.
+  const documents = allDocs;
 
   // Solo generar signed URLs para documentos con archivo disponible (no purgados)
   const storagePaths = documents
@@ -40,6 +39,9 @@ export default async function MiPerfilPage() {
     ...d,
     signedUrl: signedUrls[d.storage_path] ?? '',
   }));
+
+  // Sanitizar campos solo-admin antes de serializar al cliente
+  const safeProfile = isAdmin ? profile : { ...profile, entrevista_tecnica: null };
 
   if (docsError) {
     return (
@@ -64,8 +66,8 @@ export default async function MiPerfilPage() {
       {/* Selector de empleado solo para admin */}
       {isAdmin && <AdminEmployeeSelector />}
 
-      {/* Datos personales (lectura) */}
-      <ProfileView profile={profile} isAdmin={isAdmin} />
+      {/* Datos personales (lectura) — safeProfile omite entrevista_tecnica para no-admin */}
+      <ProfileView profile={safeProfile} isAdmin={isAdmin} />
 
       {/* Documentos */}
       <DocumentsSection documents={documentsWithUrls} />

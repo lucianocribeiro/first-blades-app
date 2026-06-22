@@ -358,18 +358,36 @@ describe.skipIf(!dbAvailable)('purgatorio: flujo de aprobación/rechazo de docum
     });
   });
 
-  it('empleado NO puede leer el documento estudio_medico propio (RLS no filtra por tipo — restricción en app layer)', async () => {
-    // La RLS de documents no filtra por document_type; la restricción es en app layer.
-    // Este test documenta el comportamiento esperado a nivel de base de datos.
-    // El empleado SÍ puede ver la fila desde SQL, pero la app la oculta.
+  it('empleado SÍ ve su propio estudio_medico (RLS lo permite; otros empleados y supervisor no)', async () => {
+    // Contrato A3: el dueño ve su propio estudio_medico.
+    // La visibilidad hacia terceros la controla RLS (0004_rls_fixes), no un filtro de app.
     await asUser(IDS.employee1, async (c) => {
       const { rows } = await c.query(
         `SELECT document_type FROM documents WHERE id = $1`,
         [DOC_ESTUDIO_ID]
       );
-      // RLS permite SELECT por user_id = auth.uid(), así que el empleado ve la fila en BD.
-      // La app layer filtra estudio_medico en Mi Perfil para no-admin.
       expect(rows).toHaveLength(1);
+      expect(rows[0].document_type).toBe('estudio_medico');
+    });
+  });
+
+  it('otro empleado NO ve el estudio_medico ajeno (RLS → 0 filas)', async () => {
+    await asUser(IDS.employee2, async (c) => {
+      const { rows } = await c.query(
+        `SELECT document_type FROM documents WHERE id = $1`,
+        [DOC_ESTUDIO_ID]
+      );
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  it('supervisor NO ve el estudio_medico de su equipo (RLS → 0 filas)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      const { rows } = await c.query(
+        `SELECT document_type FROM documents WHERE id = $1`,
+        [DOC_ESTUDIO_ID]
+      );
+      expect(rows).toHaveLength(0);
     });
   });
 
@@ -486,6 +504,44 @@ describe.skipIf(!dbAvailable)('constraint: rechazado requiere motivo_rechazo', (
         ['Motivo válido de rechazo', IDS.admin, DOC_ESTUDIO_ID]
       );
       expect(rowCount).toBeGreaterThanOrEqual(1);
+    });
+  });
+});
+
+// ============================================================
+// EXCEPCIÓN A5 — carga admin en nombre del empleado → aprobado directo
+//
+// Deliberada: el admin ya está aprobando implícitamente al cargar.
+// Es el ÚNICO path de auto-aprobación; toda submission nativa entra pendiente.
+// ============================================================
+
+describe.skipIf(!dbAvailable)('excepción A5: admin puede crear documento ya aprobado', () => {
+  it('admin PUEDE crear un documento ya aprobado en nombre del empleado (excepción deliberada)', async () => {
+    const storagePath = `${IDS.employee1}/admin-excepcion-${Date.now()}.pdf`;
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query(
+        `INSERT INTO documents
+           (user_id, uploaded_by, document_type, filename, storage_path,
+            estado, reviewed_by, reviewed_at)
+         VALUES ($1, $2, 'estudio_medico', 'admin-upload.pdf', $3, 'aprobado', $2, now())`,
+        [IDS.employee1, IDS.admin, storagePath]
+      );
+      expect(rowCount).toBe(1);
+    });
+  });
+
+  it('empleado NO puede crear un documento ya aprobado (WITH CHECK falla — ya cubierto en RLS docs)', async () => {
+    // El caso opuesto ya existe en 'documents: nuevos campos Fase 1' →
+    // 'empleado NO puede cambiar estado a aprobado (WITH CHECK falla)'.
+    // Este test lo referencia explícitamente para documentar la asimetría del contrato.
+    await asUser(IDS.employee1, async (c) => {
+      await expectPermissionError(
+        c,
+        `INSERT INTO documents
+           (user_id, uploaded_by, document_type, filename, storage_path, estado)
+         VALUES ($1, $1, 'otros', 'no-auto-aprobado.pdf', $2, 'aprobado')`,
+        [IDS.employee1, `${IDS.employee1}/no-auto-aprobado.pdf`]
+      );
     });
   });
 });

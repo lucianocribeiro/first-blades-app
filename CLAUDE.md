@@ -52,6 +52,8 @@ Empleado/Supervisor envía (formulario nativo)
 
 Invariante: nada llega a `aprobado` sin acción explícita de un admin. Ver skill `purgatorio-form`. Viáticos NO usa este patrón (es externo).
 
+**Excepción deliberada (A5):** `uploadDocumentForEmployee` (carga admin en nombre del empleado) crea el documento directamente en `aprobado` — es el **único** path de auto-aprobación. El admin ya está aprobando implícitamente al cargar. Todo lo demás (submission de empleado o supervisor) entra en `pendiente` sin excepción. Fijado con tests en `mi-perfil.test.ts` → describe `excepción A5`.
+
 ## Menú (sidebar, ítems visibles según rol)
 
 Sidebar colapsable con hamburguesa. Ítems y visibilidad:
