@@ -1,8 +1,13 @@
 /**
  * Tests de integración — Retención y purga de documentos rechazados (FB-F1-02)
  *
- * Testea la lógica SQL de selección e idempotencia directamente en Postgres.
- * La eliminación real de Storage no se testea aquí (requiere instancia live).
+ * Cubre dos capas:
+ * 1. Lógica SQL de selección y retención (30 días, idempotencia, conservación de fila).
+ * 2. Purga productiva real: sube un objeto al bucket local, corre `purgeRejectedDocuments()`
+ *    con el cliente inyectado, y verifica que el archivo desaparece de Storage y que
+ *    `file_purged_at` queda seteado mientras la fila de metadatos se conserva.
+ *    El manejo de error y reintento (fallo de `remove()` no marca `file_purged_at`) queda
+ *    garantizado por la lógica de `lib/purge.ts` (FB-F1-17).
  */
 
 import { Client } from 'pg';
