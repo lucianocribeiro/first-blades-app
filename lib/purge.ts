@@ -5,7 +5,7 @@ export const RETENTION_DAYS = 30;
 
 export type PurgeResult = {
   purged: number;
-  errors: { id: string; error: string }[];
+  failed: number;
 };
 
 /**
@@ -43,14 +43,18 @@ export function getPurgeCutoff(referenceDate: Date = new Date()): Date {
  * - Solo se elimina el archivo físico en Storage.
  * - Idempotente: la condición `file_purged_at IS NULL` evita reprocesar.
  * - El campo storage_path NO se nulifica (queda como auditoría).
+ * - Si remove() falla, la fila NO se marca: queda elegible para reintento.
+ *
+ * @param client Cliente Supabase inyectable (default = admin de prod). Permite testeo.
  */
-export async function purgeRejectedDocuments(): Promise<PurgeResult> {
-  const admin = createAdminClient();
-  const result: PurgeResult = { purged: 0, errors: [] };
+export async function purgeRejectedDocuments(
+  client: ReturnType<typeof createAdminClient> = createAdminClient()
+): Promise<PurgeResult> {
+  const result: PurgeResult = { purged: 0, failed: 0 };
 
   const cutoff = getPurgeCutoff().toISOString();
 
-  const { data: docs, error: selectError } = await admin
+  const { data: docs, error: selectError } = await client
     .from('documents')
     .select('id, storage_path')
     .eq('estado', 'rechazado')
@@ -62,23 +66,29 @@ export async function purgeRejectedDocuments(): Promise<PurgeResult> {
   if (!docs?.length) return result;
 
   for (const doc of docs) {
-    try {
-      await admin.storage.from(DOCUMENTS_BUCKET).remove([doc.storage_path]);
+    const { error: removeError } = await client.storage
+      .from(DOCUMENTS_BUCKET)
+      .remove([doc.storage_path]);
 
-      const { error: updateError } = await admin
-        .from('documents')
-        .update({ file_purged_at: new Date().toISOString() })
-        .eq('id', doc.id)
-        .is('file_purged_at', null); // guarda de idempotencia
-
-      if (updateError) throw new Error(updateError.message);
-      result.purged++;
-    } catch (err) {
-      result.errors.push({
-        id: doc.id,
-        error: err instanceof Error ? err.message : 'Error desconocido',
-      });
+    if (removeError) {
+      console.error(`[purge] fallo al borrar ${doc.storage_path}:`, removeError);
+      result.failed++;
+      continue; // no marcar file_purged_at: la fila queda elegible para reintento
     }
+
+    const { error: updateError } = await client
+      .from('documents')
+      .update({ file_purged_at: new Date().toISOString() })
+      .eq('id', doc.id)
+      .is('file_purged_at', null); // guarda de idempotencia
+
+    if (updateError) {
+      console.error(`[purge] fallo al marcar file_purged_at para ${doc.id}:`, updateError);
+      result.failed++;
+      continue;
+    }
+
+    result.purged++;
   }
 
   return result;

@@ -7,8 +7,8 @@
 
 import { Client } from 'pg';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { setupTestDb, IDS } from './helpers';
-import { RETENTION_DAYS } from '@/lib/purge';
+import { setupTestDb, IDS, createStorageAdminClient, ensureDocumentsBucket } from './helpers';
+import { RETENTION_DAYS, purgeRejectedDocuments } from '@/lib/purge';
 
 const dbAvailable = process.env.INTEGRATION_DB_AVAILABLE === 'true';
 
@@ -182,6 +182,62 @@ describe.skipIf(!dbAvailable)('actualización de file_purged_at', () => {
     // file_purged_at ya no es NULL → rowCount debe ser 0
     expect(result.rowCount).toBe(0);
   });
+});
+
+// ─── Purga real vía función productiva ───────────────────────
+
+describe.skipIf(!dbAvailable)('purgeRejectedDocuments: función productiva contra bucket real', () => {
+  it('borra el archivo físico y marca file_purged_at; conserva la fila', async () => {
+    const admin = createStorageAdminClient();
+    await ensureDocumentsBucket(admin);
+
+    const userId = IDS.employee1;
+    const path = `${userId}/purge-me-${Date.now()}.pdf`;
+
+    // 1. subir objeto real al bucket
+    const { error: uploadError } = await admin.storage
+      .from('documents')
+      .upload(path, Buffer.from('contenido de purga'), { contentType: 'application/pdf' });
+    expect(uploadError).toBeNull();
+
+    // 2. insertar fila elegible: rechazado, reviewed_at > 30 días, file_purged_at null
+    const { data: inserted, error: insertError } = await admin
+      .from('documents')
+      .insert({
+        user_id:       userId,
+        document_type: 'otros',
+        filename:      'purge.pdf',
+        storage_path:  path,
+        uploaded_by:   IDS.admin,
+        estado:        'rechazado',
+        motivo_rechazo: 'test-purga',
+        reviewed_by:   IDS.admin,
+        reviewed_at:   new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString(),
+      })
+      .select('id')
+      .single();
+    expect(insertError).toBeNull();
+
+    // 3. correr la función productiva con el cliente local inyectado
+    const res = await purgeRejectedDocuments(admin);
+    expect(res.purged).toBeGreaterThanOrEqual(1);
+    expect(res.failed).toBe(0);
+
+    // 4. el archivo ya no existe en Storage
+    const filename = path.split('/').pop()!;
+    const { data: listed } = await admin.storage.from('documents').list(userId);
+    expect((listed ?? []).some((o) => o.name === filename)).toBe(false);
+
+    // 5. la fila se conserva y tiene file_purged_at seteado
+    const { data: row } = await admin
+      .from('documents')
+      .select('file_purged_at, estado, storage_path')
+      .eq('id', inserted!.id)
+      .single();
+    expect(row?.file_purged_at).not.toBeNull();
+    expect(row?.estado).toBe('rechazado');       // fila conservada intacta
+    expect(row?.storage_path).toBe(path);        // storage_path no se nulifica
+  }, 20_000);
 });
 
 // ─── Límites de ventana de retención ─────────────────────────

@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await purgeRejectedDocuments();
+    console.log(`[purge-cron] purged=${result.purged} failed=${result.failed}`);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     return NextResponse.json(
