@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FileText, Eye, Clock } from 'lucide-react';
+import { FileText, Eye, Clock, AlertCircle } from 'lucide-react';
 import { copy } from '@/lib/copy';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -16,6 +16,8 @@ type DocumentsSectionProps = {
   documents: DocumentWithUrl[];
   /** Cuando el admin está viendo el perfil de otro usuario, usar modal de admin */
   targetUserId?: string;
+  /** La query de documentos falló; mostrar error en vez de lista vacía */
+  queryError?: boolean;
 };
 
 function documentTypeLabel(type: string): string {
@@ -34,7 +36,7 @@ function formatDate(date: string | null | undefined): string {
   return new Date(date).toLocaleDateString('es-AR');
 }
 
-export function DocumentsSection({ documents, targetUserId }: DocumentsSectionProps) {
+export function DocumentsSection({ documents, targetUserId, queryError }: DocumentsSectionProps) {
   const [uploadOpen, setUploadOpen] = useState(false);
 
   return (
@@ -48,7 +50,12 @@ export function DocumentsSection({ documents, targetUserId }: DocumentsSectionPr
         </Button>
       </div>
 
-      {documents.length === 0 ? (
+      {queryError ? (
+        <div className="flex flex-col items-center justify-center py-10 text-error gap-2">
+          <AlertCircle size={32} className="text-error/60" />
+          <p className="text-sm">{copy.documentos.errors.cargaError}</p>
+        </div>
+      ) : documents.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 text-neutral gap-2">
           <FileText size={32} className="text-neutral/40" />
           <p className="text-sm">{copy.documentos.noDocuments}</p>

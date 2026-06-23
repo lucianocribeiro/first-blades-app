@@ -40,22 +40,26 @@ export default async function AdminEmpleadoPage({
     .eq('user_id', id)
     .order('created_at', { ascending: false });
 
+  const docsQueryError = !!docsError;
+
   if (docsError) {
-    console.error('[AdminEmpleadoPage] error al cargar documentos:', docsError.message);
+    console.error(`[AdminEmpleadoPage] error al cargar documentos de ${id}:`, docsError.message);
   }
 
-  const docs = (docsRaw ?? []) as Document[];
+  const docs = docsQueryError ? [] : ((docsRaw ?? []) as Document[]);
 
-  // Solo generar signed URLs para archivos no purgados
-  const storagePaths = docs
-    .filter((d) => !d.file_purged_at)
-    .map((d) => d.storage_path);
-  const signedUrls = await getSignedUrls(storagePaths);
+  // Solo generar signed URLs cuando la query fue exitosa
+  const storagePaths = docsQueryError
+    ? []
+    : docs.filter((d) => !d.file_purged_at).map((d) => d.storage_path);
+  const signedUrls = docsQueryError ? {} : await getSignedUrls(storagePaths);
 
-  const documentsWithUrls = docs.map((d) => ({
-    ...d,
-    signedUrl: d.file_purged_at ? '' : (signedUrls[d.storage_path] ?? ''),
-  }));
+  const documentsWithUrls = docsQueryError
+    ? []
+    : docs.map((d) => ({
+        ...d,
+        signedUrl: d.file_purged_at ? '' : (signedUrls[d.storage_path] ?? ''),
+      }));
 
   const displayName = employeeProfile.full_name || employeeProfile.email;
 
@@ -86,6 +90,7 @@ export default async function AdminEmpleadoPage({
       <DocumentsSection
         documents={documentsWithUrls}
         targetUserId={id}
+        queryError={docsQueryError}
       />
     </div>
   );

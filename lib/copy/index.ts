@@ -245,6 +245,7 @@ export const copy = {
       archivoDemasiadoGrande:   'El archivo excede el límite de 10 MB.',
       tipoArchivoNoPermitido:   'Tipo de archivo no permitido:',
       urlNoDisponible:          'No se pudo generar la URL de acceso.',
+      cargaError:               'No se pudieron cargar los documentos. Intentá recargar la página.',
     },
   },
 
