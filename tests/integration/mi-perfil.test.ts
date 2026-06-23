@@ -1,14 +1,15 @@
 /**
  * Tests de integración — Módulo Mi Perfil (FB-F1-01)
  *
- * Cubre: RLS de profiles (nuevos campos), documents con certificado_tipo y
+ * Cubre: RLS de profiles (full_name unificado), documents con certificado_tipo y
  * fecha_vencimiento, flujo purgatorio (pendiente → aprobar/rechazar),
  * límite de rol para los 3 roles, campo estudio_medico solo admin.
  *
  * Control de acceso a Storage (storage.objects): ver rls.test.ts, que lo
  * testea contra la Storage API real (FB-F1-15).
  *
- * Corre contra PostgreSQL real con la migración completa (0001 + 0002).
+ * Corre contra PostgreSQL real con las migraciones completas (0001–0007).
+ * Migración 0007: nombre/apellido retirados, full_name es la única fuente.
  */
 
 import { Client } from 'pg';
@@ -35,16 +36,16 @@ beforeAll(async () => {
   if (!dbAvailable) return;
   db = await setupTestDb();
 
-  // Seed: actualizar perfiles con los nuevos campos de Fase 1
+  // Seed: actualizar perfiles con los campos de Fase 1 (full_name unificado)
   await db.query(`
     UPDATE profiles
-    SET nombre = 'Juan', apellido = 'Pérez', cuit = '20-12345678-9', winda_id = 'W123'
+    SET full_name = 'Juan Pérez', cuit = '20-12345678-9', winda_id = 'W123'
     WHERE id = $1
   `, [IDS.employee1]);
 
   await db.query(`
     UPDATE profiles
-    SET nombre = 'María', apellido = 'López', cuit = '27-98765432-1', winda_id = 'W456'
+    SET full_name = 'María López', cuit = '27-98765432-1', winda_id = 'W456'
     WHERE id = $1
   `, [IDS.supervisor]);
 
@@ -102,27 +103,26 @@ afterAll(async () => {
 // PROFILES — nuevos campos (Fase 1)
 // ============================================================
 
-describe.skipIf(!dbAvailable)('profiles: campos Fase 1 (nombre, apellido, cuit, winda_id)', () => {
-  it('empleado puede leer sus propios campos nombre/apellido/cuit/winda_id', async () => {
+describe.skipIf(!dbAvailable)('profiles: campos Fase 1 (full_name, cuit, winda_id)', () => {
+  it('empleado puede leer sus propios campos full_name/cuit/winda_id', async () => {
     await asUser(IDS.employee1, async (c) => {
       const { rows } = await c.query(
-        'SELECT nombre, apellido, cuit, winda_id FROM profiles WHERE id = $1',
+        'SELECT full_name, cuit, winda_id FROM profiles WHERE id = $1',
         [IDS.employee1]
       );
       expect(rows).toHaveLength(1);
-      expect(rows[0].nombre).toBe('Juan');
-      expect(rows[0].apellido).toBe('Pérez');
+      expect(rows[0].full_name).toBe('Juan Pérez');
       expect(rows[0].cuit).toBe('20-12345678-9');
       expect(rows[0].winda_id).toBe('W123');
     });
   });
 
-  it('empleado NO puede UPDATE sus propios campos (UPDATE denegado silenciosamente)', async () => {
+  it('empleado NO puede UPDATE su propio perfil (UPDATE denegado silenciosamente)', async () => {
     await asUser(IDS.employee1, async (c) => {
       await expectDeniedSilently(
         c,
-        'UPDATE profiles SET nombre = $1, apellido = $2 WHERE id = $3',
-        ['Hack', 'Hack', IDS.employee1]
+        'UPDATE profiles SET full_name = $1 WHERE id = $2',
+        ['Hack Empleado', IDS.employee1]
       );
     });
   });
@@ -137,32 +137,32 @@ describe.skipIf(!dbAvailable)('profiles: campos Fase 1 (nombre, apellido, cuit, 
     });
   });
 
-  it('supervisor puede leer campos nombre/apellido/cuit/winda_id de su equipo', async () => {
+  it('supervisor puede leer full_name/cuit/winda_id de su equipo', async () => {
     await asUser(IDS.supervisor, async (c) => {
       const { rows } = await c.query(
-        'SELECT nombre, apellido, cuit, winda_id FROM profiles WHERE id = $1',
+        'SELECT full_name, cuit, winda_id FROM profiles WHERE id = $1',
         [IDS.employee1]
       );
       expect(rows).toHaveLength(1);
-      expect(rows[0].nombre).toBe('Juan');
+      expect(rows[0].full_name).toBe('Juan Pérez');
     });
   });
 
   it('supervisor NO puede leer perfiles de empleados de otro supervisor', async () => {
     await asUser(IDS.supervisor, async (c) => {
       const { rows } = await c.query(
-        'SELECT nombre FROM profiles WHERE id = $1',
+        'SELECT full_name FROM profiles WHERE id = $1',
         [IDS.employee3]
       );
       expect(rows).toHaveLength(0);
     });
   });
 
-  it('admin puede UPDATE nombre/apellido/cuit/winda_id de cualquier perfil', async () => {
+  it('admin puede UPDATE full_name/cuit/winda_id de cualquier perfil', async () => {
     await asUser(IDS.admin, async (c) => {
       const { rowCount } = await c.query(
-        'UPDATE profiles SET nombre = $1, apellido = $2, cuit = $3, winda_id = $4 WHERE id = $5',
-        ['TestNombre', 'TestApellido', '20-11111111-1', 'W999', IDS.employee2]
+        'UPDATE profiles SET full_name = $1, cuit = $2, winda_id = $3 WHERE id = $4',
+        ['Test Nombre Completo', '20-11111111-1', 'W999', IDS.employee2]
       );
       expect(rowCount).toBeGreaterThanOrEqual(1);
     });
@@ -424,8 +424,8 @@ describe.skipIf(!dbAvailable)('límite de rol: Mi Perfil (empleado / supervisor 
     await asUser(IDS.supervisor, async (c) => {
       await expectDeniedSilently(
         c,
-        'UPDATE profiles SET nombre = $1 WHERE id = $2',
-        ['HackSupervisor', IDS.supervisor]
+        'UPDATE profiles SET full_name = $1 WHERE id = $2',
+        ['Hack Supervisor', IDS.supervisor]
       );
     });
   });
@@ -435,11 +435,11 @@ describe.skipIf(!dbAvailable)('límite de rol: Mi Perfil (empleado / supervisor 
     expect(n).toBe(6);
   });
 
-  it('admin: puede UPDATE nombre/apellido/cuit/winda_id en cualquier perfil', async () => {
+  it('admin: puede UPDATE full_name/cuit/winda_id en cualquier perfil', async () => {
     await asUser(IDS.admin, async (c) => {
       const { rowCount } = await c.query(
-        'UPDATE profiles SET nombre = $1, cuit = $2 WHERE id = $3',
-        ['AdminUpdate', '20-99999999-9', IDS.supervisor]
+        'UPDATE profiles SET full_name = $1, cuit = $2 WHERE id = $3',
+        ['Admin Update Nombre', '20-99999999-9', IDS.supervisor]
       );
       expect(rowCount).toBeGreaterThanOrEqual(1);
     });

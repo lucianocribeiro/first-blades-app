@@ -36,9 +36,8 @@ export function ProfileView({ profile, isAdmin }: ProfileViewProps) {
           {copy.miPerfil.sectionDatos}
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <FieldRow label={copy.miPerfil.fields.nombre}   value={profile.nombre} />
-          <FieldRow label={copy.miPerfil.fields.apellido} value={profile.apellido} />
-          <FieldRow label={copy.miPerfil.fields.email}    value={profile.email} />
+          <FieldRow label={copy.miPerfil.fields.nombreCompleto} value={profile.full_name} />
+          <FieldRow label={copy.miPerfil.fields.email}          value={profile.email} />
           <FieldRow label={copy.miPerfil.fields.telefono} value={profile.phone} />
           <FieldRow label={copy.miPerfil.fields.cuit}     value={profile.cuit} />
           <FieldRow label={copy.miPerfil.fields.windaId}  value={profile.winda_id} />

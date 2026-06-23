@@ -6,7 +6,7 @@ import { AprobacionesTable } from './AprobacionesTable';
 import type { Document, Profile } from '@/lib/db-types';
 
 type DocumentWithUser = Document & {
-  user_profile?: Pick<Profile, 'nombre' | 'apellido' | 'email'> | null;
+  user_profile?: Pick<Profile, 'full_name' | 'email'> | null;
 };
 
 export default async function AprobacionesPage() {
@@ -16,7 +16,7 @@ export default async function AprobacionesPage() {
   // Cargar documentos pendientes con join a profiles para mostrar nombre del usuario
   const { data: rawDocs, error } = await supabase
     .from('documents')
-    .select('*, user_profile:profiles!documents_user_id_fkey(nombre, apellido, email)')
+    .select('*, user_profile:profiles!documents_user_id_fkey(full_name, email)')
     .eq('estado', 'pendiente')
     .order('created_at', { ascending: true });
 

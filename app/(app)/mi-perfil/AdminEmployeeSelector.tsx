@@ -14,6 +14,7 @@ export function AdminEmployeeSelector() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<EmployeeSearchResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,15 +29,22 @@ export function AdminEmployeeSelector() {
 
   function handleChange(value: string) {
     setQuery(value);
+    setSearchError('');
     if (value.trim().length < 2) {
       setResults([]);
       setShowDropdown(false);
       return;
     }
     startTransition(async () => {
-      const r = await searchEmployees(value);
-      setResults(r);
-      setShowDropdown(true);
+      try {
+        const r = await searchEmployees(value);
+        setResults(r);
+        setShowDropdown(true);
+      } catch {
+        setSearchError(copy.errors.generic);
+        setResults([]);
+        setShowDropdown(false);
+      }
     });
   }
 
@@ -74,6 +82,10 @@ export function AdminEmployeeSelector() {
 
         <p className="text-xs text-neutral mt-1">{copy.adminEmpleado.selectorHint}</p>
 
+        {searchError && (
+          <p className="text-xs text-error mt-1">{searchError}</p>
+        )}
+
         {showDropdown && (
           <ul className="absolute z-10 mt-1 w-full bg-white border border-color-border rounded-lg shadow-md overflow-hidden">
             {results.length === 0 ? (
@@ -87,9 +99,7 @@ export function AdminEmployeeSelector() {
                     className="w-full text-left px-4 py-3 text-sm hover:bg-surface transition-colors"
                   >
                     <span className="font-medium text-secondary">
-                      {emp.nombre && emp.apellido
-                        ? `${emp.nombre} ${emp.apellido}`
-                        : emp.email}
+                      {emp.full_name || emp.email}
                     </span>
                     <span className="text-neutral ml-2">{emp.email}</span>
                   </button>

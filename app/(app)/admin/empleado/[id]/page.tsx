@@ -20,21 +20,29 @@ export default async function AdminEmpleadoPage({
 
   const admin = createAdminClient();
 
-  const { data: rawProfile } = await admin
+  const { data: rawProfile, error: profileError } = await admin
     .from('profiles')
     .select('*')
     .eq('id', id)
     .single();
 
+  if (profileError) {
+    console.error('[AdminEmpleadoPage] error al cargar perfil:', profileError.message);
+    notFound();
+  }
   if (!rawProfile) notFound();
 
   const employeeProfile = rawProfile as Profile;
 
-  const { data: docsRaw } = await admin
+  const { data: docsRaw, error: docsError } = await admin
     .from('documents')
     .select('*')
     .eq('user_id', id)
     .order('created_at', { ascending: false });
+
+  if (docsError) {
+    console.error('[AdminEmpleadoPage] error al cargar documentos:', docsError.message);
+  }
 
   const docs = (docsRaw ?? []) as Document[];
 
@@ -49,10 +57,7 @@ export default async function AdminEmpleadoPage({
     signedUrl: d.file_purged_at ? '' : (signedUrls[d.storage_path] ?? ''),
   }));
 
-  const displayName =
-    employeeProfile.nombre && employeeProfile.apellido
-      ? `${employeeProfile.nombre} ${employeeProfile.apellido}`
-      : employeeProfile.email;
+  const displayName = employeeProfile.full_name || employeeProfile.email;
 
   return (
     <div className="space-y-6">

@@ -13,8 +13,7 @@ import { copy } from '@/lib/copy';
 
 export type UpdateProfileInput = {
   id: string;
-  nombre?: string;
-  apellido?: string;
+  full_name?: string;
   phone?: string;
   cuit?: string;
   winda_id?: string;
@@ -30,8 +29,7 @@ export async function updateProfile(input: UpdateProfileInput) {
   const admin = createAdminClient();
 
   const update: ProfileUpdate = {
-    nombre:       input.nombre       || null,
-    apellido:     input.apellido     || null,
+    full_name:    input.full_name    || null,
     phone:        input.phone        || null,
     cuit:         input.cuit         || null,
     winda_id:     input.winda_id     || null,
@@ -126,10 +124,16 @@ export async function getSignedUrls(
   const supabase = await createServerClient();
   // La cadena .in() con el generics de postgrest-js puede inferir `never` en TS;
   // el cast es seguro: estamos seleccionando exactamente storage_path (string NOT NULL).
-  const { data: rawVisibles } = await supabase
+  const { data: rawVisibles, error: visiblesError } = await supabase
     .from('documents')
     .select('storage_path')
     .in('storage_path', paths as readonly string[]);
+
+  if (visiblesError) {
+    console.error('[getSignedUrls] error al consultar documentos visibles:', visiblesError.message);
+    throw new Error(copy.errors.generic);
+  }
+
   const visibles = rawVisibles as Array<{ storage_path: string }> | null;
 
   const authorized = new Set((visibles ?? []).map((d) => d.storage_path));
@@ -150,23 +154,35 @@ export async function getSignedUrls(
 
 export type EmployeeSearchResult = {
   id: string;
-  nombre: string | null;
-  apellido: string | null;
+  full_name: string | null;
   email: string;
   role: string;
 };
+
+// Escapa caracteres especiales de PostgREST en el valor del filtro .or()
+function escapePostgrestFilter(s: string): string {
+  return s.replace(/[(),."*\\]/g, '');
+}
 
 export async function searchEmployees(q: string): Promise<EmployeeSearchResult[]> {
   await requireAdmin();
   if (q.trim().length < 2) return [];
 
+  const safe = escapePostgrestFilter(q.trim());
+  if (safe.length === 0) return [];
+
   const admin = createAdminClient();
-  const { data } = await admin
+  const { data, error } = await admin
     .from('profiles')
-    .select('id, nombre, apellido, email, role')
+    .select('id, full_name, email, role')
     .neq('role', 'admin')
-    .or(`nombre.ilike.%${q}%,apellido.ilike.%${q}%,email.ilike.%${q}%`)
+    .or(`full_name.ilike.%${safe}%,email.ilike.%${safe}%`)
     .limit(10);
+
+  if (error) {
+    console.error('[searchEmployees] error en query:', error.message);
+    throw new Error(copy.errors.generic);
+  }
 
   return (data ?? []) as EmployeeSearchResult[];
 }

@@ -31,8 +31,7 @@ export function ProfileEditForm({ profile }: ProfileEditFormProps) {
 
   const entrevistaInit = (profile.entrevista_tecnica ?? {}) as EntrevistaTecnica;
 
-  const [nombre,       setNombre]       = useState(profile.nombre ?? '');
-  const [apellido,     setApellido]     = useState(profile.apellido ?? '');
+  const [fullName,     setFullName]     = useState(profile.full_name ?? '');
   const [phone,        setPhone]        = useState(profile.phone ?? '');
   const [cuit,         setCuit]         = useState(profile.cuit ?? '');
   const [windaId,      setWindaId]      = useState(profile.winda_id ?? '');
@@ -52,7 +51,7 @@ export function ProfileEditForm({ profile }: ProfileEditFormProps) {
       try {
         await updateProfile({
           id: profile.id,
-          nombre, apellido, phone, cuit, winda_id: windaId,
+          full_name: fullName, phone, cuit, winda_id: windaId,
           dni, fecha_ingreso: fechaIngreso || undefined,
           status, entrevista_tecnica: entrevista,
         });
@@ -86,20 +85,12 @@ export function ProfileEditForm({ profile }: ProfileEditFormProps) {
         }
       >
         <form id="profile-edit-form" onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label={copy.miPerfil.fields.nombre}
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              placeholder={copy.miPerfil.placeholders.nombre}
-            />
-            <Input
-              label={copy.miPerfil.fields.apellido}
-              value={apellido}
-              onChange={(e) => setApellido(e.target.value)}
-              placeholder={copy.miPerfil.placeholders.apellido}
-            />
-          </div>
+          <Input
+            label={copy.miPerfil.fields.nombreCompleto}
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder={copy.miPerfil.placeholders.nombreCompleto}
+          />
 
           <Input
             label={copy.miPerfil.fields.email}

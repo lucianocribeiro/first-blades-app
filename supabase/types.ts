@@ -326,7 +326,6 @@ export type Database = {
       }
       profiles: {
         Row: {
-          apellido: string | null
           created_at: string
           cuit: string | null
           dni: string | null
@@ -335,7 +334,6 @@ export type Database = {
           fecha_ingreso: string | null
           full_name: string | null
           id: string
-          nombre: string | null
           phone: string | null
           role: Database["public"]["Enums"]["user_role"]
           status: Database["public"]["Enums"]["employee_status"]
@@ -344,7 +342,6 @@ export type Database = {
           winda_id: string | null
         }
         Insert: {
-          apellido?: string | null
           created_at?: string
           cuit?: string | null
           dni?: string | null
@@ -353,7 +350,6 @@ export type Database = {
           fecha_ingreso?: string | null
           full_name?: string | null
           id: string
-          nombre?: string | null
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           status?: Database["public"]["Enums"]["employee_status"]
@@ -362,7 +358,6 @@ export type Database = {
           winda_id?: string | null
         }
         Update: {
-          apellido?: string | null
           created_at?: string
           cuit?: string | null
           dni?: string | null
@@ -371,7 +366,6 @@ export type Database = {
           fecha_ingreso?: string | null
           full_name?: string | null
           id?: string
-          nombre?: string | null
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           status?: Database["public"]["Enums"]["employee_status"]

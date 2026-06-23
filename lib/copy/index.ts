@@ -137,8 +137,7 @@ export const copy = {
     sectionDatos: 'Datos personales',
     sectionDocumentos: 'Documentos',
     fields: {
-      nombre:        'Nombre',
-      apellido:      'Apellido',
+      nombreCompleto: 'Nombre completo',
       email:         'Correo electrónico',
       telefono:      'Teléfono',
       cuit:          'CUIT',
@@ -161,8 +160,7 @@ export const copy = {
       },
     },
     placeholders: {
-      nombre:    'Nombre',
-      apellido:  'Apellido',
+      nombreCompleto: 'Nombre y apellido',
       telefono:  'Ej: +54 9 261 000-0000',
       cuit:      'Ej: 20-12345678-9',
       windaId:   'ID Winda',
@@ -252,7 +250,7 @@ export const copy = {
 
   adminEmpleado: {
     selectorTitle:       'Administrar perfil de empleado',
-    selectorPlaceholder: 'Buscar por nombre, apellido o correo…',
+    selectorPlaceholder: 'Buscar por nombre o correo…',
     selectorHint:        'Ingresá al menos 2 caracteres.',
     noResults:           'Sin resultados.',
     pageTitle:           'Perfil de empleado',

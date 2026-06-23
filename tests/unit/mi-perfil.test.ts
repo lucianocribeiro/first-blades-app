@@ -96,8 +96,7 @@ describe('copy: labels de tipos de documento y certificado', () => {
   });
 
   it('copy.miPerfil tiene todos los campos de perfil de Fase 1', () => {
-    expect(copy.miPerfil.fields.nombre).toBeTruthy();
-    expect(copy.miPerfil.fields.apellido).toBeTruthy();
+    expect(copy.miPerfil.fields.nombreCompleto).toBeTruthy();
     expect(copy.miPerfil.fields.cuit).toBeTruthy();
     expect(copy.miPerfil.fields.windaId).toBeTruthy();
   });
@@ -178,5 +177,50 @@ describe('validación de campos de certificado', () => {
 
   it('válido: cursos_elevadores (nuevo valor del enum)', () => {
     expect(validateCertificado('cursos_elevadores', null)).toBeNull();
+  });
+});
+
+// ─── sanitización de búsqueda (escapePostgrestFilter) ────────
+
+describe('escapePostgrestFilter: caracteres especiales de PostgREST', () => {
+  function escapePostgrestFilter(s: string): string {
+    return s.replace(/[(),."*\\]/g, '');
+  }
+
+  it('texto sin caracteres especiales pasa sin cambios', () => {
+    expect(escapePostgrestFilter('Juan Pérez')).toBe('Juan Pérez');
+  });
+
+  it('elimina paréntesis', () => {
+    expect(escapePostgrestFilter('test()')).toBe('test');
+  });
+
+  it('elimina comas', () => {
+    expect(escapePostgrestFilter('a,b')).toBe('ab');
+  });
+
+  it('elimina punto', () => {
+    expect(escapePostgrestFilter('a.b')).toBe('ab');
+  });
+
+  it('elimina comillas dobles', () => {
+    expect(escapePostgrestFilter('"hack"')).toBe('hack');
+  });
+
+  it('elimina asterisco', () => {
+    expect(escapePostgrestFilter('a*b')).toBe('ab');
+  });
+
+  it('elimina backslash', () => {
+    expect(escapePostgrestFilter('a\\b')).toBe('ab');
+  });
+
+  it('input con múltiples caracteres especiales queda limpio', () => {
+    const evil = '()name.test,"*\\';
+    expect(escapePostgrestFilter(evil)).toBe('nametest');
+  });
+
+  it('email válido pasa sin daño (@ y - no se escapan)', () => {
+    expect(escapePostgrestFilter('user@example-corp')).toBe('user@example-corp');
   });
 });

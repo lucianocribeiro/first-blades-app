@@ -118,15 +118,19 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     ]);
   });
 
-  it('profiles tiene columnas nuevas (nombre, apellido, cuit, winda_id)', async () => {
+  it('profiles tiene full_name, cuit y winda_id; nombre/apellido fueron retirados (0007)', async () => {
     const { rows } = await client.query(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'profiles'
-        AND column_name IN ('nombre', 'apellido', 'cuit', 'winda_id')
+        AND column_name IN ('full_name', 'cuit', 'winda_id', 'nombre', 'apellido')
       ORDER BY column_name
     `);
     const cols = rows.map((r: { column_name: string }) => r.column_name);
-    expect(cols).toEqual(['apellido', 'cuit', 'nombre', 'winda_id']);
+    expect(cols).toContain('full_name');
+    expect(cols).toContain('cuit');
+    expect(cols).toContain('winda_id');
+    expect(cols).not.toContain('nombre');
+    expect(cols).not.toContain('apellido');
   });
 
   it('documents tiene columnas nuevas (certificado_tipo, certificado_otros_texto, fecha_vencimiento)', async () => {

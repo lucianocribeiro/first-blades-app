@@ -10,7 +10,7 @@ import { approveDocument, rejectDocument } from './actions';
 import type { Document, Profile } from '@/lib/db-types';
 
 type DocumentWithUser = Document & {
-  user_profile?: Pick<Profile, 'nombre' | 'apellido' | 'email'> | null;
+  user_profile?: Pick<Profile, 'full_name' | 'email'> | null;
 };
 
 type AprobacionesTableProps = {
@@ -31,8 +31,7 @@ function certTipoLabel(tipo: string | null | undefined): string {
 function userName(doc: DocumentWithUser): string {
   const p = doc.user_profile;
   if (!p) return '—';
-  if (p.nombre && p.apellido) return `${p.nombre} ${p.apellido}`;
-  return p.email ?? '—';
+  return p.full_name || p.email || '—';
 }
 
 function RejectModal({
