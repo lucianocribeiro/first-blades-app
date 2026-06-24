@@ -309,6 +309,39 @@ export const copy = {
     menuButton:    'Menú',
   },
 
+  equipo: {
+    title:   'Equipo',
+    subtitle: 'Estado documental de todos los perfiles',
+    search:   'Buscar por nombre o correo…',
+    filtroEstado: 'Estado',
+    todoEstado:   'Todos los estados',
+    noPerfiles:   'No hay perfiles registrados.',
+    table: {
+      nombre:       'Nombre',
+      email:        'Correo electrónico',
+      rol:          'Rol',
+      supervisor:   'Supervisor',
+      estado:       'Estado',
+      docVencidos:  'Vencidos',
+      docPorVencer: 'Por vencer',
+    },
+    proximosAVencer: {
+      title:    'Próximos a vencer',
+      subtitle: 'Documentos vencidos o que vencen en los próximos 30 días',
+      noItems:  'No hay documentos próximos a vencer.',
+      table: {
+        empleado:      'Empleado',
+        documento:     'Documento',
+        vencimiento:   'Vencimiento',
+        diasRestantes: 'Días restantes',
+      },
+    },
+    diasHoy:   'Hoy',
+    diasHace:  'Hace',
+    diasLabel: 'días',
+    diaLabel:  'día',
+  },
+
   pages: {
     dashboard: {
       title:       'Inicio',
@@ -323,7 +356,7 @@ export const copy = {
     },
     equipo: {
       title:    'Equipo',
-      subtitle: 'Integrantes de tu equipo',
+      subtitle: 'Estado documental de todos los perfiles',
     },
     calendario: {
       title:    'Calendario',
