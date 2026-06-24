@@ -801,18 +801,19 @@ describe.skipIf(!dbAvailable)('storage.objects: control de acceso vía Storage A
 // ============================================================
 
 describe.skipIf(!dbAvailable)('Mi Equipo: RLS de perfiles y documentos', () => {
-  it('supervisor ve exactamente los miembros de su equipo (supervisor_id = uid)', async () => {
+  it('supervisor ve exactamente los miembros de su equipo (cardinalidad 2, solo employee1 y employee2)', async () => {
     await asUser(IDS.supervisor, async (c) => {
-      // Con la sesión del supervisor, la RLS limita profiles a: propio + equipo.
-      // El módulo aplica además .eq('supervisor_id', profile.id), pero aquí
-      // verificamos que la base ya devuelve solo el subconjunto correcto.
+      // Simula la query del módulo Mi Equipo: .eq('supervisor_id', profile.id).
+      // La RLS es el backstop, pero el scope de app impone supervisor_id explícito.
       const { rows } = await c.query(
         'SELECT id FROM profiles WHERE supervisor_id = $1',
         [IDS.supervisor]
       );
-      const ids = rows.map((r: { id: string }) => r.id);
+      const ids = rows.map((r: { id: string }) => r.id).sort();
+      expect(ids).toHaveLength(2);
       expect(ids).toContain(IDS.employee1);
       expect(ids).toContain(IDS.employee2);
+      expect(ids).not.toContain(IDS.supervisor);  // propio del supervisor no aparece
       expect(ids).not.toContain(IDS.employee3);   // equipo de supervisor2
       expect(ids).not.toContain(IDS.supervisor2);
     });
@@ -836,6 +837,42 @@ describe.skipIf(!dbAvailable)('Mi Equipo: RLS de perfiles y documentos', () => {
       const { rows } = await c.query(
         'SELECT id FROM documents WHERE user_id = $1',
         [IDS.employee1]
+      );
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  // ── Scope de app en el detalle (hallazgo FB-F2-AUD-03 #1) ──────────────
+  // La query del detalle usa .eq('id', id).eq('supervisor_id', supervisor.id).
+  // Estos tests verifican los 3 casos semánticos del fix:
+
+  it('detalle: miembro real del equipo → encontrado', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      const { rows } = await c.query(
+        'SELECT id FROM profiles WHERE id = $1 AND supervisor_id = $2',
+        [IDS.employee1, IDS.supervisor]
+      );
+      expect(rows).toHaveLength(1);
+    });
+  });
+
+  it('detalle: id propio del supervisor → rechazado (scope de app, no RLS)', async () => {
+    // La RLS permite que el supervisor vea su propia fila (id = auth.uid()).
+    // El scope de app (.eq supervisor_id) es lo que impide que aparezca en Mi Equipo.
+    await asUser(IDS.supervisor, async (c) => {
+      const { rows } = await c.query(
+        'SELECT id FROM profiles WHERE id = $1 AND supervisor_id = $2',
+        [IDS.supervisor, IDS.supervisor]
+      );
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  it('detalle: empleado fuera de cargo (employee3) → rechazado (scope de app + RLS)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      const { rows } = await c.query(
+        'SELECT id FROM profiles WHERE id = $1 AND supervisor_id = $2',
+        [IDS.employee3, IDS.supervisor]
       );
       expect(rows).toHaveLength(0);
     });

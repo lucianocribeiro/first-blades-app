@@ -23,17 +23,21 @@ export default async function MiEquipoMiembroPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireSupervisor();
+  const supervisor = await requireSupervisor();
   const { id } = await params;
 
   const supabase = await createServerClient();
 
-  // RLS enforces team scope: if the id is not in the supervisor's team,
-  // the query returns null and we notFound().
+  // App-layer scope: .eq('supervisor_id', supervisor.id) restricts the result
+  // to the supervisor's direct reports only — it excludes the supervisor's own
+  // profile (whose supervisor_id is null or another supervisor) and any employee
+  // outside the team. The RLS policy is the security backstop that blocks
+  // employees from other teams, but it does NOT exclude the supervisor's own row.
   const { data, error } = await supabase
     .from('profiles')
     .select('id, full_name, email, phone, status, role')
     .eq('id', id)
+    .eq('supervisor_id', supervisor.id)
     .single();
 
   if (error || !data) {
