@@ -600,3 +600,71 @@ describe('filterProfiles: búsqueda y filtro combinado', () => {
     expect(result.map((p) => p.id)).not.toContain('u2');
   });
 });
+
+// ─── Exclusión por estado de documento (FB-F2-03) ─────────────
+//
+// El filtro .eq('estado','aprobado') vive en la query de BD (page.tsx:31).
+// Las funciones de utilidad no conocen el campo 'estado'; reciben el resultado
+// ya filtrado por la BD. Estos tests cubren:
+//   (a) por resultado: con input que simula la respuesta de BD, los docs
+//       pendiente/rechazado de u-pen y u-rej no contaminan contadores ni panel.
+//   (b) contraste: si los docs llegaran sin el filtro BD, SÍ contaminarían,
+//       lo que prueba que el filtro de estado es indispensable en la query.
+//
+// El filtro de fecha_vencimiento null es responsabilidad de filterValidDocs
+// (cubierto en el describe anterior); aquí asumimos input ya depurado.
+
+describe('exclusión por estado de documento: contadores y panel no incluyen pendiente/rechazado', () => {
+  const today = '2026-07-01';
+
+  const profiles: ProfileRow[] = [
+    { id: 'u-apr', full_name: 'Empleado Aprobado', email: 'apr@test.com', role: 'empleado', status: 'activo', supervisor_id: null },
+    { id: 'u-pen', full_name: 'Empleado Pendiente', email: 'pen@test.com', role: 'empleado', status: 'activo', supervisor_id: null },
+    { id: 'u-rej', full_name: 'Empleado Rechazado', email: 'rej@test.com', role: 'empleado', status: 'activo', supervisor_id: null },
+  ];
+
+  // Lo que la BD devuelve con .eq('estado','aprobado').not('fecha_vencimiento','is',null):
+  // solo los docs de u-apr pasan; los de u-pen (pendiente) y u-rej (rechazado) quedan fuera.
+  const docsFromDB: DocRow[] = [
+    { id: 'd-apr-1', user_id: 'u-apr', document_type: 'dni', certificado_tipo: null, certificado_otros_texto: null, fecha_vencimiento: '2026-06-15' }, // vencido
+    { id: 'd-apr-2', user_id: 'u-apr', document_type: 'licencia', certificado_tipo: null, certificado_otros_texto: null, fecha_vencimiento: '2026-07-20' }, // por vencer
+  ];
+
+  it('(resultado) empleados con docs pendiente/rechazado tienen 0 vencidos y 0 por_vencer', () => {
+    const counts = computeDocCounts(docsFromDB, today);
+    const profilesWithCounts = buildProfilesWithCounts(profiles, counts, buildSupervisorMap(profiles));
+
+    const pen = profilesWithCounts.find((p) => p.id === 'u-pen')!;
+    const rej = profilesWithCounts.find((p) => p.id === 'u-rej')!;
+
+    expect(pen.doc_vencidos).toBe(0);
+    expect(pen.doc_por_vencer).toBe(0);
+    expect(rej.doc_vencidos).toBe(0);
+    expect(rej.doc_por_vencer).toBe(0);
+  });
+
+  it('(resultado) panel Próximos a vencer no muestra usuarios sin docs aprobados', () => {
+    const proximos = buildProximosAVencer(docsFromDB, profiles, today);
+    const userIds = proximos.map((r) => r.user_id);
+
+    expect(userIds).not.toContain('u-pen');
+    expect(userIds).not.toContain('u-rej');
+    expect(userIds).toContain('u-apr'); // el aprobado sí aparece
+  });
+
+  it('(contraste) sin el filtro BD, docs pendiente/rechazado contaminarían los contadores', () => {
+    // Simula qué pasaría si la query no tuviera .eq('estado','aprobado')
+    // y los docs de u-pen y u-rej llegaran igualmente al pipeline.
+    const docsWithoutFilter: DocRow[] = [
+      ...docsFromDB,
+      { id: 'd-pen', user_id: 'u-pen', document_type: 'dni', certificado_tipo: null, certificado_otros_texto: null, fecha_vencimiento: '2026-06-15' },
+      { id: 'd-rej', user_id: 'u-rej', document_type: 'dni', certificado_tipo: null, certificado_otros_texto: null, fecha_vencimiento: '2026-06-15' },
+    ];
+    const counts = computeDocCounts(docsWithoutFilter, today);
+    const profilesWithCounts = buildProfilesWithCounts(profiles, counts, buildSupervisorMap(profiles));
+
+    // El pipeline no filtra por estado: solo el filtro BD lo hace.
+    expect(profilesWithCounts.find((p) => p.id === 'u-pen')?.doc_vencidos).toBe(1);
+    expect(profilesWithCounts.find((p) => p.id === 'u-rej')?.doc_vencidos).toBe(1);
+  });
+});
