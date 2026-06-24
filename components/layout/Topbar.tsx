@@ -23,6 +23,7 @@ const pageMeta: Record<string, PageMeta> = {
   dashboard:          { title: copy.pages.dashboard.title,          subtitle: copy.pages.dashboard.subtitle,          icon: Home },
   'mi-perfil':        { title: copy.pages.miPerfil.title,           subtitle: copy.pages.miPerfil.subtitle,           icon: User },
   equipo:             { title: copy.pages.equipo.title,             subtitle: copy.pages.equipo.subtitle,             icon: Users },
+  'mi-equipo':        { title: copy.pages.miEquipo.title,           subtitle: copy.pages.miEquipo.subtitle,           icon: Users },
   calendario:         { title: copy.pages.calendario.title,         subtitle: copy.pages.calendario.subtitle,         icon: CalendarDays },
   'solicitud-pasaje': { title: copy.pages.solicitudPasaje.title,    subtitle: copy.pages.solicitudPasaje.subtitle,    icon: Plane },
   'solicitud-ausencia':{ title: copy.pages.solicitudAusencia.title, subtitle: copy.pages.solicitudAusencia.subtitle,  icon: Clock },

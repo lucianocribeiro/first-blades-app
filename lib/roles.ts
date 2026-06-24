@@ -6,6 +6,7 @@ export type UserRole = Enums<'user_role'>;
 export type RouteKey =
   | 'miPerfil'
   | 'equipo'
+  | 'miEquipo'
   | 'calendario'
   | 'solicitudPasaje'
   | 'solicitudAusencia'
@@ -18,6 +19,7 @@ export type RouteKey =
 const roleAccess: Record<RouteKey, UserRole[]> = {
   miPerfil:          ['admin', 'supervisor', 'empleado'],
   equipo:            ['admin'],
+  miEquipo:          ['supervisor'],
   calendario:        ['admin', 'supervisor', 'empleado'],
   solicitudPasaje:   ['admin', 'supervisor', 'empleado'],
   solicitudAusencia: ['admin', 'supervisor', 'empleado'],

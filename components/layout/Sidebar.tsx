@@ -25,6 +25,7 @@ type NavItem = {
 const navItems: NavItem[] = [
   { key: 'miPerfil',          label: copy.nav.miPerfil,          href: '/mi-perfil',          icon: User,          roles: ['admin', 'supervisor', 'empleado'] },
   { key: 'equipo',            label: copy.nav.equipo,            href: '/equipo',              icon: Users,         roles: ['admin'] },
+  { key: 'miEquipo',          label: copy.nav.miEquipo,          href: '/mi-equipo',           icon: Users,         roles: ['supervisor'] },
   { key: 'calendario',        label: copy.nav.calendario,        href: '/calendario',          icon: Calendar,      roles: ['admin', 'supervisor', 'empleado'] },
   { key: 'solicitudPasaje',   label: copy.nav.solicitudPasaje,   href: '/solicitud-pasaje',   icon: Plane,         roles: ['admin', 'supervisor', 'empleado'] },
   { key: 'solicitudAusencia', label: copy.nav.solicitudAusencia, href: '/solicitud-ausencia', icon: Clock,         roles: ['admin', 'supervisor', 'empleado'] },

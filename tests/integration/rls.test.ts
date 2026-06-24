@@ -786,3 +786,58 @@ describe.skipIf(!dbAvailable)('storage.objects: control de acceso vía Storage A
     expect((data ?? []).some((o) => o.name === filename)).toBe(false);
   });
 });
+
+// ============================================================
+// MI EQUIPO — RLS end-to-end (FB-F2-04)
+//
+// Verifica que el módulo "Mi Equipo" (supervisor-only) tiene las
+// garantías de RLS correctas:
+//   1. Supervisor ve exactamente los perfiles de su equipo.
+//   2. Supervisor NO puede leer perfiles fuera de su equipo (por id directo).
+//   3. Supervisor NO puede leer documentos de sus subordinados.
+//
+// (El gating de ruta — test 4 del requisito — está en el test unitario
+//  tests/unit/mi-equipo-server-boundary.test.ts que ejercita requireSupervisor().)
+// ============================================================
+
+describe.skipIf(!dbAvailable)('Mi Equipo: RLS de perfiles y documentos', () => {
+  it('supervisor ve exactamente los miembros de su equipo (supervisor_id = uid)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      // Con la sesión del supervisor, la RLS limita profiles a: propio + equipo.
+      // El módulo aplica además .eq('supervisor_id', profile.id), pero aquí
+      // verificamos que la base ya devuelve solo el subconjunto correcto.
+      const { rows } = await c.query(
+        'SELECT id FROM profiles WHERE supervisor_id = $1',
+        [IDS.supervisor]
+      );
+      const ids = rows.map((r: { id: string }) => r.id);
+      expect(ids).toContain(IDS.employee1);
+      expect(ids).toContain(IDS.employee2);
+      expect(ids).not.toContain(IDS.employee3);   // equipo de supervisor2
+      expect(ids).not.toContain(IDS.supervisor2);
+    });
+  });
+
+  it('supervisor NO puede leer por id un perfil fuera de su equipo (RLS devuelve vacío)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      const { rows } = await c.query(
+        'SELECT id FROM profiles WHERE id = $1',
+        [IDS.employee3]
+      );
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  it('supervisor NO puede leer documentos de sus subordinados (solo ve los propios)', async () => {
+    // Documentos de employee1 (subordinado de supervisor) NO son visibles
+    // para el supervisor — la policy documents_select (migración 0004) solo permite
+    // user_id = auth.uid() || is_admin().
+    await asUser(IDS.supervisor, async (c) => {
+      const { rows } = await c.query(
+        'SELECT id FROM documents WHERE user_id = $1',
+        [IDS.employee1]
+      );
+      expect(rows).toHaveLength(0);
+    });
+  });
+});

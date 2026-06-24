@@ -47,6 +47,7 @@ export const copy = {
   nav: {
     miPerfil:         'Mi Perfil',
     equipo:           'Equipo',
+    miEquipo:         'Mi Equipo',
     calendario:       'Calendario',
     solicitudPasaje:  'Solicitud de Pasaje',
     solicitudAusencia:'Solicitud de Ausencia',
@@ -309,6 +310,31 @@ export const copy = {
     menuButton:    'Menú',
   },
 
+  miEquipo: {
+    title:      'Mi Equipo',
+    subtitle:   'Perfiles de los técnicos de tu equipo',
+    noMiembros: 'No hay miembros en tu equipo.',
+    table: {
+      nombre:   'Nombre',
+      email:    'Correo electrónico',
+      telefono: 'Teléfono',
+      estado:   'Estado',
+      rol:      'Rol',
+    },
+    detalle: {
+      backToList:   'Volver a Mi Equipo',
+      noEncontrado: 'Miembro no encontrado.',
+      sinDatos:     '—',
+    },
+    campos: {
+      nombre:   'Nombre',
+      email:    'Correo electrónico',
+      telefono: 'Teléfono',
+      estado:   'Estado',
+      rol:      'Rol',
+    },
+  },
+
   equipo: {
     title:   'Equipo',
     subtitle: 'Estado documental de todos los perfiles',
@@ -357,6 +383,10 @@ export const copy = {
     equipo: {
       title:    'Equipo',
       subtitle: 'Estado documental de todos los perfiles',
+    },
+    miEquipo: {
+      title:    'Mi Equipo',
+      subtitle: 'Perfiles de los técnicos de tu equipo',
     },
     calendario: {
       title:    'Calendario',

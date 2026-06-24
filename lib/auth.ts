@@ -35,3 +35,7 @@ export async function requireRole(role: UserRole): Promise<SessionProfile> {
 export async function requireAdmin(): Promise<SessionProfile> {
   return requireRole('admin');
 }
+
+export async function requireSupervisor(): Promise<SessionProfile> {
+  return requireRole('supervisor');
+}

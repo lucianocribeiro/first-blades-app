@@ -85,9 +85,11 @@ describe('comparación de roles', () => {
     );
   });
 
-  it('supervisor tiene las mismas rutas accesibles que empleado', () => {
-    expect(getAccessibleRoutes('supervisor').sort()).toEqual(
-      getAccessibleRoutes('empleado').sort()
-    );
+  it('supervisor tiene más rutas que empleado (miEquipo es supervisor-only)', () => {
+    const supRoutes = getAccessibleRoutes('supervisor');
+    const empRoutes = getAccessibleRoutes('empleado');
+    expect(supRoutes.length).toBeGreaterThan(empRoutes.length);
+    expect(supRoutes).toContain('miEquipo');
+    expect(empRoutes).not.toContain('miEquipo');
   });
 });
