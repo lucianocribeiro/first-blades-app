@@ -42,9 +42,9 @@ export function getDiasRestantes(fechaVenc: string, today: string): number {
 }
 
 export function getUrgencyBgClass(dias: number): string {
-  if (dias <= 5) return 'bg-red-50 text-error border border-red-200';
-  if (dias <= 15) return 'bg-amber-50 text-warning border border-amber-200';
-  return 'bg-blue-50 text-primary border border-blue-200';
+  if (dias <= 5) return 'bg-error/10 text-error border border-error/30';
+  if (dias <= 15) return 'bg-warning/10 text-warning border border-warning/30';
+  return 'bg-primary/10 text-primary border border-primary/30';
 }
 
 export function formatDocTypeLabel(
@@ -146,6 +146,32 @@ export function buildProfilesWithCounts(
         ? (supervisorMap.get(p.supervisor_id) ?? null)
         : null,
     };
+  });
+}
+
+export type DocRowNullableDate = Omit<DocRow, 'fecha_vencimiento'> & {
+  fecha_vencimiento: string | null;
+};
+
+export function filterValidDocs(docs: DocRowNullableDate[]): DocRow[] {
+  return docs.filter((d): d is DocRowNullableDate & { fecha_vencimiento: string } =>
+    d.fecha_vencimiento !== null
+  ) as DocRow[];
+}
+
+export function filterProfiles(
+  profiles: ProfileWithDocCounts[],
+  search: string,
+  filterStatus: string
+): ProfileWithDocCounts[] {
+  const q = search.trim().toLowerCase();
+  return profiles.filter((p) => {
+    const matchesSearch =
+      q.length === 0 ||
+      (p.full_name ?? '').toLowerCase().includes(q) ||
+      p.email.toLowerCase().includes(q);
+    const matchesStatus = filterStatus === '' || p.status === filterStatus;
+    return matchesSearch && matchesStatus;
   });
 }
 

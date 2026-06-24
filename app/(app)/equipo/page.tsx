@@ -9,8 +9,9 @@ import {
   computeDocCounts,
   buildProfilesWithCounts,
   buildProximosAVencer,
+  filterValidDocs,
 } from './utils';
-import type { ProfileRow, DocRow } from './utils';
+import type { ProfileRow, DocRowNullableDate } from './utils';
 
 function getToday(): string {
   return new Date().toISOString().split('T')[0];
@@ -42,11 +43,17 @@ export default async function EquipoPage() {
 
   if (docsResult.error) {
     console.error('[EquipoPage] error al cargar documentos:', docsResult.error.message);
+    return (
+      <Card>
+        <p className="text-error">{copy.errors.generic}</p>
+      </Card>
+    );
   }
 
   const profiles = (profilesResult.data ?? []) as ProfileRow[];
-  const docs = ((docsResult.data ?? []) as (DocRow & { fecha_vencimiento: string | null })[])
-    .filter((d): d is DocRow => d.fecha_vencimiento !== null);
+  const docs = filterValidDocs(
+    (docsResult.data ?? []) as DocRowNullableDate[]
+  );
 
   const supervisorMap = buildSupervisorMap(profiles);
   const docCounts = computeDocCounts(docs, today);

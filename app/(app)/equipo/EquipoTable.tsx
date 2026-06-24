@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Table } from '@/components/ui/Table';
 import { copy } from '@/lib/copy';
 import { ROLE_LABELS } from '@/lib/roles';
+import { filterProfiles } from './utils';
 import type { ProfileWithDocCounts } from './utils';
 import type { Enums } from '@/supabase/types';
 
@@ -27,17 +28,7 @@ export function EquipoTable({ profiles }: Props) {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
-  const q = search.trim().toLowerCase();
-
-  const filtered = profiles.filter((p) => {
-    const matchesSearch =
-      q.length === 0 ||
-      (p.full_name ?? '').toLowerCase().includes(q) ||
-      p.email.toLowerCase().includes(q);
-    const matchesStatus =
-      filterStatus === '' || p.status === filterStatus;
-    return matchesSearch && matchesStatus;
-  });
+  const filtered = filterProfiles(profiles, search, filterStatus);
 
   const t = copy.equipo;
 
