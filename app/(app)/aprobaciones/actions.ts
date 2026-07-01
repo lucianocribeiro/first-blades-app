@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { copy } from '@/lib/copy';
+import { sendDocumentRejectionEmail } from '@/lib/email/rejection-email';
 
 // ─── Aprobar documento ────────────────────────────────────────
 
@@ -74,6 +75,45 @@ export async function rejectDocument(documentId: string, motivo: string): Promis
     });
   } catch (auditErr) {
     console.error('[audit] fallo al registrar rechazo de documento:', auditErr);
+  }
+
+  // Notificar por email al empleado dueño (no bloqueante, no silencioso).
+  // El rechazo es la fuente de verdad: un fallo de email no lo revierte, pero
+  // se loguea de forma visible en vez de tragarse el error.
+  try {
+    const { data: doc, error: docErr } = await admin
+      .from('documents')
+      .select('user_id, document_type')
+      .eq('id', documentId)
+      .single();
+    if (docErr || !doc) {
+      throw docErr ?? new Error('No se encontró el documento para notificar.');
+    }
+
+    const { data: owner, error: ownerErr } = await admin
+      .from('profiles')
+      .select('email, full_name')
+      .eq('id', doc.user_id)
+      .single();
+    if (ownerErr || !owner) {
+      throw ownerErr ?? new Error('No se encontró el perfil del dueño del documento.');
+    }
+
+    if (!owner.email) {
+      // Caso borde: perfil sin email. No crashea el rechazo; se loguea el skip.
+      console.warn(
+        `[email] rechazo de documento ${documentId}: el empleado no tiene email en el perfil, se omite el envío.`
+      );
+    } else {
+      await sendDocumentRejectionEmail({
+        to:           owner.email,
+        fullName:     owner.full_name,
+        documentType: doc.document_type,
+        motivo:       motivo.trim(),
+      });
+    }
+  } catch (emailErr) {
+    console.error('[email] fallo al notificar rechazo de documento:', emailErr);
   }
 
   revalidatePath('/aprobaciones');
