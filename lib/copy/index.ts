@@ -307,6 +307,25 @@ export const copy = {
       accion:      'Podés corregirlo y volver a enviarlo desde el portal, en la sección Mi Perfil.',
       firma:       'Equipo First Blades',
     },
+    vencimientoEmpleado: {
+      subject:          'Tu documento está por vencer — First Blades',
+      saludo:           'Hola',
+      intro:            'Uno de tus documentos está por vencer.',
+      tipoLabel:        'Documento',
+      vencimientoLabel: 'Fecha de vencimiento',
+      diasLabel:        'Días restantes',
+      accion:           'Actualizalo desde el portal, en la sección Mi Perfil, antes de que venza.',
+      firma:            'Equipo First Blades',
+    },
+    vencimientoAdmin: {
+      subject:          'Documento de un empleado por vencer — First Blades',
+      intro:            'El documento de un integrante del equipo está por vencer.',
+      empleadoLabel:    'Empleado',
+      tipoLabel:        'Documento',
+      vencimientoLabel: 'Fecha de vencimiento',
+      diasLabel:        'Días restantes',
+      firma:            'Equipo First Blades',
+    },
   },
 
   errors: {

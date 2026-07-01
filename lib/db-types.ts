@@ -11,6 +11,7 @@ export type EstadoDia      = Enums<'estado_dia'>;
 export type MotivoAusencia = Enums<'motivo_ausencia'>;
 export type MotivoViaje    = Enums<'motivo_viaje'>;
 export type CertificadoTipo = Enums<'certificado_tipo'>;
+export type NotificationType = Enums<'notification_type'>;
 
 // Row aliases para las tablas principales
 export type Profile              = Tables<'profiles'>;
@@ -21,12 +22,14 @@ export type Procedure            = Tables<'procedures'>;
 export type RotationAssignment   = Tables<'rotation_assignments'>;
 export type RotationGroup        = Tables<'rotation_groups'>;
 export type AuditLog             = Tables<'audit_log'>;
+export type NotificationLog      = Tables<'notification_log'>;
 
 // Insert / Update aliases para las tablas con escritura frecuente
 export type ProfileInsert          = TablesInsert<'profiles'>;
 export type ProfileUpdate          = TablesUpdate<'profiles'>;
 export type DocumentInsert         = TablesInsert<'documents'>;
 export type DocumentUpdate         = TablesUpdate<'documents'>;
+export type NotificationLogInsert  = TablesInsert<'notification_log'>;
 export type AusenciaRequestInsert  = TablesInsert<'ausencia_requests'>;
 export type PasajeRequestInsert    = TablesInsert<'pasaje_requests'>;
 

@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       audit_log: {
@@ -118,7 +143,9 @@ export type Database = {
       documents: {
         Row: {
           certificado_otros_texto: string | null
-          certificado_tipo: Database["public"]["Enums"]["certificado_tipo"] | null
+          certificado_tipo:
+            | Database["public"]["Enums"]["certificado_tipo"]
+            | null
           created_at: string
           document_type: string
           estado: Database["public"]["Enums"]["approval_status"]
@@ -138,7 +165,9 @@ export type Database = {
         }
         Insert: {
           certificado_otros_texto?: string | null
-          certificado_tipo?: Database["public"]["Enums"]["certificado_tipo"] | null
+          certificado_tipo?:
+            | Database["public"]["Enums"]["certificado_tipo"]
+            | null
           created_at?: string
           document_type: string
           estado?: Database["public"]["Enums"]["approval_status"]
@@ -158,7 +187,9 @@ export type Database = {
         }
         Update: {
           certificado_otros_texto?: string | null
-          certificado_tipo?: Database["public"]["Enums"]["certificado_tipo"] | null
+          certificado_tipo?:
+            | Database["public"]["Enums"]["certificado_tipo"]
+            | null
           created_at?: string
           document_type?: string
           estado?: Database["public"]["Enums"]["approval_status"]
@@ -194,6 +225,48 @@ export type Database = {
           {
             foreignKeyName: "documents_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_log: {
+        Row: {
+          document_id: string
+          id: string
+          recipient_profile_id: string
+          sent_at: string
+          tipo: Database["public"]["Enums"]["notification_type"]
+          umbral: number
+        }
+        Insert: {
+          document_id: string
+          id?: string
+          recipient_profile_id: string
+          sent_at?: string
+          tipo: Database["public"]["Enums"]["notification_type"]
+          umbral: number
+        }
+        Update: {
+          document_id?: string
+          id?: string
+          recipient_profile_id?: string
+          sent_at?: string
+          tipo?: Database["public"]["Enums"]["notification_type"]
+          umbral?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_log_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_log_recipient_profile_id_fkey"
+            columns: ["recipient_profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -503,6 +576,7 @@ export type Database = {
         | "fallecimiento"
         | "otros"
       motivo_viaje: "inicio_franco" | "fin_franco" | "traslado_proyectos"
+      notification_type: "vencimiento_documento"
       user_role: "admin" | "supervisor" | "empleado"
     }
     CompositeTypes: {
@@ -629,9 +703,20 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       approval_status: ["pendiente", "aprobado", "rechazado"],
+      certificado_tipo: [
+        "gwo",
+        "cursos_elevadores",
+        "espacio_confinado",
+        "manejo_defensivo",
+        "cursos_vestas",
+        "otros",
+      ],
       employee_status: ["activo", "inactivo", "pendiente"],
       estado_dia: [
         "trabajando",
@@ -648,6 +733,7 @@ export const Constants = {
         "otros",
       ],
       motivo_viaje: ["inicio_franco", "fin_franco", "traslado_proyectos"],
+      notification_type: ["vencimiento_documento"],
       user_role: ["admin", "supervisor", "empleado"],
     },
   },
