@@ -459,10 +459,12 @@ export type Database = {
       rotation_assignments: {
         Row: {
           created_at: string
+          es_estimado: boolean
           estado_dia: Database["public"]["Enums"]["estado_dia"]
           fecha: string
           id: string
           motivo_ausencia: Database["public"]["Enums"]["motivo_ausencia"] | null
+          motivo_otros_texto: string | null
           notas: string | null
           rotation_group_id: string | null
           updated_at: string
@@ -470,12 +472,14 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          es_estimado?: boolean
           estado_dia?: Database["public"]["Enums"]["estado_dia"]
           fecha: string
           id?: string
           motivo_ausencia?:
             | Database["public"]["Enums"]["motivo_ausencia"]
             | null
+          motivo_otros_texto?: string | null
           notas?: string | null
           rotation_group_id?: string | null
           updated_at?: string
@@ -483,12 +487,14 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          es_estimado?: boolean
           estado_dia?: Database["public"]["Enums"]["estado_dia"]
           fecha?: string
           id?: string
           motivo_ausencia?:
             | Database["public"]["Enums"]["motivo_ausencia"]
             | null
+          motivo_otros_texto?: string | null
           notas?: string | null
           rotation_group_id?: string | null
           updated_at?: string

@@ -34,6 +34,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     'rotation_assignments',
     'procedures',
     'audit_log',
+    'notification_log',
   ];
 
   for (const table of expectedTables) {
@@ -171,5 +172,82 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'storage_documents_insert'
     `);
     expect(rows).toHaveLength(1);
+  });
+
+  it('rotation_assignments tiene columnas nuevas es_estimado y motivo_otros_texto (migración 0009)', async () => {
+    const { rows } = await client.query(`
+      SELECT column_name, is_nullable, data_type, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'rotation_assignments'
+        AND column_name IN ('es_estimado', 'motivo_otros_texto')
+      ORDER BY column_name
+    `);
+    const byName = Object.fromEntries(rows.map((r) => [r.column_name, r]));
+    expect(byName.es_estimado.is_nullable).toBe('NO');
+    expect(byName.es_estimado.data_type).toBe('boolean');
+    expect(byName.es_estimado.column_default).toBe('false');
+    expect(byName.motivo_otros_texto.is_nullable).toBe('YES');
+    expect(byName.motivo_otros_texto.data_type).toBe('character varying');
+  });
+
+  it('rotation_assignments tiene EXACTAMENTE UNIQUE (user_id, fecha) — columnas y orden (per-día desde 0001, confirmado en 0009)', async () => {
+    const { rows } = await client.query(`
+      SELECT conname, pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.rotation_assignments'::regclass AND contype = 'u'
+    `);
+    // Detector de drift estricto: no alcanza con "existe alguna UNIQUE" (FB-F3-AUD-01
+    // Hallazgo 5) — se valida la definición completa (columnas y orden exactos).
+    expect(rows).toHaveLength(1);
+    expect(rows[0].def).toBe('UNIQUE (user_id, fecha)');
+  });
+
+  it('CHECK rotation_assignments_motivo_requerido exige motivo_ausencia cuando estado_dia = periodo_fuera_trabajo (expresión, no solo nombre — migración 0009)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.rotation_assignments'::regclass
+        AND conname = 'rotation_assignments_motivo_requerido'
+        AND contype = 'c'
+    `);
+    expect(rows).toHaveLength(1);
+    // Se valida la expresión lógica real (no solo nombre/tipo, FB-F3-AUD-01 Hallazgo 5).
+    // No se afirma el string completo porque Postgres normaliza casts de enum de forma
+    // dependiente de versión; se afirma cada término semántico de la implicación.
+    const def: string = rows[0].def;
+    expect(def).toMatch(/estado_dia/);
+    expect(def).toMatch(/periodo_fuera_trabajo/);
+    expect(def).toMatch(/OR/);
+    expect(def).toMatch(/motivo_ausencia IS NOT NULL/);
+  });
+
+  it('profiles.dni es text nullable con constraint UNIQUE (migración 0009)', async () => {
+    const { rows: cols } = await client.query(`
+      SELECT data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'dni'
+    `);
+    expect(cols).toHaveLength(1);
+    expect(cols[0].data_type).toBe('text');
+    expect(cols[0].is_nullable).toBe('YES');
+
+    const { rows: cons } = await client.query(`
+      SELECT conname, pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.profiles'::regclass
+        AND conname = 'profiles_dni_unique'
+        AND contype = 'u'
+    `);
+    expect(cons).toHaveLength(1);
+    expect(cons[0].def).toBe('UNIQUE (dni)');
+  });
+
+  it('rotation_groups queda admin-only: policy rotation_groups_select_all fue eliminada (migración 0009, FB-F3-AUD-01 Hallazgo 3)', async () => {
+    const { rows } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'rotation_groups'
+    `);
+    const names = rows.map((r) => r.policyname).sort();
+    expect(names).toEqual(['rotation_groups_admin']);
   });
 });

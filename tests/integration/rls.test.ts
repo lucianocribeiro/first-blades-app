@@ -41,6 +41,7 @@ const PASAJE_ID      = 'b0000000-0000-0000-0001-000000000001';
 const AUSENCIA_ID    = 'c0000000-0000-0000-0001-000000000001';
 const ROT_GROUP_ID   = 'e0000000-0000-0000-0001-000000000001';
 const ROT_ASSIGN_ID  = 'f0000000-0000-0000-0001-000000000001';
+const ROT_ASSIGN_SUPERVISOR_ID = 'f0000000-0000-0000-0001-000000000002'; // fila propia del supervisor (FB-F3-03)
 const PROCEDURE_ID   = 'f1000000-0000-0000-0001-000000000001';
 const AUDIT_LOG_ID   = 'a1000000-0000-0000-0001-000000000001'; // fila conocida para assert real
 
@@ -75,6 +76,13 @@ beforeAll(async () => {
     INSERT INTO rotation_assignments (id, user_id, fecha, estado_dia)
     VALUES ($1, $2, '2026-07-01', 'trabajando') ON CONFLICT DO NOTHING
   `, [ROT_ASSIGN_ID, IDS.employee1]);
+
+  // Fila propia del supervisor: distingue "supervisor no escribe sobre su equipo"
+  // de "supervisor no escribe sobre su propia fila" (FB-F3-03 / FB-F3-AUD-02 Hallazgo 4).
+  await db.query(`
+    INSERT INTO rotation_assignments (id, user_id, fecha, estado_dia)
+    VALUES ($1, $2, '2026-07-01', 'trabajando') ON CONFLICT DO NOTHING
+  `, [ROT_ASSIGN_SUPERVISOR_ID, IDS.supervisor]);
 
   await db.query(`
     INSERT INTO procedures (id, title, content, created_by)
@@ -520,11 +528,23 @@ describe.skipIf(!dbAvailable)('RLS: ausencia_requests', () => {
 // ============================================================
 
 describe.skipIf(!dbAvailable)('RLS: rotation_groups', () => {
-  it('cualquier usuario autenticado puede leer grupos (SELECT)', async () => {
-    for (const id of [IDS.employee1, IDS.supervisor, IDS.admin]) {
-      const n = await asUser(id, (c) => countRows(c, 'rotation_groups'));
-      expect(n).toBeGreaterThanOrEqual(1);
-    }
+  it('admin puede leer grupos (SELECT)', async () => {
+    const n = await asUser(IDS.admin, (c) => countRows(c, 'rotation_groups'));
+    expect(n).toBeGreaterThanOrEqual(1);
+  });
+
+  it('empleado NO puede leer rotation_groups (SELECT, admin-only desde 0009 — FB-F3-AUD-01 Hallazgo 3, caso negativo → 0 filas)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      const n = await countRows(c, 'rotation_groups', `WHERE id = '${ROT_GROUP_ID}'`);
+      expect(n).toBe(0);
+    });
+  });
+
+  it('supervisor NO puede leer rotation_groups (SELECT, admin-only desde 0009 — FB-F3-AUD-01 Hallazgo 3, caso negativo → 0 filas)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      const n = await countRows(c, 'rotation_groups', `WHERE id = '${ROT_GROUP_ID}'`);
+      expect(n).toBe(0);
+    });
   });
 
   it('empleado NO puede INSERT rotation_groups (INSERT deniega con error)', async () => {
@@ -544,6 +564,50 @@ describe.skipIf(!dbAvailable)('RLS: rotation_groups', () => {
       await expect(
         c.query(`INSERT INTO rotation_groups (name) VALUES ('Grupo Test')`)
       ).resolves.toBeDefined();
+    });
+  });
+
+  it('empleado NO puede UPDATE rotation_groups (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(
+        c, 'UPDATE rotation_groups SET name = $1 WHERE id = $2', ['Hack', ROT_GROUP_ID]
+      );
+    });
+  });
+
+  it('supervisor NO puede UPDATE rotation_groups (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(
+        c, 'UPDATE rotation_groups SET name = $1 WHERE id = $2', ['Hack', ROT_GROUP_ID]
+      );
+    });
+  });
+
+  it('empleado NO puede DELETE rotation_groups (DELETE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_groups WHERE id = $1', [ROT_GROUP_ID]);
+    });
+  });
+
+  it('supervisor NO puede DELETE rotation_groups (DELETE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_groups WHERE id = $1', [ROT_GROUP_ID]);
+    });
+  });
+
+  it('admin puede UPDATE rotation_groups', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query(
+        'UPDATE rotation_groups SET name = $1 WHERE id = $2', ['Grupo A editado', ROT_GROUP_ID]
+      );
+      expect(rowCount).toBe(1);
+    });
+  });
+
+  it('admin puede DELETE rotation_groups', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query('DELETE FROM rotation_groups WHERE id = $1', [ROT_GROUP_ID]);
+      expect(rowCount).toBe(1);
     });
   });
 });
@@ -592,6 +656,16 @@ describe.skipIf(!dbAvailable)('RLS: rotation_assignments', () => {
     });
   });
 
+  it('supervisor NO puede INSERT rotation_assignments, ni para sí ni para su equipo (INSERT deniega con error)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectPermissionError(
+        c,
+        `INSERT INTO rotation_assignments (user_id, fecha, estado_dia) VALUES ($1, '2026-07-03', 'trabajando')`,
+        [IDS.employee1]
+      );
+    });
+  });
+
   it('admin puede INSERT rotation_assignments', async () => {
     await asUser(IDS.admin, async (c) => {
       await expect(
@@ -600,6 +674,86 @@ describe.skipIf(!dbAvailable)('RLS: rotation_assignments', () => {
           [IDS.employee1]
         )
       ).resolves.toBeDefined();
+    });
+  });
+
+  it('CHECK rotation_assignments_motivo_requerido: periodo_fuera_trabajo sin motivo_ausencia falla (admin, INSERT permitido por RLS pero bloqueado por CHECK)', async () => {
+    await asUser(IDS.admin, async (c) => {
+      await expect(
+        c.query(
+          `INSERT INTO rotation_assignments (user_id, fecha, estado_dia) VALUES ($1, '2026-07-04', 'periodo_fuera_trabajo')`,
+          [IDS.employee1]
+        )
+      ).rejects.toThrow(/rotation_assignments_motivo_requerido/);
+    });
+  });
+
+  it('CHECK rotation_assignments_motivo_requerido: periodo_fuera_trabajo con motivo_ausencia se inserta (admin)', async () => {
+    await asUser(IDS.admin, async (c) => {
+      await expect(
+        c.query(
+          `INSERT INTO rotation_assignments (user_id, fecha, estado_dia, motivo_ausencia) VALUES ($1, '2026-07-05', 'periodo_fuera_trabajo', 'vacaciones')`,
+          [IDS.employee1]
+        )
+      ).resolves.toBeDefined();
+    });
+  });
+
+  it('empleado NO puede UPDATE rotation_assignments, ni su propia fila (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(
+        c, `UPDATE rotation_assignments SET estado_dia = 'en_franco' WHERE id = $1`, [ROT_ASSIGN_ID]
+      );
+    });
+  });
+
+  it('supervisor NO puede UPDATE rotation_assignments, ni de su equipo (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(
+        c, `UPDATE rotation_assignments SET estado_dia = 'en_franco' WHERE id = $1`, [ROT_ASSIGN_ID]
+      );
+    });
+  });
+
+  it('supervisor NO puede UPDATE rotation_assignments, ni su propia fila (UPDATE denegado silenciosamente → rowCount=0, FB-F3-AUD-02 Hallazgo 4)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(
+        c, `UPDATE rotation_assignments SET estado_dia = 'en_franco' WHERE id = $1`, [ROT_ASSIGN_SUPERVISOR_ID]
+      );
+    });
+  });
+
+  it('empleado NO puede DELETE rotation_assignments, ni su propia fila (DELETE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_assignments WHERE id = $1', [ROT_ASSIGN_ID]);
+    });
+  });
+
+  it('supervisor NO puede DELETE rotation_assignments, ni de su equipo (DELETE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_assignments WHERE id = $1', [ROT_ASSIGN_ID]);
+    });
+  });
+
+  it('supervisor NO puede DELETE rotation_assignments, ni su propia fila (DELETE denegado silenciosamente → rowCount=0, FB-F3-AUD-02 Hallazgo 4)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_assignments WHERE id = $1', [ROT_ASSIGN_SUPERVISOR_ID]);
+    });
+  });
+
+  it('admin puede UPDATE rotation_assignments', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query(
+        `UPDATE rotation_assignments SET estado_dia = 'en_franco' WHERE id = $1`, [ROT_ASSIGN_ID]
+      );
+      expect(rowCount).toBe(1);
+    });
+  });
+
+  it('admin puede DELETE rotation_assignments', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query('DELETE FROM rotation_assignments WHERE id = $1', [ROT_ASSIGN_ID]);
+      expect(rowCount).toBe(1);
     });
   });
 });
