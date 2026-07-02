@@ -190,31 +190,64 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     expect(byName.motivo_otros_texto.data_type).toBe('character varying');
   });
 
-  it('rotation_assignments mantiene UNIQUE (user_id, fecha) (per-día desde 0001, confirmado en 0009)', async () => {
+  it('rotation_assignments tiene EXACTAMENTE UNIQUE (user_id, fecha) — columnas y orden (per-día desde 0001, confirmado en 0009)', async () => {
     const { rows } = await client.query(`
-      SELECT conname FROM pg_constraint
+      SELECT conname, pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
       WHERE conrelid = 'public.rotation_assignments'::regclass AND contype = 'u'
     `);
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    // Detector de drift estricto: no alcanza con "existe alguna UNIQUE" (FB-F3-AUD-01
+    // Hallazgo 5) — se valida la definición completa (columnas y orden exactos).
+    expect(rows).toHaveLength(1);
+    expect(rows[0].def).toBe('UNIQUE (user_id, fecha)');
   });
 
-  it('CHECK rotation_assignments_motivo_requerido existe: periodo_fuera_trabajo exige motivo_ausencia (migración 0009)', async () => {
+  it('CHECK rotation_assignments_motivo_requerido exige motivo_ausencia cuando estado_dia = periodo_fuera_trabajo (expresión, no solo nombre — migración 0009)', async () => {
     const { rows } = await client.query(`
-      SELECT conname FROM pg_constraint
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
       WHERE conrelid = 'public.rotation_assignments'::regclass
         AND conname = 'rotation_assignments_motivo_requerido'
         AND contype = 'c'
     `);
     expect(rows).toHaveLength(1);
+    // Se valida la expresión lógica real (no solo nombre/tipo, FB-F3-AUD-01 Hallazgo 5).
+    // No se afirma el string completo porque Postgres normaliza casts de enum de forma
+    // dependiente de versión; se afirma cada término semántico de la implicación.
+    const def: string = rows[0].def;
+    expect(def).toMatch(/estado_dia/);
+    expect(def).toMatch(/periodo_fuera_trabajo/);
+    expect(def).toMatch(/OR/);
+    expect(def).toMatch(/motivo_ausencia IS NOT NULL/);
   });
 
-  it('profiles.dni tiene constraint UNIQUE (migración 0009)', async () => {
-    const { rows } = await client.query(`
-      SELECT conname FROM pg_constraint
+  it('profiles.dni es text nullable con constraint UNIQUE (migración 0009)', async () => {
+    const { rows: cols } = await client.query(`
+      SELECT data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'dni'
+    `);
+    expect(cols).toHaveLength(1);
+    expect(cols[0].data_type).toBe('text');
+    expect(cols[0].is_nullable).toBe('YES');
+
+    const { rows: cons } = await client.query(`
+      SELECT conname, pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
       WHERE conrelid = 'public.profiles'::regclass
         AND conname = 'profiles_dni_unique'
         AND contype = 'u'
     `);
-    expect(rows).toHaveLength(1);
+    expect(cons).toHaveLength(1);
+    expect(cons[0].def).toBe('UNIQUE (dni)');
+  });
+
+  it('rotation_groups queda admin-only: policy rotation_groups_select_all fue eliminada (migración 0009, FB-F3-AUD-01 Hallazgo 3)', async () => {
+    const { rows } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'rotation_groups'
+    `);
+    const names = rows.map((r) => r.policyname).sort();
+    expect(names).toEqual(['rotation_groups_admin']);
   });
 });

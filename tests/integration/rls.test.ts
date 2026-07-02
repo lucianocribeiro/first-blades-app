@@ -520,11 +520,23 @@ describe.skipIf(!dbAvailable)('RLS: ausencia_requests', () => {
 // ============================================================
 
 describe.skipIf(!dbAvailable)('RLS: rotation_groups', () => {
-  it('cualquier usuario autenticado puede leer grupos (SELECT)', async () => {
-    for (const id of [IDS.employee1, IDS.supervisor, IDS.admin]) {
-      const n = await asUser(id, (c) => countRows(c, 'rotation_groups'));
-      expect(n).toBeGreaterThanOrEqual(1);
-    }
+  it('admin puede leer grupos (SELECT)', async () => {
+    const n = await asUser(IDS.admin, (c) => countRows(c, 'rotation_groups'));
+    expect(n).toBeGreaterThanOrEqual(1);
+  });
+
+  it('empleado NO puede leer rotation_groups (SELECT, admin-only desde 0009 — FB-F3-AUD-01 Hallazgo 3, caso negativo → 0 filas)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      const n = await countRows(c, 'rotation_groups', `WHERE id = '${ROT_GROUP_ID}'`);
+      expect(n).toBe(0);
+    });
+  });
+
+  it('supervisor NO puede leer rotation_groups (SELECT, admin-only desde 0009 — FB-F3-AUD-01 Hallazgo 3, caso negativo → 0 filas)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      const n = await countRows(c, 'rotation_groups', `WHERE id = '${ROT_GROUP_ID}'`);
+      expect(n).toBe(0);
+    });
   });
 
   it('empleado NO puede INSERT rotation_groups (INSERT deniega con error)', async () => {
@@ -544,6 +556,50 @@ describe.skipIf(!dbAvailable)('RLS: rotation_groups', () => {
       await expect(
         c.query(`INSERT INTO rotation_groups (name) VALUES ('Grupo Test')`)
       ).resolves.toBeDefined();
+    });
+  });
+
+  it('empleado NO puede UPDATE rotation_groups (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(
+        c, 'UPDATE rotation_groups SET name = $1 WHERE id = $2', ['Hack', ROT_GROUP_ID]
+      );
+    });
+  });
+
+  it('supervisor NO puede UPDATE rotation_groups (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(
+        c, 'UPDATE rotation_groups SET name = $1 WHERE id = $2', ['Hack', ROT_GROUP_ID]
+      );
+    });
+  });
+
+  it('empleado NO puede DELETE rotation_groups (DELETE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_groups WHERE id = $1', [ROT_GROUP_ID]);
+    });
+  });
+
+  it('supervisor NO puede DELETE rotation_groups (DELETE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_groups WHERE id = $1', [ROT_GROUP_ID]);
+    });
+  });
+
+  it('admin puede UPDATE rotation_groups', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query(
+        'UPDATE rotation_groups SET name = $1 WHERE id = $2', ['Grupo A editado', ROT_GROUP_ID]
+      );
+      expect(rowCount).toBe(1);
+    });
+  });
+
+  it('admin puede DELETE rotation_groups', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query('DELETE FROM rotation_groups WHERE id = $1', [ROT_GROUP_ID]);
+      expect(rowCount).toBe(1);
     });
   });
 });
@@ -632,6 +688,50 @@ describe.skipIf(!dbAvailable)('RLS: rotation_assignments', () => {
           [IDS.employee1]
         )
       ).resolves.toBeDefined();
+    });
+  });
+
+  it('empleado NO puede UPDATE rotation_assignments, ni su propia fila (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(
+        c, `UPDATE rotation_assignments SET estado_dia = 'en_franco' WHERE id = $1`, [ROT_ASSIGN_ID]
+      );
+    });
+  });
+
+  it('supervisor NO puede UPDATE rotation_assignments, ni de su equipo (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(
+        c, `UPDATE rotation_assignments SET estado_dia = 'en_franco' WHERE id = $1`, [ROT_ASSIGN_ID]
+      );
+    });
+  });
+
+  it('empleado NO puede DELETE rotation_assignments, ni su propia fila (DELETE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_assignments WHERE id = $1', [ROT_ASSIGN_ID]);
+    });
+  });
+
+  it('supervisor NO puede DELETE rotation_assignments, ni de su equipo (DELETE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(c, 'DELETE FROM rotation_assignments WHERE id = $1', [ROT_ASSIGN_ID]);
+    });
+  });
+
+  it('admin puede UPDATE rotation_assignments', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query(
+        `UPDATE rotation_assignments SET estado_dia = 'en_franco' WHERE id = $1`, [ROT_ASSIGN_ID]
+      );
+      expect(rowCount).toBe(1);
+    });
+  });
+
+  it('admin puede DELETE rotation_assignments', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rowCount } = await c.query('DELETE FROM rotation_assignments WHERE id = $1', [ROT_ASSIGN_ID]);
+      expect(rowCount).toBe(1);
     });
   });
 });
