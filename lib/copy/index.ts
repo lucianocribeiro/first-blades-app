@@ -297,6 +297,18 @@ export const copy = {
     },
   },
 
+  emails: {
+    documentoRechazado: {
+      subject:     'Tu documento fue rechazado — First Blades',
+      saludo:      'Hola',
+      intro:       'Tu documento fue revisado por Administración y fue rechazado.',
+      tipoLabel:   'Documento',
+      motivoLabel: 'Motivo del rechazo',
+      accion:      'Podés corregirlo y volver a enviarlo desde el portal, en la sección Mi Perfil.',
+      firma:       'Equipo First Blades',
+    },
+  },
+
   errors: {
     unauthorized:   'No tenés permiso para acceder a esta sección.',
     sessionExpired: 'Tu sesión expiró. Iniciá sesión nuevamente.',
