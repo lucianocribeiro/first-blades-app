@@ -34,6 +34,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     'rotation_assignments',
     'procedures',
     'audit_log',
+    'notification_log',
   ];
 
   for (const table of expectedTables) {
@@ -100,6 +101,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'estado_dia',
       'motivo_ausencia',
       'motivo_viaje',
+      'notification_type',
       'user_role',
     ]);
   });
