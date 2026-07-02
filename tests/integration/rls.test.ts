@@ -592,11 +592,43 @@ describe.skipIf(!dbAvailable)('RLS: rotation_assignments', () => {
     });
   });
 
+  it('supervisor NO puede INSERT rotation_assignments, ni para sí ni para su equipo (INSERT deniega con error)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectPermissionError(
+        c,
+        `INSERT INTO rotation_assignments (user_id, fecha, estado_dia) VALUES ($1, '2026-07-03', 'trabajando')`,
+        [IDS.employee1]
+      );
+    });
+  });
+
   it('admin puede INSERT rotation_assignments', async () => {
     await asUser(IDS.admin, async (c) => {
       await expect(
         c.query(
           `INSERT INTO rotation_assignments (user_id, fecha, estado_dia) VALUES ($1, '2026-07-02', 'en_franco')`,
+          [IDS.employee1]
+        )
+      ).resolves.toBeDefined();
+    });
+  });
+
+  it('CHECK rotation_assignments_motivo_requerido: periodo_fuera_trabajo sin motivo_ausencia falla (admin, INSERT permitido por RLS pero bloqueado por CHECK)', async () => {
+    await asUser(IDS.admin, async (c) => {
+      await expect(
+        c.query(
+          `INSERT INTO rotation_assignments (user_id, fecha, estado_dia) VALUES ($1, '2026-07-04', 'periodo_fuera_trabajo')`,
+          [IDS.employee1]
+        )
+      ).rejects.toThrow(/rotation_assignments_motivo_requerido/);
+    });
+  });
+
+  it('CHECK rotation_assignments_motivo_requerido: periodo_fuera_trabajo con motivo_ausencia se inserta (admin)', async () => {
+    await asUser(IDS.admin, async (c) => {
+      await expect(
+        c.query(
+          `INSERT INTO rotation_assignments (user_id, fecha, estado_dia, motivo_ausencia) VALUES ($1, '2026-07-05', 'periodo_fuera_trabajo', 'vacaciones')`,
           [IDS.employee1]
         )
       ).resolves.toBeDefined();

@@ -171,4 +171,48 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     `);
     expect(rows).toHaveLength(1);
   });
+
+  it('rotation_assignments tiene columnas nuevas es_estimado y motivo_otros_texto (migración 0009)', async () => {
+    const { rows } = await client.query(`
+      SELECT column_name, is_nullable, data_type, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'rotation_assignments'
+        AND column_name IN ('es_estimado', 'motivo_otros_texto')
+      ORDER BY column_name
+    `);
+    const byName = Object.fromEntries(rows.map((r) => [r.column_name, r]));
+    expect(byName.es_estimado.is_nullable).toBe('NO');
+    expect(byName.es_estimado.data_type).toBe('boolean');
+    expect(byName.es_estimado.column_default).toBe('false');
+    expect(byName.motivo_otros_texto.is_nullable).toBe('YES');
+    expect(byName.motivo_otros_texto.data_type).toBe('character varying');
+  });
+
+  it('rotation_assignments mantiene UNIQUE (user_id, fecha) (per-día desde 0001, confirmado en 0009)', async () => {
+    const { rows } = await client.query(`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'public.rotation_assignments'::regclass AND contype = 'u'
+    `);
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('CHECK rotation_assignments_motivo_requerido existe: periodo_fuera_trabajo exige motivo_ausencia (migración 0009)', async () => {
+    const { rows } = await client.query(`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'public.rotation_assignments'::regclass
+        AND conname = 'rotation_assignments_motivo_requerido'
+        AND contype = 'c'
+    `);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('profiles.dni tiene constraint UNIQUE (migración 0009)', async () => {
+    const { rows } = await client.query(`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'public.profiles'::regclass
+        AND conname = 'profiles_dni_unique'
+        AND contype = 'u'
+    `);
+    expect(rows).toHaveLength(1);
+  });
 });
