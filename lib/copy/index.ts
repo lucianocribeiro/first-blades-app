@@ -399,6 +399,66 @@ export const copy = {
     diaLabel:  'día',
   },
 
+  calendario: {
+    title:    'Calendario',
+    subtitle: 'Calendario de rotación',
+    meses: [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+    ],
+    nav: {
+      mesAnterior: 'Mes anterior',
+      mesSiguiente: 'Mes siguiente',
+      hoy:          'Hoy',
+    },
+    table: {
+      empleado: 'Empleado',
+    },
+    leyenda: {
+      title:      'Referencias',
+      sinCargar:  'Sin cargar',
+      estimado:   'Estimado (planificado)',
+    },
+    noEmpleados: 'No hay empleados activos para mostrar en el roster.',
+    modal: {
+      title:  'Editar día',
+      guardar: 'Guardar',
+      fields: {
+        empleado:  'Empleado',
+        fecha:     'Fecha',
+        estado:    'Estado',
+        motivo:    'Motivo',
+        motivoOtros: 'Detalle del motivo',
+        estimado:  'Estimado (planificación futura)',
+      },
+      placeholders: {
+        motivo:      'Seleccioná el motivo',
+        motivoOtros: 'Describí el motivo (máx. 80 caracteres)',
+      },
+      hints: {
+        estimado: 'Los días estimados se muestran en tono más claro hasta 7 días antes de la fecha.',
+      },
+    },
+    motivos: {
+      vacaciones:      'Vacaciones',
+      licencia_medica: 'Licencia médica',
+      dia_tramite:     'Día de trámite',
+      matrimonio:      'Matrimonio',
+      fallecimiento:   'Fallecimiento',
+      otros:           'Otros',
+    },
+    errors: {
+      motivoRequerido:      'Seleccioná un motivo para "Fuera del trabajo".',
+      motivoOtrosRequerido: 'Describí el motivo cuando seleccionás "Otros".',
+      motivoOtrosMaximo:    'El detalle del motivo no puede superar los 80 caracteres.',
+    },
+    messages: {
+      upsertSuccess: 'Día actualizado correctamente.',
+      upsertError:   'Error al actualizar el día.',
+      loadError:     'No se pudo cargar el roster del mes.',
+    },
+  },
+
   pages: {
     dashboard: {
       title:       'Inicio',

@@ -17,6 +17,13 @@ const config: Config = {
         success: '#2E7D32',
         error: '#C62828',
         warning: '#F9A825',
+        calendar: {
+          trabajando: '#2E7D32',
+          enViaje: '#0D7EC7',
+          enFranco: '#C62828',
+          fueraTrabajo: '#F9A825',
+          vacio: '#CBD5E1',
+        },
       },
       borderRadius: {
         card: '12px',
