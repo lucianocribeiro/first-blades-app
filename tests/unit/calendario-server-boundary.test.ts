@@ -18,15 +18,19 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
 vi.mock('@/lib/auth', () => ({
   requireAdmin: vi.fn(),
+  requireAuth: vi.fn(),
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
   createServerClient: vi.fn(),
 }));
 
-import { requireAdmin } from '@/lib/auth';
+import { requireAdmin, requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { upsertRotationAssignment } from '@/app/(app)/calendario/actions';
+import CalendarioPage from '@/app/(app)/calendario/page';
+import { PlaceholderPage } from '@/components/layout/PlaceholderPage';
+import { RosterGrid } from '@/app/(app)/calendario/RosterGrid';
 import { copy } from '@/lib/copy';
 
 const VALID_INPUT = {
@@ -128,5 +132,79 @@ describe('upsertRotationAssignment: gating de servidor (no-admin rechazado)', ()
     await expect(upsertRotationAssignment(VALID_INPUT)).rejects.toThrow(
       copy.calendario.messages.upsertError
     );
+  });
+});
+
+// ─── CalendarioPage: branch por rol (no-admin ve el placeholder) ──────────
+//
+// El gating admin-only de esta pieza vive en el branch de render de la
+// página (CalendarioPage retorna <PlaceholderPage /> si role !== 'admin')
+// y en la server action (arriba). Estos tests invocan la Server Component
+// directamente (es una función async que devuelve JSX, sin renderizar DOM)
+// y verifican el elemento devuelto, mockeando requireAuth + createServerClient.
+
+type ElementNode = { type?: unknown; props?: { children?: unknown } } | null | undefined;
+
+function containsElementType(node: unknown, type: unknown): boolean {
+  if (!node) return false;
+  if (Array.isArray(node)) return node.some((n) => containsElementType(n, type));
+  if (typeof node !== 'object') return false;
+  const el = node as ElementNode;
+  if (el?.type === type) return true;
+  return containsElementType(el?.props?.children, type);
+}
+
+function mockProfileRole(role: 'admin' | 'supervisor' | 'empleado') {
+  vi.mocked(requireAuth).mockResolvedValue({
+    id: 'user-1',
+    role,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+}
+
+// Mock de la cadena .from('profiles').select(...).in(...).eq(...).order(...)
+// con 0 empleados: alcanza para probar el branch de render sin necesitar
+// también mockear la query de rotation_assignments (se skipea si employeeIds
+// está vacío, ver app/(app)/calendario/page.tsx).
+function mockEmptyProfilesQuery() {
+  const order = vi.fn().mockResolvedValue({ data: [], error: null });
+  const eq = vi.fn().mockReturnValue({ order });
+  const inFn = vi.fn().mockReturnValue({ eq });
+  const select = vi.fn().mockReturnValue({ in: inFn });
+  const from = vi.fn().mockReturnValue({ select });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  vi.mocked(createServerClient).mockResolvedValue({ from } as any);
+  return { from };
+}
+
+describe('CalendarioPage: branch por rol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('supervisor recibe el placeholder, no la vista de gestión del roster', async () => {
+    mockProfileRole('supervisor');
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(result.type).toBe(PlaceholderPage);
+  });
+
+  it('empleado recibe el placeholder, no la vista de gestión del roster', async () => {
+    mockProfileRole('empleado');
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(result.type).toBe(PlaceholderPage);
+  });
+
+  it('admin recibe la vista de gestión (RosterGrid), no el placeholder', async () => {
+    mockProfileRole('admin');
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(result.type).not.toBe(PlaceholderPage);
+    expect(containsElementType(result, RosterGrid)).toBe(true);
   });
 });
