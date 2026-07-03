@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   test: {
     // Solo tests unitarios — los de integración usan vitest.integration.config.ts
-    include: ['tests/unit/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts', 'tests/unit/**/*.test.tsx'],
     exclude: ['tests/integration/**'],
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],

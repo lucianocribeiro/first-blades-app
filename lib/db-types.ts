@@ -32,6 +32,8 @@ export type DocumentUpdate         = TablesUpdate<'documents'>;
 export type NotificationLogInsert  = TablesInsert<'notification_log'>;
 export type AusenciaRequestInsert  = TablesInsert<'ausencia_requests'>;
 export type PasajeRequestInsert    = TablesInsert<'pasaje_requests'>;
+export type RotationAssignmentInsert = TablesInsert<'rotation_assignments'>;
+export type RotationAssignmentUpdate = TablesUpdate<'rotation_assignments'>;
 
 // Tipos de documento (enforced en app layer; document_type es TEXT en la BD)
 export const DOCUMENT_TYPES = ['dni', 'licencia', 'foto_carnet', 'certificado', 'estudio_medico'] as const;
