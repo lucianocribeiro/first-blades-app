@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/document-expiry-alerts",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/promote-estimated-days",
+      "schedule": "0 5 * * *"
     }
   ]
 }
