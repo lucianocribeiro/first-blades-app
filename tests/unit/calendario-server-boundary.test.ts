@@ -29,7 +29,6 @@ import { requireAdmin, requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { upsertRotationAssignment } from '@/app/(app)/calendario/actions';
 import CalendarioPage from '@/app/(app)/calendario/page';
-import { PlaceholderPage } from '@/components/layout/PlaceholderPage';
 import { RosterGrid } from '@/app/(app)/calendario/RosterGrid';
 import { copy } from '@/lib/copy';
 
@@ -135,46 +134,68 @@ describe('upsertRotationAssignment: gating de servidor (no-admin rechazado)', ()
   });
 });
 
-// ─── CalendarioPage: branch por rol (no-admin ve el placeholder) ──────────
+// ─── CalendarioPage: branch por rol (FB-F3-06) ────────────────────────────
 //
-// El gating admin-only de esta pieza vive en el branch de render de la
-// página (CalendarioPage retorna <PlaceholderPage /> si role !== 'admin')
-// y en la server action (arriba). Estos tests invocan la Server Component
+// admin gestiona (RosterGrid editable); supervisor/empleado ven en modo
+// lectura (RosterGrid readOnly). Estos tests invocan la Server Component
 // directamente (es una función async que devuelve JSX, sin renderizar DOM)
-// y verifican el elemento devuelto, mockeando requireAuth + createServerClient.
+// y verifican el elemento RosterGrid dentro del árbol devuelto + los
+// filtros que arma cada rol en la query de profiles (scope de app
+// superpuesto a la RLS, ver app/(app)/calendario/page.tsx).
 
-type ElementNode = { type?: unknown; props?: { children?: unknown } } | null | undefined;
+type ElementLike = { type?: unknown; props?: Record<string, unknown> };
 
-function containsElementType(node: unknown, type: unknown): boolean {
-  if (!node) return false;
-  if (Array.isArray(node)) return node.some((n) => containsElementType(n, type));
-  if (typeof node !== 'object') return false;
-  const el = node as ElementNode;
-  if (el?.type === type) return true;
-  return containsElementType(el?.props?.children, type);
+// Sin renderer real: CalendarioPage devuelve <RosterView .../> (un
+// componente función), no el árbol de RosterView ya "renderizado". Para
+// encontrar RosterGrid sin montar un renderer completo, cuando el nodo es
+// un componente función que no es el target, se lo invoca directamente
+// (son todos puros / sin hooks — Card, MonthNav, Legend, RosterView) para
+// bajar un nivel más. RosterGrid (el target) nunca se invoca: usa useState,
+// y el chequeo de igualdad corta la recursión antes de llamarlo.
+function findElement(node: unknown, type: unknown): ElementLike | undefined {
+  if (!node) return undefined;
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const found = findElement(n, type);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (typeof node !== 'object') return undefined;
+  const el = node as ElementLike;
+  if (el.type === type) return el;
+  if (typeof el.type === 'function') {
+    const rendered = (el.type as (props: unknown) => unknown)(el.props);
+    return findElement(rendered, type);
+  }
+  return findElement((el.props as { children?: unknown } | undefined)?.children, type);
 }
 
-function mockProfileRole(role: 'admin' | 'supervisor' | 'empleado') {
+function mockProfileRole(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
   vi.mocked(requireAuth).mockResolvedValue({
-    id: 'user-1',
+    id,
     role,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 }
 
-// Mock de la cadena .from('profiles').select(...).in(...).eq(...).order(...)
+// Mock genérico de la cadena .from('profiles').select(...).eq(...)[.in()|.or()](...).order(...)
 // con 0 empleados: alcanza para probar el branch de render sin necesitar
 // también mockear la query de rotation_assignments (se skipea si employeeIds
-// está vacío, ver app/(app)/calendario/page.tsx).
+// está vacío). Cada método intermedio devuelve el mismo builder para
+// soportar cualquier combinación de filtros según el rol (in para admin,
+// or para supervisor, eq para empleado).
 function mockEmptyProfilesQuery() {
-  const order = vi.fn().mockResolvedValue({ data: [], error: null });
-  const eq = vi.fn().mockReturnValue({ order });
-  const inFn = vi.fn().mockReturnValue({ eq });
-  const select = vi.fn().mockReturnValue({ in: inFn });
-  const from = vi.fn().mockReturnValue({ select });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const builder: any = {};
+  for (const method of ['select', 'eq', 'in', 'or']) {
+    builder[method] = vi.fn().mockReturnValue(builder);
+  }
+  builder.order = vi.fn().mockResolvedValue({ data: [], error: null });
+  const from = vi.fn().mockReturnValue(builder);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from } as any);
-  return { from };
+  return { from, builder };
 }
 
 describe('CalendarioPage: branch por rol', () => {
@@ -182,29 +203,67 @@ describe('CalendarioPage: branch por rol', () => {
     vi.clearAllMocks();
   });
 
-  it('supervisor recibe el placeholder, no la vista de gestión del roster', async () => {
+  it('supervisor recibe la vista de lectura (RosterGrid readOnly), no la de gestión', async () => {
     mockProfileRole('supervisor');
+    mockEmptyProfilesQuery();
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    expect(result.type).toBe(PlaceholderPage);
+    const grid = findElement(result, RosterGrid);
+    expect(grid).toBeTruthy();
+    expect(grid?.props?.readOnly).toBe(true);
   });
 
-  it('empleado recibe el placeholder, no la vista de gestión del roster', async () => {
+  it('empleado recibe la vista de lectura (RosterGrid readOnly), no la de gestión', async () => {
     mockProfileRole('empleado');
+    mockEmptyProfilesQuery();
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    expect(result.type).toBe(PlaceholderPage);
+    const grid = findElement(result, RosterGrid);
+    expect(grid).toBeTruthy();
+    expect(grid?.props?.readOnly).toBe(true);
   });
 
-  it('admin recibe la vista de gestión (RosterGrid), no el placeholder', async () => {
+  it('admin recibe la vista de gestión (RosterGrid editable, readOnly=false) — regresión', async () => {
     mockProfileRole('admin');
     mockEmptyProfilesQuery();
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    expect(result.type).not.toBe(PlaceholderPage);
-    expect(containsElementType(result, RosterGrid)).toBe(true);
+    const grid = findElement(result, RosterGrid);
+    expect(grid).toBeTruthy();
+    expect(grid?.props?.readOnly).toBe(false);
+  });
+
+  it('supervisor: la query de profiles filtra por equipo + sí mismo (or), no por lista de roles', async () => {
+    mockProfileRole('supervisor', 'sup-1');
+    const { builder } = mockEmptyProfilesQuery();
+
+    await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(builder.or).toHaveBeenCalledWith('id.eq.sup-1,supervisor_id.eq.sup-1');
+    expect(builder.in).not.toHaveBeenCalled();
+  });
+
+  it('empleado: la query de profiles filtra solo por su id', async () => {
+    mockProfileRole('empleado', 'emp-9');
+    const { builder } = mockEmptyProfilesQuery();
+
+    await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(builder.eq).toHaveBeenCalledWith('id', 'emp-9');
+    expect(builder.or).not.toHaveBeenCalled();
+    expect(builder.in).not.toHaveBeenCalled();
+  });
+
+  it('admin: la query de profiles filtra por roles empleado/supervisor — regresión', async () => {
+    mockProfileRole('admin');
+    const { builder } = mockEmptyProfilesQuery();
+
+    await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(builder.in).toHaveBeenCalledWith('role', ['empleado', 'supervisor']);
+    expect(builder.or).not.toHaveBeenCalled();
   });
 });

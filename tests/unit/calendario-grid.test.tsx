@@ -1,11 +1,11 @@
 /**
- * Tests de render (Testing Library) — grilla del roster y leyenda (FB-F3-05,
- * cierra el bloqueante de cobertura de FB-F3-AUD-04).
+ * Tests de render (Testing Library) — grilla del roster y leyenda.
  *
- * FB-F3-04 solo cubría la lógica pura de app/(app)/calendario/utils.ts;
- * acá se renderiza el DOM real para verificar filas × columnas, el color
- * gris de la celda sin cargar, el tono claro de una celda estimada y que
- * la leyenda muestra sus 6 entradas (4 estados + sin cargar + estimado).
+ * FB-F3-05: filas × columnas, color gris de la celda sin cargar, tono claro
+ * de una celda estimada, leyenda con sus 6 entradas.
+ * FB-F3-06: modo lectura (readOnly) — reutiliza RosterGrid en vez de
+ * duplicarlo para supervisor/empleado; en ese modo las celdas no son
+ * interactivas (sin role="button", sin handler de escritura montado).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -90,6 +90,52 @@ describe('RosterGrid (render)', () => {
     render(<RosterGrid employees={[]} days={DAYS} assignments={[]} />);
     expect(screen.getByText(copy.calendario.noEmpleados)).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+});
+
+describe('RosterGrid (modo lectura — readOnly, FB-F3-06)', () => {
+  it('las celdas NO son interactivas: sin role="button", sin handler de escritura montado', () => {
+    const assignments = [
+      makeAssignment({ user_id: 'emp-1', fecha: '2026-07-01', estado_dia: 'en_franco', es_estimado: false }),
+    ];
+    render(<RosterGrid employees={EMPLOYEES} days={DAYS} assignments={assignments} readOnly />);
+
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('mantiene los mismos colores que en modo edición (gris sin cargar, sólido, estimado en tono claro)', () => {
+    const assignments = [
+      makeAssignment({ user_id: 'emp-1', fecha: '2026-07-01', estado_dia: 'en_franco', es_estimado: false }),
+      makeAssignment({ user_id: 'emp-2', fecha: '2026-07-02', estado_dia: 'trabajando', es_estimado: true }),
+    ];
+    const { container } = render(
+      <RosterGrid employees={EMPLOYEES} days={DAYS} assignments={assignments} readOnly />
+    );
+
+    const sinCargar = container.querySelector(
+      `[aria-label="Ana Gómez — 2026-07-02 — ${copy.calendario.leyenda.sinCargar}"]`
+    );
+    const solido = container.querySelector(`[aria-label="Ana Gómez — 2026-07-01 — ${copy.status.en_franco}"]`);
+    const estimado = container.querySelector(`[aria-label="Beto Ruiz — 2026-07-02 — ${copy.status.trabajando}"]`);
+
+    expect(sinCargar?.className).toContain('bg-calendar-vacio');
+    expect(solido?.className).toContain('bg-calendar-enFranco');
+    expect(solido?.className).not.toContain('/35');
+    expect(estimado?.className).toContain('bg-calendar-trabajando/35');
+  });
+
+  it('sigue mostrando filas y columnas (solo cambia la interactividad de la celda)', () => {
+    render(<RosterGrid employees={EMPLOYEES} days={DAYS} assignments={[]} readOnly />);
+
+    expect(screen.getByText('Ana Gómez')).toBeInTheDocument();
+    expect(screen.getByText('Beto Ruiz')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '1' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '2' })).toBeInTheDocument();
+  });
+
+  it('sin readOnly (o readOnly=false) el comportamiento es el de edición — sin regresión', () => {
+    render(<RosterGrid employees={EMPLOYEES} days={DAYS} assignments={[]} readOnly={false} />);
+    expect(screen.getAllByRole('button')).toHaveLength(4);
   });
 });
 
