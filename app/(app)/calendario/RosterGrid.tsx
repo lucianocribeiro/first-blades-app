@@ -16,6 +16,7 @@ type RosterGridProps = {
   employees: RosterEmployee[];
   days: string[];
   assignments: RotationAssignment[];
+  readOnly?: boolean;
 };
 
 type SelectedCell = {
@@ -24,7 +25,7 @@ type SelectedCell = {
   assignment: RotationAssignment | undefined;
 };
 
-export function RosterGrid({ employees, days, assignments }: RosterGridProps) {
+export function RosterGrid({ employees, days, assignments, readOnly = false }: RosterGridProps) {
   const [selected, setSelected] = useState<SelectedCell | null>(null);
   const index = buildAssignmentIndex(assignments);
 
@@ -67,15 +68,24 @@ export function RosterGrid({ employees, days, assignments }: RosterGridProps) {
                     const assignment = index.get(assignmentKey(emp.id, fecha));
                     const visual = getCellVisual(assignment);
                     const nombre = emp.full_name || emp.email;
+                    const label = `${nombre} — ${fecha} — ${visual.label}`;
                     return (
                       <td key={fecha} className="p-0.5 text-center">
-                        <button
-                          type="button"
-                          title={visual.label}
-                          aria-label={`${nombre} — ${fecha} — ${visual.label}`}
-                          onClick={() => setSelected({ employee: emp, fecha, assignment })}
-                          className={`w-7 h-7 rounded ${visual.bgClass} hover:ring-2 hover:ring-primary transition-shadow`}
-                        />
+                        {readOnly ? (
+                          <div
+                            title={visual.label}
+                            aria-label={label}
+                            className={`w-7 h-7 rounded ${visual.bgClass}`}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            title={visual.label}
+                            aria-label={label}
+                            onClick={() => setSelected({ employee: emp, fecha, assignment })}
+                            className={`w-7 h-7 rounded ${visual.bgClass} hover:ring-2 hover:ring-primary transition-shadow`}
+                          />
+                        )}
                       </td>
                     );
                   })}
