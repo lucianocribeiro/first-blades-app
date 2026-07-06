@@ -1,4 +1,3 @@
-import { Card } from '@/components/ui/Card';
 import { Table } from '@/components/ui/Table';
 import { copy } from '@/lib/copy';
 import { MOTIVOS_DASHBOARD, type MotivoDashboardRow } from './utils';
@@ -7,10 +6,12 @@ type MotivoDashboardProps = {
   rows: MotivoDashboardRow[];
 };
 
-// FB-F3-08: panel de lectura arriba de la grilla. Tabla empleado × 6
-// motivos fijos (siempre presentes, con 0) + total, del mes visible.
-// Comparte el mismo scope de `employees`/`assignments` ya resuelto por rol
-// en page.tsx — no hace ninguna query propia.
+// FB-F3-08: tabla empleado × 6 motivos fijos (siempre presentes, con 0) +
+// total, del mes visible. Comparte el mismo scope de
+// `employees`/`assignments` ya resuelto por rol en page.tsx — no hace
+// ninguna query propia. FB-F3-11: sin Card/título propios — el
+// CollapsibleSection que lo envuelve en CalendarioSections da el
+// encabezado; este componente es solo la tabla.
 export function MotivoDashboard({ rows }: MotivoDashboardProps) {
   const columns = [
     {
@@ -32,19 +33,11 @@ export function MotivoDashboard({ rows }: MotivoDashboardProps) {
   ];
 
   return (
-    <Card padding="sm">
-      <div className="space-y-3">
-        <div>
-          <h2 className="text-base font-semibold text-secondary">{copy.calendario.dashboard.title}</h2>
-          <p className="text-sm text-neutral mt-0.5">{copy.calendario.dashboard.subtitle}</p>
-        </div>
-        <Table<MotivoDashboardRow>
-          columns={columns}
-          rows={rows}
-          keyExtractor={(row) => row.employeeId}
-          emptyMessage={copy.calendario.noEmpleados}
-        />
-      </div>
-    </Card>
+    <Table<MotivoDashboardRow>
+      columns={columns}
+      rows={rows}
+      keyExtractor={(row) => row.employeeId}
+      emptyMessage={copy.calendario.noEmpleados}
+    />
   );
 }

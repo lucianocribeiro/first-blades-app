@@ -5,6 +5,7 @@ export { Textarea }    from './Textarea';
 export { StatusBadge } from './StatusBadge';
 export { Card }        from './Card';
 export { Table }       from './Table';
+export { CollapsibleSection } from './CollapsibleSection';
 export { Modal }       from './Modal';
 export { InfoBanner }  from './InfoBanner';
 export { DatePicker }  from './DatePicker';

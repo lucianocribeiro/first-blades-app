@@ -1,12 +1,9 @@
+import { cookies } from 'next/headers';
 import { requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { copy } from '@/lib/copy';
 import { Card } from '@/components/ui/Card';
-import { MonthNav } from './MonthNav';
-import { Legend } from './Legend';
-import { RosterGrid } from './RosterGrid';
-import { MotivoDashboard } from './MotivoDashboard';
-import { FrancoAlertPanel } from './FrancoAlertPanel';
+import { CalendarioSections } from './CalendarioSections';
 import { getCurrentYearMonth, getDaysInMonth, computeMotivoDashboard } from './utils';
 import {
   computeFrancoAlerts,
@@ -14,9 +11,11 @@ import {
   type FrancoAlertaDia,
   type FrancoAlertRow,
 } from './francoAlerts';
+import { COLLAPSE_COOKIE_NAME, parseCollapseState } from './collapseState';
 import { getBusinessToday } from '@/lib/rotation/promote-estimated';
 import type { RotationAssignment } from '@/lib/db-types';
 import type { RosterEmployee } from './RosterGrid';
+import type { MotivoDashboardRow } from './utils';
 
 type CalendarioPageProps = {
   searchParams: Promise<{ year?: string; month?: string }>;
@@ -29,7 +28,10 @@ function RosterView({
   employees,
   assignments,
   readOnly,
+  motivoRows,
   francoAlertRows,
+  initialCollapseState,
+  showFilter,
 }: {
   year: number;
   month: number;
@@ -37,7 +39,10 @@ function RosterView({
   employees: RosterEmployee[];
   assignments: RotationAssignment[];
   readOnly: boolean;
+  motivoRows: MotivoDashboardRow[];
   francoAlertRows: FrancoAlertRow[] | null;
+  initialCollapseState: ReturnType<typeof parseCollapseState>;
+  showFilter: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -46,19 +51,18 @@ function RosterView({
         <p className="text-sm text-neutral mt-0.5">{copy.calendario.subtitle}</p>
       </div>
 
-      {/* francoAlertRows === null para empleado (FB-F3-09: herramienta de
-          gestión, no para su propia vista). */}
-      {francoAlertRows !== null && <FrancoAlertPanel rows={francoAlertRows} />}
-
-      <MotivoDashboard rows={computeMotivoDashboard(employees, assignments, days)} />
-
-      <Card padding="sm">
-        <div className="space-y-4">
-          <MonthNav year={year} month={month} />
-          <Legend />
-          <RosterGrid employees={employees} days={days} assignments={assignments} readOnly={readOnly} />
-        </div>
-      </Card>
+      <CalendarioSections
+        year={year}
+        month={month}
+        days={days}
+        employees={employees}
+        assignments={assignments}
+        readOnly={readOnly}
+        motivoRows={motivoRows}
+        francoAlertRows={francoAlertRows}
+        initialCollapseState={initialCollapseState}
+        showFilter={showFilter}
+      />
     </div>
   );
 }
@@ -168,6 +172,14 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
     );
   }
 
+  const motivoRows = computeMotivoDashboard(employees, assignments, days);
+
+  // FB-F3-11: preferencia de colapsado de las 3 secciones, leída del
+  // cookie en el render inicial (sin parpadeo). Cookie ausente/malformada
+  // → default (calendario expandido; alertas y resumen, colapsados).
+  const cookieStore = await cookies();
+  const initialCollapseState = parseCollapseState(cookieStore.get(COLLAPSE_COOKIE_NAME)?.value);
+
   return (
     <RosterView
       year={year}
@@ -176,7 +188,10 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
       employees={employees}
       assignments={assignments}
       readOnly={!isAdmin}
+      motivoRows={motivoRows}
       francoAlertRows={francoAlertRows}
+      initialCollapseState={initialCollapseState}
+      showFilter={profile.role !== 'empleado'}
     />
   );
 }

@@ -468,6 +468,13 @@ export const copy = {
       },
       diasLabel: 'días',
     },
+    filtroEmpleado: {
+      label:         'Filtrar por empleado',
+      todos:         'Todos los empleados',
+      seleccionado:  'seleccionado',
+      seleccionados: 'seleccionados',
+      limpiar:       'Limpiar filtro',
+    },
     errors: {
       motivoRequerido:      'Seleccioná un motivo para "Fuera del trabajo".',
       motivoOtrosRequerido: 'Describí el motivo cuando seleccionás "Otros".',

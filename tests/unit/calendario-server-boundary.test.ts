@@ -16,6 +16,8 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
+vi.mock('next/headers', () => ({ cookies: vi.fn() }));
+
 vi.mock('@/lib/auth', () => ({
   requireAdmin: vi.fn(),
   requireAuth: vi.fn(),
@@ -25,13 +27,22 @@ vi.mock('@/lib/supabase/server', () => ({
   createServerClient: vi.fn(),
 }));
 
+import { cookies } from 'next/headers';
 import { requireAdmin, requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { upsertRotationAssignment } from '@/app/(app)/calendario/actions';
 import CalendarioPage from '@/app/(app)/calendario/page';
-import { RosterGrid } from '@/app/(app)/calendario/RosterGrid';
-import { FrancoAlertPanel } from '@/app/(app)/calendario/FrancoAlertPanel';
+import { CalendarioSections } from '@/app/(app)/calendario/CalendarioSections';
 import { copy } from '@/lib/copy';
+
+// FB-F3-11: page.tsx lee la cookie de colapsado con `await cookies()`
+// (next/headers). Por default (sin argumento) no hay cookie guardada →
+// CalendarioPage cae al DEFAULT_COLLAPSE_STATE.
+function mockCookies(rawValue?: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const get = vi.fn((name: string) => (rawValue !== undefined ? { name, value: rawValue } : undefined));
+  vi.mocked(cookies).mockResolvedValue({ get } as never);
+}
 
 const VALID_INPUT = {
   user_id: 'emp-1',
@@ -135,14 +146,15 @@ describe('upsertRotationAssignment: gating de servidor (no-admin rechazado)', ()
   });
 });
 
-// ─── CalendarioPage: branch por rol (FB-F3-06) ────────────────────────────
+// ─── CalendarioPage: branch por rol (FB-F3-06, FB-F3-11) ──────────────────
 //
-// admin gestiona (RosterGrid editable); supervisor/empleado ven en modo
-// lectura (RosterGrid readOnly). Estos tests invocan la Server Component
-// directamente (es una función async que devuelve JSX, sin renderizar DOM)
-// y verifican el elemento RosterGrid dentro del árbol devuelto + los
-// filtros que arma cada rol en la query de profiles (scope de app
-// superpuesto a la RLS, ver app/(app)/calendario/page.tsx).
+// admin gestiona (grilla editable); supervisor/empleado ven en modo lectura.
+// Estos tests invocan la Server Component directamente (es una función
+// async que devuelve JSX, sin renderizar DOM) y verifican las props que
+// llegan a CalendarioSections (readOnly, francoAlertRows, showFilter,
+// initialCollapseState) + los filtros que arma cada rol en la query de
+// profiles (scope de app superpuesto a la RLS, ver
+// app/(app)/calendario/page.tsx).
 
 type ElementLike = { type?: unknown; props?: Record<string, unknown> };
 
@@ -150,12 +162,12 @@ type ElementLike = { type?: unknown; props?: Record<string, unknown> };
 // componente función), no el árbol de RosterView ya "renderizado". Para
 // encontrar un elemento sin montar un renderer completo, cuando el nodo es
 // un componente función que no es el target, se lo invoca directamente
-// (son todos puros / sin hooks — Card, MonthNav, Legend, RosterView,
-// MotivoDashboard, FrancoAlertPanel) para bajar un nivel más. RosterGrid es
-// la única excepción: usa useState, así que NUNCA se invoca (ni como
-// target — el chequeo de igualdad corta antes — ni de paso buscando otro
-// elemento): si se llega a él sin haber encontrado el target, se corta la
-// rama ahí (no puede contener el target de todas formas, es una hoja).
+// (son todos puros / sin hooks — Card, RosterView). CalendarioSections es
+// la única excepción: usa useState (y a su vez contiene a RosterGrid, que
+// también usa hooks), así que NUNCA se invoca (ni como target — el chequeo
+// de igualdad corta antes — ni de paso buscando otro elemento): las props
+// que le llegan ya alcanzan para verificar el branch de rol sin necesidad
+// de bajar más.
 function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (!node) return undefined;
   if (Array.isArray(node)) {
@@ -168,7 +180,7 @@ function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (typeof node !== 'object') return undefined;
   const el = node as ElementLike;
   if (el.type === type) return el;
-  if (el.type === RosterGrid) return undefined;
+  if (el.type === CalendarioSections) return undefined;
   if (typeof el.type === 'function') {
     const rendered = (el.type as (props: unknown) => unknown)(el.props);
     return findElement(rendered, type);
@@ -200,6 +212,7 @@ function mockEmptyProfilesQuery() {
   const from = vi.fn().mockReturnValue(builder);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from } as any);
+  mockCookies(); // sin cookie por default; los tests que la necesitan la pisan explícitamente.
   return { from, builder };
 }
 
@@ -208,37 +221,37 @@ describe('CalendarioPage: branch por rol', () => {
     vi.clearAllMocks();
   });
 
-  it('supervisor recibe la vista de lectura (RosterGrid readOnly), no la de gestión', async () => {
+  it('supervisor recibe la vista de lectura (grilla readOnly), no la de gestión', async () => {
     mockProfileRole('supervisor');
     mockEmptyProfilesQuery();
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    const grid = findElement(result, RosterGrid);
-    expect(grid).toBeTruthy();
-    expect(grid?.props?.readOnly).toBe(true);
+    const sections = findElement(result, CalendarioSections);
+    expect(sections).toBeTruthy();
+    expect(sections?.props?.readOnly).toBe(true);
   });
 
-  it('empleado recibe la vista de lectura (RosterGrid readOnly), no la de gestión', async () => {
+  it('empleado recibe la vista de lectura (grilla readOnly), no la de gestión', async () => {
     mockProfileRole('empleado');
     mockEmptyProfilesQuery();
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    const grid = findElement(result, RosterGrid);
-    expect(grid).toBeTruthy();
-    expect(grid?.props?.readOnly).toBe(true);
+    const sections = findElement(result, CalendarioSections);
+    expect(sections).toBeTruthy();
+    expect(sections?.props?.readOnly).toBe(true);
   });
 
-  it('admin recibe la vista de gestión (RosterGrid editable, readOnly=false) — regresión', async () => {
+  it('admin recibe la vista de gestión (grilla editable, readOnly=false) — regresión', async () => {
     mockProfileRole('admin');
     mockEmptyProfilesQuery();
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    const grid = findElement(result, RosterGrid);
-    expect(grid).toBeTruthy();
-    expect(grid?.props?.readOnly).toBe(false);
+    const sections = findElement(result, CalendarioSections);
+    expect(sections).toBeTruthy();
+    expect(sections?.props?.readOnly).toBe(false);
   });
 
   it('supervisor: la query de profiles filtra por equipo + sí mismo (or), no por lista de roles', async () => {
@@ -273,6 +286,102 @@ describe('CalendarioPage: branch por rol', () => {
   });
 });
 
+// ─── CalendarioPage: filtro por empleado — visibilidad por rol (FB-F3-11) ─
+//
+// "Para empleado el control puede omitirse": showFilter llega en false
+// para empleado y true para admin/supervisor. La lista de empleados que
+// vería el filtro es exactamente `employees` (mismo scope ya resuelto),
+// no una fuente aparte.
+
+describe('CalendarioPage: showFilter (control de filtro por empleado) por rol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('empleado: showFilter=false (el control se omite)', async () => {
+    mockProfileRole('empleado', 'emp-9');
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.showFilter).toBe(false);
+  });
+
+  it('admin: showFilter=true', async () => {
+    mockProfileRole('admin');
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.showFilter).toBe(true);
+  });
+
+  it('supervisor: showFilter=true', async () => {
+    mockProfileRole('supervisor');
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.showFilter).toBe(true);
+  });
+});
+
+// ─── CalendarioPage: preferencia de colapsado por cookie (FB-F3-11) ───────
+
+describe('CalendarioPage: initialCollapseState leído de la cookie', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('sin cookie: usa el default (calendario expandido; alertas y resumen, colapsados)', async () => {
+    mockProfileRole('admin');
+    mockEmptyProfilesQuery();
+    mockCookies(undefined);
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.initialCollapseState).toEqual({
+      alertas: false,
+      resumen: false,
+      calendario: true,
+    });
+  });
+
+  it('con cookie guardada: respeta esa preferencia por sobre el default', async () => {
+    mockProfileRole('admin');
+    mockEmptyProfilesQuery();
+    mockCookies(JSON.stringify({ alertas: true, resumen: true, calendario: false }));
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.initialCollapseState).toEqual({
+      alertas: true,
+      resumen: true,
+      calendario: false,
+    });
+  });
+
+  it('cookie malformada: cae al default en vez de romper el render', async () => {
+    mockProfileRole('admin');
+    mockEmptyProfilesQuery();
+    mockCookies('{esto no es json valido');
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.initialCollapseState).toEqual({
+      alertas: false,
+      resumen: false,
+      calendario: true,
+    });
+  });
+});
+
 // ─── FrancoAlertPanel: visible solo para admin/supervisor (FB-F3-09) ──────
 //
 // "Empleado no ve el panel" es una decisión de producto (herramienta de
@@ -303,6 +412,7 @@ function mockProfilesAndAssignments(employees: unknown[], assignments: unknown[]
   const from = vi.fn((table: string) => (table === 'profiles' ? profilesBuilder : assignmentsBuilder));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from } as any);
+  mockCookies();
   return { from, profilesBuilder, assignmentsBuilder };
 }
 
@@ -311,32 +421,33 @@ describe('CalendarioPage: visibilidad del panel de alertas de franco por rol', (
     vi.clearAllMocks();
   });
 
-  it('empleado: NO ve el panel de alertas de franco', async () => {
+  it('empleado: NO ve el panel de alertas de franco (francoAlertRows llega null a CalendarioSections)', async () => {
     mockProfileRole('empleado', 'emp-9');
     mockProfilesAndAssignments([{ id: 'emp-9', full_name: 'Empleado Nueve', email: 'emp9@test.com' }]);
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    expect(findElement(result, FrancoAlertPanel)).toBeUndefined();
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.francoAlertRows).toBeNull();
   });
 
-  it('admin: SÍ ve el panel de alertas de franco', async () => {
+  it('admin: SÍ ve el panel de alertas de franco (francoAlertRows llega como array)', async () => {
     mockProfileRole('admin');
     mockProfilesAndAssignments([{ id: 'e1', full_name: 'Empleado Uno', email: 'e1@test.com' }]);
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    const panel = findElement(result, FrancoAlertPanel);
-    expect(panel).toBeTruthy();
-    expect(panel?.props?.rows).toEqual([]);
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.francoAlertRows).toEqual([]);
   });
 
-  it('supervisor: SÍ ve el panel de alertas de franco', async () => {
+  it('supervisor: SÍ ve el panel de alertas de franco (francoAlertRows llega como array)', async () => {
     mockProfileRole('supervisor', 'sup-1');
     mockProfilesAndAssignments([{ id: 'sup-1', full_name: 'Sup Uno', email: 'sup1@test.com' }]);
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
-    expect(findElement(result, FrancoAlertPanel)).toBeTruthy();
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.francoAlertRows).toEqual([]);
   });
 });
