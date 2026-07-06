@@ -452,6 +452,22 @@ export const copy = {
       subtitle: 'Días por motivo, por empleado, en el mes visible.',
       total:    'Total',
     },
+    alertasFranco: {
+      title:      'Alertas de franco',
+      subtitle:   'Empleados que superaron un umbral de días sin franco o de franco corrido.',
+      sinAlertas: 'Sin alertas de franco.',
+      table: {
+        empleado: 'Empleado',
+        tipo:     'Alerta',
+        valor:    'Racha actual',
+        umbral:   'Umbral alcanzado',
+      },
+      tipos: {
+        sin_franco:       'Sin franco',
+        franco_excedido:  'Franco excedido',
+      },
+      diasLabel: 'días',
+    },
     errors: {
       motivoRequerido:      'Seleccioná un motivo para "Fuera del trabajo".',
       motivoOtrosRequerido: 'Describí el motivo cuando seleccionás "Otros".',

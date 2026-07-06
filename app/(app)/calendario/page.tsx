@@ -6,7 +6,15 @@ import { MonthNav } from './MonthNav';
 import { Legend } from './Legend';
 import { RosterGrid } from './RosterGrid';
 import { MotivoDashboard } from './MotivoDashboard';
+import { FrancoAlertPanel } from './FrancoAlertPanel';
 import { getCurrentYearMonth, getDaysInMonth, computeMotivoDashboard } from './utils';
+import {
+  computeFrancoAlerts,
+  getFrancoAlertWindowStart,
+  type FrancoAlertaDia,
+  type FrancoAlertRow,
+} from './francoAlerts';
+import { getBusinessToday } from '@/lib/rotation/promote-estimated';
 import type { RotationAssignment } from '@/lib/db-types';
 import type { RosterEmployee } from './RosterGrid';
 
@@ -21,6 +29,7 @@ function RosterView({
   employees,
   assignments,
   readOnly,
+  francoAlertRows,
 }: {
   year: number;
   month: number;
@@ -28,6 +37,7 @@ function RosterView({
   employees: RosterEmployee[];
   assignments: RotationAssignment[];
   readOnly: boolean;
+  francoAlertRows: FrancoAlertRow[] | null;
 }) {
   return (
     <div className="space-y-4">
@@ -35,6 +45,10 @@ function RosterView({
         <h2 className="text-lg font-semibold text-secondary">{copy.calendario.title}</h2>
         <p className="text-sm text-neutral mt-0.5">{copy.calendario.subtitle}</p>
       </div>
+
+      {/* francoAlertRows === null para empleado (FB-F3-09: herramienta de
+          gestión, no para su propia vista). */}
+      {francoAlertRows !== null && <FrancoAlertPanel rows={francoAlertRows} />}
 
       <MotivoDashboard rows={computeMotivoDashboard(employees, assignments, days)} />
 
@@ -123,6 +137,37 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
     assignments = (assignmentsRaw ?? []) as RotationAssignment[];
   }
 
+  // FB-F3-09: alertas de franco — herramienta de gestión, no visible para
+  // empleado. Ventana propia (~65 días hasta hoy), independiente del mes
+  // que esté navegando la grilla (MonthNav no la afecta).
+  let francoAlertRows: FrancoAlertRow[] | null = null;
+  if (profile.role !== 'empleado' && employeeIds.length > 0) {
+    const today = getBusinessToday();
+    const windowStart = getFrancoAlertWindowStart(today);
+
+    const { data: francoDiasRaw, error: francoError } = await supabase
+      .from('rotation_assignments')
+      .select('user_id, fecha, estado_dia, es_estimado')
+      .in('user_id', employeeIds)
+      .gte('fecha', windowStart)
+      .lte('fecha', today);
+
+    if (francoError) {
+      console.error('[CalendarioPage] error al cargar alertas de franco:', francoError.message);
+      return (
+        <Card>
+          <p className="text-error">{copy.errors.generic}</p>
+        </Card>
+      );
+    }
+
+    francoAlertRows = computeFrancoAlerts(
+      employees,
+      (francoDiasRaw ?? []) as FrancoAlertaDia[],
+      today
+    );
+  }
+
   return (
     <RosterView
       year={year}
@@ -131,6 +176,7 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
       employees={employees}
       assignments={assignments}
       readOnly={!isAdmin}
+      francoAlertRows={francoAlertRows}
     />
   );
 }
