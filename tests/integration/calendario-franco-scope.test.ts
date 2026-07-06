@@ -41,6 +41,12 @@ const SUPERVISOR_EMPLOYEES_QUERY = `
   ORDER BY full_name
 `;
 
+const EMPLOYEE_EMPLOYEES_QUERY = `
+  SELECT id, full_name, email FROM profiles
+  WHERE status = 'activo' AND id = $1
+  ORDER BY full_name
+`;
+
 type Row = { id: string; full_name: string | null; email: string };
 
 async function loadFrancoDias(c: Client, employeeIds: string[]): Promise<FrancoAlertaDia[]> {
@@ -140,6 +146,31 @@ describe.skipIf(!dbAvailable)('scope del panel de alertas de franco por rol (DB-
 
       expect(alerts.some((a) => a.employeeId === IDS.employee3)).toBe(true);
       expect(alerts.some((a) => a.employeeId === IDS.employee1)).toBe(false);
+    });
+  });
+
+  // FB-F3-10 / FB-F3-AUD-09 Hallazgo 3: page.tsx decide NO ejecutar esta
+  // query ni renderizar el panel para empleado (cubierto en
+  // tests/unit/calendario-server-boundary.test.ts, que sí puede invocar el
+  // Server Component). Acá, bajo asUser real, se agrega la capa
+  // complementaria DB-backed: si por error se ejecutara la misma query de
+  // empleados + asignaciones que arma page.tsx (defensa en profundidad),
+  // el scope de app + la RLS igual acotan el resultado a la propia fila —
+  // aunque employee1 alcanzó el umbral sembrado en beforeAll, JAMÁS
+  // aparece nada de su supervisor ni de un compañero de equipo.
+  it('empleado: aunque se ejecutara la query (defensa en profundidad), solo trae su propia fila — nunca la de su supervisor ni la de un compañero', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      const { rows: employeesRaw } = await c.query(EMPLOYEE_EMPLOYEES_QUERY, [IDS.employee1]);
+      const employees = employeesRaw as Row[];
+      expect(employees).toEqual([{ id: IDS.employee1, full_name: 'Empleado 1', email: 'emp1@test.com' }]);
+
+      const dias = await loadFrancoDias(c, employees.map((e) => e.id));
+      const alerts = computeFrancoAlerts(employees, dias, HOY);
+
+      expect(alerts.every((a) => a.employeeId === IDS.employee1)).toBe(true);
+      expect(alerts.some((a) => a.employeeId === IDS.supervisor)).toBe(false);
+      expect(alerts.some((a) => a.employeeId === IDS.employee2)).toBe(false);
+      expect(alerts.some((a) => a.employeeId === IDS.employee3)).toBe(false);
     });
   });
 });

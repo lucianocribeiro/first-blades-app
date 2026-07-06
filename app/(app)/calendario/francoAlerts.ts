@@ -76,48 +76,66 @@ export type FrancoAlertRow = {
   nivel: 1 | 2;
 };
 
-// Camina hacia atrás desde el día más reciente (asume `diasDesc` ya ordenado
-// descendente por fecha): suma en 'suma', corta en 'resetea', salvo en
-// 'neutral' (ni suma ni corta, sigue mirando hacia atrás).
-function computeStreak(diasDesc: FrancoAlertaDia[], efectos: Record<EstadoDia, EstadoEfecto>): number {
+function addDays(fecha: string, delta: number): string {
+  const [y, m, d] = fecha.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + delta)).toISOString().split('T')[0];
+}
+
+function diaKey(userId: string, fecha: string): string {
+  return `${userId}|${fecha}`;
+}
+
+// FB-F3-10 (fix de FB-F3-AUD-09, Hallazgo 1): camina por CADA fecha de
+// calendario consecutiva desde `today` hacia atrás, no sobre las filas
+// existentes. Un día SIN fila (hueco) corta la racha igual que un
+// 'resetea': no hay dato de ese día, no se puede afirmar continuidad. Solo
+// los estados mapeados como 'neutral' se saltean sin cortar. `index` debe
+// tener SOLO días reales (es_estimado = false): un día estimado (o
+// ausente) es indistinguible de un hueco, ambos cortan.
+function computeStreak(
+  index: Map<string, FrancoAlertaDia>,
+  userId: string,
+  today: string,
+  windowDays: number,
+  efectos: Record<EstadoDia, EstadoEfecto>
+): number {
   let streak = 0;
-  for (const dia of diasDesc) {
+  for (let i = 0; i < windowDays; i++) {
+    const fecha = addDays(today, -i);
+    const dia = index.get(diaKey(userId, fecha));
+    if (!dia) break; // hueco: corta
     const efecto = efectos[dia.estado_dia];
     if (efecto === 'resetea') break;
     if (efecto === 'suma') streak++;
+    // 'neutral': ni suma ni corta, sigue a la fecha anterior.
   }
   return streak;
 }
 
-// Agrega, por empleado, las alertas de franco vigentes hoy. Solo cuenta
-// días reales (es_estimado = false) con fecha <= hoy (zona horaria de
-// negocio, ver getBusinessToday) — un día futuro o estimado no participa
-// de la racha. Un empleado puede aparecer 0, 1 (una alerta) o 2 veces
-// (ambas alertas simultáneas); si alcanzó el segundo umbral, no se muestra
+// Agrega, por empleado, las alertas de franco vigentes hoy. Un día
+// estimado no entra al índice (se comporta como hueco, ver computeStreak).
+// `windowDays` acota cuántas fechas hacia atrás camina el walker — el
+// mismo tamaño de la ventana que se leyó de la base (FRANCO_ALERT_WINDOW_DAYS
+// por default); más allá de eso ya no hay datos, así que un hueco cortaría
+// igual. Un empleado puede aparecer 0, 1 (una alerta) o 2 veces (ambas
+// alertas simultáneamente); si alcanzó el segundo umbral, no se muestra
 // también el primero (el umbral alcanzado es el más alto).
 export function computeFrancoAlerts(
   employees: RosterEmployee[],
   dias: FrancoAlertaDia[],
-  today: string = getBusinessToday()
+  today: string = getBusinessToday(),
+  windowDays: number = FRANCO_ALERT_WINDOW_DAYS
 ): FrancoAlertRow[] {
-  const porEmpleado = new Map<string, FrancoAlertaDia[]>();
-  for (const emp of employees) porEmpleado.set(emp.id, []);
-
+  const index = new Map<string, FrancoAlertaDia>();
   for (const dia of dias) {
     if (dia.es_estimado) continue;
-    if (dia.fecha > today) continue;
-    const lista = porEmpleado.get(dia.user_id);
-    if (!lista) continue;
-    lista.push(dia);
+    index.set(diaKey(dia.user_id, dia.fecha), dia);
   }
 
   const rows: FrancoAlertRow[] = [];
   for (const emp of employees) {
-    const diasEmpleado = porEmpleado.get(emp.id) ?? [];
-    const diasDesc = [...diasEmpleado].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
-
     for (const alerta of FRANCO_ALERTAS) {
-      const valor = computeStreak(diasDesc, alerta.efectos);
+      const valor = computeStreak(index, emp.id, today, windowDays, alerta.efectos);
       if (valor >= alerta.umbralSegundo) {
         rows.push({
           employeeId: emp.id,
