@@ -447,6 +447,11 @@ export const copy = {
       fallecimiento:   'Fallecimiento',
       otros:           'Otros',
     },
+    dashboard: {
+      title:    'Resumen de ausencias del mes',
+      subtitle: 'Días por motivo, por empleado, en el mes visible.',
+      total:    'Total',
+    },
     errors: {
       motivoRequerido:      'Seleccioná un motivo para "Fuera del trabajo".',
       motivoOtrosRequerido: 'Describí el motivo cuando seleccionás "Otros".',
