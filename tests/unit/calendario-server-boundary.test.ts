@@ -30,6 +30,7 @@ import { createServerClient } from '@/lib/supabase/server';
 import { upsertRotationAssignment } from '@/app/(app)/calendario/actions';
 import CalendarioPage from '@/app/(app)/calendario/page';
 import { RosterGrid } from '@/app/(app)/calendario/RosterGrid';
+import { FrancoAlertPanel } from '@/app/(app)/calendario/FrancoAlertPanel';
 import { copy } from '@/lib/copy';
 
 const VALID_INPUT = {
@@ -147,11 +148,14 @@ type ElementLike = { type?: unknown; props?: Record<string, unknown> };
 
 // Sin renderer real: CalendarioPage devuelve <RosterView .../> (un
 // componente función), no el árbol de RosterView ya "renderizado". Para
-// encontrar RosterGrid sin montar un renderer completo, cuando el nodo es
+// encontrar un elemento sin montar un renderer completo, cuando el nodo es
 // un componente función que no es el target, se lo invoca directamente
-// (son todos puros / sin hooks — Card, MonthNav, Legend, RosterView) para
-// bajar un nivel más. RosterGrid (el target) nunca se invoca: usa useState,
-// y el chequeo de igualdad corta la recursión antes de llamarlo.
+// (son todos puros / sin hooks — Card, MonthNav, Legend, RosterView,
+// MotivoDashboard, FrancoAlertPanel) para bajar un nivel más. RosterGrid es
+// la única excepción: usa useState, así que NUNCA se invoca (ni como
+// target — el chequeo de igualdad corta antes — ni de paso buscando otro
+// elemento): si se llega a él sin haber encontrado el target, se corta la
+// rama ahí (no puede contener el target de todas formas, es una hoja).
 function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (!node) return undefined;
   if (Array.isArray(node)) {
@@ -164,6 +168,7 @@ function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (typeof node !== 'object') return undefined;
   const el = node as ElementLike;
   if (el.type === type) return el;
+  if (el.type === RosterGrid) return undefined;
   if (typeof el.type === 'function') {
     const rendered = (el.type as (props: unknown) => unknown)(el.props);
     return findElement(rendered, type);
@@ -265,5 +270,73 @@ describe('CalendarioPage: branch por rol', () => {
 
     expect(builder.in).toHaveBeenCalledWith('role', ['empleado', 'supervisor']);
     expect(builder.or).not.toHaveBeenCalled();
+  });
+});
+
+// ─── FrancoAlertPanel: visible solo para admin/supervisor (FB-F3-09) ──────
+//
+// "Empleado no ve el panel" es una decisión de producto (herramienta de
+// gestión), no un límite de RLS — se prueba acá, a nivel de page.tsx, no
+// en integración DB-backed (esa cubre el scope de admin/supervisor, ver
+// tests/integration/calendario-franco-scope.test.ts).
+
+// Mock de .from('profiles') Y .from('rotation_assignments') con datos: a
+// diferencia de mockEmptyProfilesQuery, acá employeeIds no está vacío, así
+// que también corren la query de asignaciones de la grilla y (si
+// corresponde) la de alertas de franco. Rutea por nombre de tabla.
+function mockProfilesAndAssignments(employees: unknown[], assignments: unknown[] = []) {
+  function makeBuilder(finalData: unknown[]) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const builder: any = {};
+    for (const method of ['select', 'eq', 'in', 'or', 'gte']) {
+      builder[method] = vi.fn().mockReturnValue(builder);
+    }
+    // .order() termina la cadena de profiles; .lte() termina la de
+    // rotation_assignments (ninguna de las dos queries de asignaciones usa order()).
+    builder.order = vi.fn().mockResolvedValue({ data: finalData, error: null });
+    builder.lte = vi.fn().mockResolvedValue({ data: finalData, error: null });
+    return builder;
+  }
+
+  const profilesBuilder = makeBuilder(employees);
+  const assignmentsBuilder = makeBuilder(assignments);
+  const from = vi.fn((table: string) => (table === 'profiles' ? profilesBuilder : assignmentsBuilder));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  vi.mocked(createServerClient).mockResolvedValue({ from } as any);
+  return { from, profilesBuilder, assignmentsBuilder };
+}
+
+describe('CalendarioPage: visibilidad del panel de alertas de franco por rol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('empleado: NO ve el panel de alertas de franco', async () => {
+    mockProfileRole('empleado', 'emp-9');
+    mockProfilesAndAssignments([{ id: 'emp-9', full_name: 'Empleado Nueve', email: 'emp9@test.com' }]);
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(findElement(result, FrancoAlertPanel)).toBeUndefined();
+  });
+
+  it('admin: SÍ ve el panel de alertas de franco', async () => {
+    mockProfileRole('admin');
+    mockProfilesAndAssignments([{ id: 'e1', full_name: 'Empleado Uno', email: 'e1@test.com' }]);
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const panel = findElement(result, FrancoAlertPanel);
+    expect(panel).toBeTruthy();
+    expect(panel?.props?.rows).toEqual([]);
+  });
+
+  it('supervisor: SÍ ve el panel de alertas de franco', async () => {
+    mockProfileRole('supervisor', 'sup-1');
+    mockProfilesAndAssignments([{ id: 'sup-1', full_name: 'Sup Uno', email: 'sup1@test.com' }]);
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(findElement(result, FrancoAlertPanel)).toBeTruthy();
   });
 });
