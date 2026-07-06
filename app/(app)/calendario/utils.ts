@@ -71,6 +71,65 @@ export function computeDefaultEsEstimado(fecha: string, today: string): boolean 
   return diffDays > 7;
 }
 
+// FB-F3-08: 6 columnas fijas del dashboard de motivos, siempre presentes
+// (con 0) aunque el mes no tenga días de ese motivo.
+export const MOTIVOS_DASHBOARD: MotivoAusencia[] = [
+  'vacaciones',
+  'licencia_medica',
+  'dia_tramite',
+  'matrimonio',
+  'fallecimiento',
+  'otros',
+];
+
+export type MotivoDashboardRow = {
+  employeeId: string;
+  fullName: string | null;
+  email: string;
+  counts: Record<MotivoAusencia, number>;
+  total: number;
+};
+
+type DashboardEmployee = { id: string; full_name: string | null; email: string };
+type DashboardAssignment = Pick<RotationAssignment, 'user_id' | 'fecha' | 'estado_dia' | 'motivo_ausencia'>;
+
+function emptyMotivoCounts(): Record<MotivoAusencia, number> {
+  return Object.fromEntries(MOTIVOS_DASHBOARD.map((m) => [m, 0])) as Record<MotivoAusencia, number>;
+}
+
+// Agrega, por empleado, la cantidad de días de periodo_fuera_trabajo de cada
+// motivo dentro del mes visible. `days` acota explícitamente al mes (filtro
+// de app, no solo confiar en que `assignments` ya venga recortado por query):
+// días fuera de `days` no cuentan, igual que días que no son
+// periodo_fuera_trabajo. "otros" se agrupa en un único número (sin exponer
+// motivo_otros_texto).
+export function computeMotivoDashboard(
+  employees: DashboardEmployee[],
+  assignments: DashboardAssignment[],
+  days: string[]
+): MotivoDashboardRow[] {
+  const daySet = new Set(days);
+  const countsByEmployee = new Map<string, Record<MotivoAusencia, number>>();
+  for (const emp of employees) {
+    countsByEmployee.set(emp.id, emptyMotivoCounts());
+  }
+
+  for (const a of assignments) {
+    if (a.estado_dia !== 'periodo_fuera_trabajo') continue;
+    if (!a.motivo_ausencia) continue;
+    if (!daySet.has(a.fecha)) continue;
+    const counts = countsByEmployee.get(a.user_id);
+    if (!counts) continue;
+    counts[a.motivo_ausencia] += 1;
+  }
+
+  return employees.map((emp) => {
+    const counts = countsByEmployee.get(emp.id) ?? emptyMotivoCounts();
+    const total = MOTIVOS_DASHBOARD.reduce((sum, m) => sum + counts[m], 0);
+    return { employeeId: emp.id, fullName: emp.full_name, email: emp.email, counts, total };
+  });
+}
+
 export type ValidateAssignmentInput = {
   estado_dia: EstadoDia;
   motivo_ausencia?: MotivoAusencia | null;

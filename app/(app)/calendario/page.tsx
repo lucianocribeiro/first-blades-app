@@ -5,7 +5,8 @@ import { Card } from '@/components/ui/Card';
 import { MonthNav } from './MonthNav';
 import { Legend } from './Legend';
 import { RosterGrid } from './RosterGrid';
-import { getCurrentYearMonth, getDaysInMonth } from './utils';
+import { MotivoDashboard } from './MotivoDashboard';
+import { getCurrentYearMonth, getDaysInMonth, computeMotivoDashboard } from './utils';
 import type { RotationAssignment } from '@/lib/db-types';
 import type { RosterEmployee } from './RosterGrid';
 
@@ -34,6 +35,8 @@ function RosterView({
         <h2 className="text-lg font-semibold text-secondary">{copy.calendario.title}</h2>
         <p className="text-sm text-neutral mt-0.5">{copy.calendario.subtitle}</p>
       </div>
+
+      <MotivoDashboard rows={computeMotivoDashboard(employees, assignments, days)} />
 
       <Card padding="sm">
         <div className="space-y-4">
