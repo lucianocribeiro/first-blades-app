@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/promote-estimated-days",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/franco-alerts",
+      "schedule": "0 6 * * *"
     }
   ]
 }

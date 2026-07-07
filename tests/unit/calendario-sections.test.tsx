@@ -60,8 +60,8 @@ const MOTIVO_ROWS: MotivoDashboardRow[] = [
 ];
 
 const FRANCO_ROWS: FrancoAlertRow[] = [
-  { employeeId: 'e1', fullName: 'Empleado Uno', email: 'e1@test.com', tipo: 'sin_franco', valor: 48, umbral: 48, nivel: 1 },
-  { employeeId: 'e2', fullName: 'Empleado Dos', email: 'e2@test.com', tipo: 'franco_excedido', valor: 10, umbral: 10, nivel: 1 },
+  { employeeId: 'e1', fullName: 'Empleado Uno', email: 'e1@test.com', tipo: 'sin_franco', valor: 48, umbral: 48, nivel: 1, rachaInicio: '2026-01-01' },
+  { employeeId: 'e2', fullName: 'Empleado Dos', email: 'e2@test.com', tipo: 'franco_excedido', valor: 10, umbral: 10, nivel: 1, rachaInicio: '2026-01-01' },
 ];
 
 const ALL_EXPANDED = { alertas: true, resumen: true, calendario: true };
