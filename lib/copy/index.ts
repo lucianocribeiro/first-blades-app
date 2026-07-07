@@ -416,8 +416,8 @@ export const copy = {
     },
     leyenda: {
       title:      'Referencias',
-      sinCargar:  'Sin cargar',
-      estimado:   'Estimado (planificado)',
+      sinCargar:  'Sin asignar',
+      estimado:   'Planificado',
     },
     noEmpleados: 'No hay empleados activos para mostrar en el roster.',
     modal: {
@@ -429,14 +429,14 @@ export const copy = {
         estado:    'Estado',
         motivo:    'Motivo',
         motivoOtros: 'Detalle del motivo',
-        estimado:  'Estimado (planificación futura)',
+        estimado:  'Planificado (a futuro)',
       },
       placeholders: {
         motivo:      'Seleccioná el motivo',
         motivoOtros: 'Describí el motivo (máx. 80 caracteres)',
       },
       hints: {
-        estimado: 'Los días estimados se muestran en tono más claro hasta 7 días antes de la fecha.',
+        estimado: 'Los días planificados se muestran en tono más claro hasta 7 días antes de la fecha.',
       },
     },
     motivos: {
@@ -453,20 +453,17 @@ export const copy = {
       total:    'Total',
     },
     alertasFranco: {
-      title:      'Alertas de franco',
-      subtitle:   'Empleados que superaron un umbral de días sin franco o de franco corrido.',
-      sinAlertas: 'Sin alertas de franco.',
+      title:      'Alertas de descanso',
+      subtitle:   'Empleados con muchos días trabajados sin descanso o con franco prolongado.',
+      sinAlertas: 'Sin alertas de descanso.',
       table: {
         empleado: 'Empleado',
         tipo:     'Alerta',
-        valor:    'Racha actual',
-        umbral:   'Umbral alcanzado',
       },
       tipos: {
-        sin_franco:       'Sin franco',
-        franco_excedido:  'Franco excedido',
+        sin_franco:       'días sin descanso',
+        franco_excedido:  'días de franco prolongado',
       },
-      diasLabel: 'días',
     },
     filtroEmpleado: {
       label:         'Filtrar por empleado',

@@ -1,9 +1,9 @@
 /**
- * Tests de render (Testing Library) — panel de alertas de franco (FB-F3-09)
+ * Tests de render (Testing Library) — panel de alertas de descanso (FB-F3-09)
  *
- * Cubre: fila muestra empleado, tipo, racha y umbral; estado vacío cuando
- * no hay alertas; el nivel 2 (segundo umbral, más urgente) se distingue
- * visualmente del nivel 1.
+ * Cubre: fila muestra empleado y la cantidad de días combinada con el tipo
+ * de alerta en un solo pill; estado vacío cuando no hay alertas; el nivel 2
+ * (el más urgente) se distingue visualmente del nivel 1.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -18,7 +18,7 @@ describe('FrancoAlertPanel (render)', () => {
     expect(screen.getByText(copy.calendario.alertasFranco.sinAlertas)).toBeInTheDocument();
   });
 
-  it('fila muestra empleado, tipo, racha (valor) y umbral alcanzado', () => {
+  it('fila muestra empleado y la cantidad de días combinada con el tipo de alerta', () => {
     const rows: FrancoAlertRow[] = [
       {
         employeeId: 'emp-1',
@@ -33,9 +33,9 @@ describe('FrancoAlertPanel (render)', () => {
     render(<FrancoAlertPanel rows={rows} />);
 
     expect(screen.getByText('Juan Pérez')).toBeInTheDocument();
-    expect(screen.getByText(copy.calendario.alertasFranco.tipos.sin_franco)).toBeInTheDocument();
-    expect(screen.getByText(`52 ${copy.calendario.alertasFranco.diasLabel}`)).toBeInTheDocument();
-    expect(screen.getByText('48')).toBeInTheDocument();
+    expect(
+      screen.getByText(`52 ${copy.calendario.alertasFranco.tipos.sin_franco}`)
+    ).toBeInTheDocument();
   });
 
   it('usa el email cuando no hay full_name', () => {
@@ -79,7 +79,7 @@ describe('FrancoAlertPanel (render)', () => {
     expect(screen.getAllByText('Ana Ruiz')).toHaveLength(2);
   });
 
-  it('nivel 2 (segundo umbral) se distingue visualmente del nivel 1 (clases de color distintas)', () => {
+  it('nivel 2 (el más urgente) se distingue visualmente del nivel 1 (clases de color distintas)', () => {
     const rows: FrancoAlertRow[] = [
       {
         employeeId: 'emp-1',
@@ -102,8 +102,9 @@ describe('FrancoAlertPanel (render)', () => {
     ];
     render(<FrancoAlertPanel rows={rows} />);
 
-    const badgeNivel1 = screen.getByText('48');
-    const badgeNivel2 = screen.getByText('60');
+    const tipoText = copy.calendario.alertasFranco.tipos.sin_franco;
+    const badgeNivel1 = screen.getByText(`48 ${tipoText}`);
+    const badgeNivel2 = screen.getByText(`60 ${tipoText}`);
     expect(badgeNivel1.className).toContain('warning');
     expect(badgeNivel2.className).toContain('error');
     expect(badgeNivel1.className).not.toBe(badgeNivel2.className);
