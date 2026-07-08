@@ -233,24 +233,30 @@ export type Database = {
       }
       notification_log: {
         Row: {
-          document_id: string
+          document_id: string | null
+          empleado_id: string | null
           id: string
+          racha_inicio: string | null
           recipient_profile_id: string
           sent_at: string
           tipo: Database["public"]["Enums"]["notification_type"]
           umbral: number
         }
         Insert: {
-          document_id: string
+          document_id?: string | null
+          empleado_id?: string | null
           id?: string
+          racha_inicio?: string | null
           recipient_profile_id: string
           sent_at?: string
           tipo: Database["public"]["Enums"]["notification_type"]
           umbral: number
         }
         Update: {
-          document_id?: string
+          document_id?: string | null
+          empleado_id?: string | null
           id?: string
+          racha_inicio?: string | null
           recipient_profile_id?: string
           sent_at?: string
           tipo?: Database["public"]["Enums"]["notification_type"]
@@ -262,6 +268,13 @@ export type Database = {
             columns: ["document_id"]
             isOneToOne: false
             referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_log_empleado_id_fkey"
+            columns: ["empleado_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -582,7 +595,10 @@ export type Database = {
         | "fallecimiento"
         | "otros"
       motivo_viaje: "inicio_franco" | "fin_franco" | "traslado_proyectos"
-      notification_type: "vencimiento_documento"
+      notification_type:
+        | "vencimiento_documento"
+        | "sin_franco"
+        | "franco_excedido"
       user_role: "admin" | "supervisor" | "empleado"
     }
     CompositeTypes: {
@@ -739,7 +755,11 @@ export const Constants = {
         "otros",
       ],
       motivo_viaje: ["inicio_franco", "fin_franco", "traslado_proyectos"],
-      notification_type: ["vencimiento_documento"],
+      notification_type: [
+        "vencimiento_documento",
+        "sin_franco",
+        "franco_excedido",
+      ],
       user_role: ["admin", "supervisor", "empleado"],
     },
   },
