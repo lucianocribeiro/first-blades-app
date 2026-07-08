@@ -503,6 +503,18 @@ describe.skipIf(!dbAvailable)('RLS: ausencia_requests', () => {
     });
   });
 
+  // FB-F3-AUD-14 Hallazgo Medio 2: faltaba el caso negativo de INSERT por otro user_id.
+  it('empleado NO puede INSERT ausencia con el user_id de otro empleado (INSERT deniega con error)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectPermissionError(
+        c,
+        `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin, estado)
+         VALUES ($1, 'dia_tramite', '2026-09-06', '2026-09-06', 'pendiente')`,
+        [IDS.employee2]
+      );
+    });
+  });
+
   // USING clause → rowCount = 0, sin error
   it('supervisor NO puede UPDATE estado de ausencia (UPDATE denegado silenciosamente → rowCount=0)', async () => {
     await asUser(IDS.supervisor, async (c) => {
@@ -512,10 +524,19 @@ describe.skipIf(!dbAvailable)('RLS: ausencia_requests', () => {
     });
   });
 
+  // FB-F3-AUD-14 Hallazgo Medio 2: faltaba el caso negativo de autoaprobación del empleado dueño.
+  it('empleado NO puede UPDATE estado de su propia ausencia — autoaprobarse (UPDATE denegado silenciosamente → rowCount=0)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(
+        c, `UPDATE ausencia_requests SET estado = 'aprobado' WHERE id = $1`, [AUSENCIA_ID]
+      );
+    });
+  });
+
   it('admin puede aprobar ausencia (UPDATE estado)', async () => {
     await asUser(IDS.admin, async (c) => {
       const { rowCount } = await c.query(
-        `UPDATE ausencia_requests SET estado = 'aprobado', reviewed_by = $1 WHERE id = $2`,
+        `UPDATE ausencia_requests SET estado = 'aprobado', reviewed_by = $1, reviewed_at = now() WHERE id = $2`,
         [IDS.admin, AUSENCIA_ID]
       );
       expect(rowCount).toBeGreaterThanOrEqual(1);

@@ -361,4 +361,74 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     `);
     expect(rows).toHaveLength(0);
   });
+
+  it('ausencia_requests: inventario EXACTO de CHECKs — solo los 2 de 0012, con definición canónica completa (FB-F3-AUD-14 Hallazgo Medio 1: drift detector real, no "existe alguno")', async () => {
+    const { rows } = await client.query(`
+      SELECT conname, pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.ausencia_requests'::regclass AND contype = 'c'
+      ORDER BY conname
+    `);
+    // Definiciones capturadas contra Postgres 17.10 real (misma versión que prod)
+    // aplicando el archivo de migración 0012 tal cual, no adivinadas.
+    expect(rows).toEqual([
+      {
+        conname: 'ausencia_requests_rechazo_requiere_motivo',
+        def: "CHECK (((estado <> 'rechazado'::approval_status) OR ((motivo_rechazo IS NOT NULL) AND (btrim(motivo_rechazo) <> ''::text))))",
+      },
+      {
+        conname: 'ausencia_requests_resolucion_completa',
+        def: "CHECK (((estado = 'pendiente'::approval_status) OR ((reviewed_by IS NOT NULL) AND (reviewed_at IS NOT NULL))))",
+      },
+    ]);
+  });
+
+  it('ausencia_requests: inventario EXACTO de índices — pkey + el parcial de 0012, con definición canónica completa (FB-F3-AUD-14 Hallazgo Medio 1)', async () => {
+    const { rows } = await client.query(`
+      SELECT indexname, indexdef FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+      ORDER BY indexname
+    `);
+    expect(rows).toEqual([
+      {
+        indexname: 'ausencia_requests_pendiente_unica',
+        indexdef:
+          "CREATE UNIQUE INDEX ausencia_requests_pendiente_unica ON public.ausencia_requests USING btree (user_id, motivo_ausencia, fecha_inicio, fecha_fin) WHERE (estado = 'pendiente'::approval_status)",
+      },
+      {
+        indexname: 'ausencia_requests_pkey',
+        indexdef: 'CREATE UNIQUE INDEX ausencia_requests_pkey ON public.ausencia_requests USING btree (id)',
+      },
+    ]);
+  });
+
+  it('ausencia_requests: ni tabla ni RLS ni enums cambiaron de forma — solo se agregaron constraints (migración 0012 es delta puro)', async () => {
+    const { rows: policies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+    `);
+    expect(policies.map((r) => r.policyname).sort()).toEqual([
+      'ausencias_delete_admin',
+      'ausencias_insert_admin',
+      'ausencias_insert_non_admin',
+      'ausencias_select',
+      'ausencias_update_admin',
+    ]);
+
+    const { rows: enums } = await client.query(`
+      SELECT typname FROM pg_type
+      WHERE typtype = 'e' AND typnamespace = 'public'::regnamespace
+      ORDER BY typname
+    `);
+    expect(enums.map((r) => r.typname)).toEqual([
+      'approval_status',
+      'certificado_tipo',
+      'employee_status',
+      'estado_dia',
+      'motivo_ausencia',
+      'motivo_viaje',
+      'notification_type',
+      'user_role',
+    ]);
+  });
 });
