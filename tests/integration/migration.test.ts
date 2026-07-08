@@ -361,4 +361,79 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     `);
     expect(rows).toHaveLength(0);
   });
+
+  it('CHECK ausencia_requests_rechazo_requiere_motivo exige motivo_rechazo no vacío cuando estado = rechazado (migración 0012)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.ausencia_requests'::regclass
+        AND conname = 'ausencia_requests_rechazo_requiere_motivo'
+        AND contype = 'c'
+    `);
+    expect(rows).toHaveLength(1);
+    const def: string = rows[0].def;
+    expect(def).toMatch(/estado/);
+    expect(def).toMatch(/rechazado/);
+    expect(def).toMatch(/motivo_rechazo IS NOT NULL/);
+    expect(def).toMatch(/btrim\(motivo_rechazo\)/);
+  });
+
+  it('CHECK ausencia_requests_resolucion_completa exige reviewed_by + reviewed_at cuando estado != pendiente (migración 0012)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.ausencia_requests'::regclass
+        AND conname = 'ausencia_requests_resolucion_completa'
+        AND contype = 'c'
+    `);
+    expect(rows).toHaveLength(1);
+    const def: string = rows[0].def;
+    expect(def).toMatch(/estado/);
+    expect(def).toMatch(/pendiente/);
+    expect(def).toMatch(/reviewed_by IS NOT NULL/);
+    expect(def).toMatch(/reviewed_at IS NOT NULL/);
+  });
+
+  it('ausencia_requests_pendiente_unica es UNIQUE parcial (user_id, motivo_ausencia, fecha_inicio, fecha_fin) WHERE estado = pendiente (migración 0012)', async () => {
+    const { rows } = await client.query(`
+      SELECT indexdef FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+        AND indexname = 'ausencia_requests_pendiente_unica'
+    `);
+    expect(rows).toHaveLength(1);
+    const def: string = rows[0].indexdef;
+    expect(def).toMatch(/UNIQUE/);
+    expect(def).toMatch(/user_id, motivo_ausencia, fecha_inicio, fecha_fin/);
+    expect(def).toMatch(/WHERE \(estado = 'pendiente'::approval_status\)/);
+  });
+
+  it('ausencia_requests: ni tabla ni RLS ni enums cambiaron de forma — solo se agregaron constraints (migración 0012 es delta puro)', async () => {
+    const { rows: policies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+    `);
+    expect(policies.map((r) => r.policyname).sort()).toEqual([
+      'ausencias_delete_admin',
+      'ausencias_insert_admin',
+      'ausencias_insert_non_admin',
+      'ausencias_select',
+      'ausencias_update_admin',
+    ]);
+
+    const { rows: enums } = await client.query(`
+      SELECT typname FROM pg_type
+      WHERE typtype = 'e' AND typnamespace = 'public'::regnamespace
+      ORDER BY typname
+    `);
+    expect(enums.map((r) => r.typname)).toEqual([
+      'approval_status',
+      'certificado_tipo',
+      'employee_status',
+      'estado_dia',
+      'motivo_ausencia',
+      'motivo_viaje',
+      'notification_type',
+      'user_role',
+    ]);
+  });
 });

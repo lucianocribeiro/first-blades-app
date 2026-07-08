@@ -515,7 +515,7 @@ describe.skipIf(!dbAvailable)('RLS: ausencia_requests', () => {
   it('admin puede aprobar ausencia (UPDATE estado)', async () => {
     await asUser(IDS.admin, async (c) => {
       const { rowCount } = await c.query(
-        `UPDATE ausencia_requests SET estado = 'aprobado', reviewed_by = $1 WHERE id = $2`,
+        `UPDATE ausencia_requests SET estado = 'aprobado', reviewed_by = $1, reviewed_at = now() WHERE id = $2`,
         [IDS.admin, AUSENCIA_ID]
       );
       expect(rowCount).toBeGreaterThanOrEqual(1);
