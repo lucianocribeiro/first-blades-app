@@ -28,6 +28,7 @@ describe('FrancoAlertPanel (render)', () => {
         valor: 52,
         umbral: 48,
         nivel: 1,
+        rachaInicio: '2026-01-01',
       },
     ];
     render(<FrancoAlertPanel rows={rows} />);
@@ -48,6 +49,7 @@ describe('FrancoAlertPanel (render)', () => {
         valor: 11,
         umbral: 10,
         nivel: 1,
+        rachaInicio: '2026-01-01',
       },
     ];
     render(<FrancoAlertPanel rows={rows} />);
@@ -64,6 +66,7 @@ describe('FrancoAlertPanel (render)', () => {
         valor: 60,
         umbral: 60,
         nivel: 2,
+        rachaInicio: '2026-01-01',
       },
       {
         employeeId: 'emp-3',
@@ -73,6 +76,7 @@ describe('FrancoAlertPanel (render)', () => {
         valor: 12,
         umbral: 12,
         nivel: 2,
+        rachaInicio: '2026-01-01',
       },
     ];
     render(<FrancoAlertPanel rows={rows} />);
@@ -89,6 +93,7 @@ describe('FrancoAlertPanel (render)', () => {
         valor: 48,
         umbral: 48,
         nivel: 1,
+        rachaInicio: '2026-01-01',
       },
       {
         employeeId: 'emp-2',
@@ -98,6 +103,7 @@ describe('FrancoAlertPanel (render)', () => {
         valor: 60,
         umbral: 60,
         nivel: 2,
+        rachaInicio: '2026-01-01',
       },
     ];
     render(<FrancoAlertPanel rows={rows} />);

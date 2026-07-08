@@ -250,4 +250,115 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     const names = rows.map((r) => r.policyname).sort();
     expect(names).toEqual(['rotation_groups_admin']);
   });
+
+  it('notification_type tiene los 3 valores correctos, incluidos los de franco (migración 0010)', async () => {
+    const { rows } = await client.query(`
+      SELECT enumlabel FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'notification_type'
+      ORDER BY enumsortorder
+    `);
+    const values = rows.map((r: { enumlabel: string }) => r.enumlabel);
+    expect(values).toEqual(['vencimiento_documento', 'sin_franco', 'franco_excedido']);
+  });
+
+  it('notification_log.document_id es nullable (migración 0011)', async () => {
+    const { rows } = await client.query(`
+      SELECT is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'notification_log' AND column_name = 'document_id'
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].is_nullable).toBe('YES');
+  });
+
+  it('notification_log tiene empleado_id (FK profiles, nullable) y racha_inicio (date, nullable) (migración 0011)', async () => {
+    const { rows } = await client.query(`
+      SELECT column_name, is_nullable, data_type
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'notification_log'
+        AND column_name IN ('empleado_id', 'racha_inicio')
+      ORDER BY column_name
+    `);
+    const byName = Object.fromEntries(rows.map((r) => [r.column_name, r]));
+    expect(byName.empleado_id.is_nullable).toBe('YES');
+    expect(byName.empleado_id.data_type).toBe('uuid');
+    expect(byName.racha_inicio.is_nullable).toBe('YES');
+    expect(byName.racha_inicio.data_type).toBe('date');
+
+    const { rows: fk } = await client.query(`
+      SELECT confrelid::regclass::text AS referenced
+      FROM pg_constraint
+      WHERE conrelid = 'public.notification_log'::regclass
+        AND contype = 'f'
+        AND conname = 'notification_log_empleado_id_fkey'
+    `);
+    expect(fk).toHaveLength(1);
+    expect(fk[0].referenced).toBe('profiles');
+  });
+
+  it('CHECK notification_log_forma_por_tipo exige document_id XOR (empleado_id + racha_inicio) según tipo (migración 0011)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.notification_log'::regclass
+        AND conname = 'notification_log_forma_por_tipo'
+        AND contype = 'c'
+    `);
+    expect(rows).toHaveLength(1);
+    const def: string = rows[0].def;
+    expect(def).toMatch(/vencimiento_documento/);
+    expect(def).toMatch(/sin_franco/);
+    expect(def).toMatch(/franco_excedido/);
+    expect(def).toMatch(/document_id IS NOT NULL/);
+    expect(def).toMatch(/empleado_id IS NOT NULL/);
+    expect(def).toMatch(/racha_inicio IS NOT NULL/);
+  });
+
+  it('CHECK notification_log_umbral_valido cubre 5/15/30 (documento), 48/60 (sin_franco) y 10/12 (franco_excedido) (migración 0011)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.notification_log'::regclass
+        AND conname = 'notification_log_umbral_valido'
+        AND contype = 'c'
+    `);
+    expect(rows).toHaveLength(1);
+    const def: string = rows[0].def;
+    expect(def).toMatch(/5, 15, 30/);
+    expect(def).toMatch(/48, 60/);
+    expect(def).toMatch(/10, 12/);
+  });
+
+  it('notification_log_franco_idempotencia es UNIQUE parcial (tipo, empleado_id, umbral, racha_inicio, recipient_profile_id) WHERE document_id IS NULL (migración 0011)', async () => {
+    const { rows } = await client.query(`
+      SELECT indexdef FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'notification_log'
+        AND indexname = 'notification_log_franco_idempotencia'
+    `);
+    expect(rows).toHaveLength(1);
+    const def: string = rows[0].indexdef;
+    expect(def).toMatch(/UNIQUE/);
+    expect(def).toMatch(/tipo, empleado_id, umbral, racha_inicio, recipient_profile_id/);
+    expect(def).toMatch(/WHERE \(document_id IS NULL\)/);
+  });
+
+  it('notification_log sigue con la UNIQUE original de documentos intacta (tipo, document_id, umbral, recipient_profile_id)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.notification_log'::regclass
+        AND conname = 'notification_log_idempotencia'
+        AND contype = 'u'
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].def).toBe('UNIQUE (tipo, document_id, umbral, recipient_profile_id)');
+  });
+
+  it('notification_log RLS sigue deny-all: sin policies (migración 0011 no agrega ninguna)', async () => {
+    const { rows } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'notification_log'
+    `);
+    expect(rows).toHaveLength(0);
+  });
 });

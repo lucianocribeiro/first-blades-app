@@ -162,6 +162,59 @@ describe('computeFrancoAlerts — Alerta B (franco_excedido: 10/12), espejo de A
   });
 });
 
+describe('computeFrancoAlerts — rachaInicio (episodio, FB-F3-13)', () => {
+  it('exactamente 48 días de trabajando hasta hoy: rachaInicio es el día más antiguo del bloque', () => {
+    const dias = diasConsecutivos(HOY, 48, 'trabajando');
+    const rows = computeFrancoAlerts(EMPLOYEES, dias, HOY);
+    const row = rows.find((r) => r.tipo === 'sin_franco')!;
+    expect(row.rachaInicio).toBe(fechaMenos(HOY, 47)); // el día 48 contando desde hoy inclusive
+  });
+
+  it('un reset corta el episodio: rachaInicio NO se corre a los días previos al reset', () => {
+    const recientes = diasConsecutivos(HOY, 48, 'trabajando');
+    const franco = diasConsecutivos(fechaMenos(HOY, 48), 1, 'en_franco');
+    const viejos = diasConsecutivos(fechaMenos(HOY, 49), 50, 'trabajando');
+
+    const rows = computeFrancoAlerts(EMPLOYEES, [...recientes, ...franco, ...viejos], HOY);
+    const row = rows.find((r) => r.tipo === 'sin_franco')!;
+    expect(row.rachaInicio).toBe(fechaMenos(HOY, 47)); // no fechaMenos(HOY, 97) de los viejos
+  });
+
+  it('los días neutrales de paso SÍ extienden rachaInicio hacia atrás (forman parte del episodio)', () => {
+    const bloque3 = diasConsecutivos(HOY, 8, 'trabajando');
+    const ausencia = diasConsecutivos(fechaMenos(HOY, 8), 1, 'periodo_fuera_trabajo');
+    const bloque2 = diasConsecutivos(fechaMenos(HOY, 9), 20, 'trabajando');
+    const viaje = diasConsecutivos(fechaMenos(HOY, 29), 1, 'en_viaje');
+    const bloque1 = diasConsecutivos(fechaMenos(HOY, 30), 20, 'trabajando');
+
+    const rows = computeFrancoAlerts(
+      EMPLOYEES,
+      [...bloque3, ...ausencia, ...bloque2, ...viaje, ...bloque1],
+      HOY
+    );
+    const row = rows.find((r) => r.tipo === 'sin_franco')!;
+    // 8 + 1 (neutral) + 20 + 1 (neutral) + 20 = 50 días de span contiguo,
+    // aunque `valor` (la cuenta que "suma") sea 48.
+    expect(row.rachaInicio).toBe(fechaMenos(HOY, 49));
+  });
+
+  it('dos empleados con la misma alerta pero rachas distintas tienen rachaInicio distinto', () => {
+    const empleados: RosterEmployee[] = [
+      { id: 'emp-1', full_name: 'Empleado Uno', email: 'emp1@test.com' },
+      { id: 'emp-2', full_name: 'Empleado Dos', email: 'emp2@test.com' },
+    ];
+    const dias1 = diasConsecutivos(HOY, 48, 'trabajando').map((d) => ({ ...d, user_id: 'emp-1' }));
+    const dias2 = diasConsecutivos(HOY, 60, 'trabajando').map((d) => ({ ...d, user_id: 'emp-2' }));
+
+    const rows = computeFrancoAlerts(empleados, [...dias1, ...dias2], HOY);
+    const row1 = rows.find((r) => r.employeeId === 'emp-1')!;
+    const row2 = rows.find((r) => r.employeeId === 'emp-2')!;
+    expect(row1.rachaInicio).toBe(fechaMenos(HOY, 47));
+    expect(row2.rachaInicio).toBe(fechaMenos(HOY, 59));
+    expect(row1.rachaInicio).not.toBe(row2.rachaInicio);
+  });
+});
+
 describe('computeFrancoAlerts — huecos cortan la racha (FB-F3-10 / FB-F3-AUD-09 Hallazgo 1)', () => {
   it('hueco en hoy: 48 días trabajando hasta AYER, sin fila para hoy → sin alerta (Alerta A)', () => {
     const dias = diasConsecutivos(fechaMenos(HOY, 1), 48, 'trabajando'); // termina ayer, nada para HOY

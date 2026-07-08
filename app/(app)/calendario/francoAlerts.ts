@@ -74,6 +74,11 @@ export type FrancoAlertRow = {
   valor: number;
   umbral: number;
   nivel: 1 | 2;
+  // FB-F3-13: fecha del día más antiguo de la racha vigente ("episodio").
+  // Si la racha se resetea y vuelve a cruzar el mismo umbral más adelante,
+  // rachaInicio cambia — eso es lo que distingue un aviso nuevo de un
+  // reenvío del cron de mail.
+  rachaInicio: string;
 };
 
 function addDays(fecha: string, delta: number): string {
@@ -92,14 +97,23 @@ function diaKey(userId: string, fecha: string): string {
 // los estados mapeados como 'neutral' se saltean sin cortar. `index` debe
 // tener SOLO días reales (es_estimado = false): un día estimado (o
 // ausente) es indistinguible de un hueco, ambos cortan.
+type StreakResult = {
+  streak: number;
+  // Fecha más antigua que sigue formando parte de la racha vigente (incluye
+  // días 'neutral' de paso, no solo los que suman) — el "episodio". `null`
+  // si la racha es 0 (hoy mismo ya corta: hueco o 'resetea').
+  inicio: string | null;
+};
+
 function computeStreak(
   index: Map<string, FrancoAlertaDia>,
   userId: string,
   today: string,
   windowDays: number,
   efectos: Record<EstadoDia, EstadoEfecto>
-): number {
+): StreakResult {
   let streak = 0;
+  let inicio: string | null = null;
   for (let i = 0; i < windowDays; i++) {
     const fecha = addDays(today, -i);
     const dia = index.get(diaKey(userId, fecha));
@@ -108,8 +122,9 @@ function computeStreak(
     if (efecto === 'resetea') break;
     if (efecto === 'suma') streak++;
     // 'neutral': ni suma ni corta, sigue a la fecha anterior.
+    inicio = fecha; // esta fecha sigue formando parte de la racha vigente.
   }
-  return streak;
+  return { streak, inicio };
 }
 
 // Agrega, por empleado, las alertas de franco vigentes hoy. Un día
@@ -135,7 +150,10 @@ export function computeFrancoAlerts(
   const rows: FrancoAlertRow[] = [];
   for (const emp of employees) {
     for (const alerta of FRANCO_ALERTAS) {
-      const valor = computeStreak(index, emp.id, today, windowDays, alerta.efectos);
+      const { streak: valor, inicio } = computeStreak(index, emp.id, today, windowDays, alerta.efectos);
+      // valor >= umbralPrimero (el único caso en que se emite una fila)
+      // siempre implica que hubo al menos un día 'suma', así que `inicio`
+      // nunca es null acá — lo afirma un test dedicado (no un `!`  a ciegas).
       if (valor >= alerta.umbralSegundo) {
         rows.push({
           employeeId: emp.id,
@@ -145,6 +163,7 @@ export function computeFrancoAlerts(
           valor,
           umbral: alerta.umbralSegundo,
           nivel: 2,
+          rachaInicio: inicio as string,
         });
       } else if (valor >= alerta.umbralPrimero) {
         rows.push({
@@ -155,6 +174,7 @@ export function computeFrancoAlerts(
           valor,
           umbral: alerta.umbralPrimero,
           nivel: 1,
+          rachaInicio: inicio as string,
         });
       }
     }

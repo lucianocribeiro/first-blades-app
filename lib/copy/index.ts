@@ -326,6 +326,14 @@ export const copy = {
       diasLabel:        'Días restantes',
       firma:            'Equipo First Blades',
     },
+    alertaFranco: {
+      subject:       'Alerta de descanso de un empleado — First Blades',
+      intro:         'Un empleado alcanzó una alerta de descanso en el Calendario de rotaciones.',
+      empleadoLabel: 'Empleado',
+      alertaLabel:   'Alerta',
+      accion:        'Podés ver el detalle en el Calendario del portal, sección Alertas de descanso.',
+      firma:         'Equipo First Blades',
+    },
   },
 
   errors: {
