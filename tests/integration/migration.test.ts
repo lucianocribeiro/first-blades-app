@@ -362,49 +362,44 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     expect(rows).toHaveLength(0);
   });
 
-  it('CHECK ausencia_requests_rechazo_requiere_motivo exige motivo_rechazo no vacío cuando estado = rechazado (migración 0012)', async () => {
+  it('ausencia_requests: inventario EXACTO de CHECKs — solo los 2 de 0012, con definición canónica completa (FB-F3-AUD-14 Hallazgo Medio 1: drift detector real, no "existe alguno")', async () => {
     const { rows } = await client.query(`
-      SELECT pg_get_constraintdef(oid) AS def
+      SELECT conname, pg_get_constraintdef(oid) AS def
       FROM pg_constraint
-      WHERE conrelid = 'public.ausencia_requests'::regclass
-        AND conname = 'ausencia_requests_rechazo_requiere_motivo'
-        AND contype = 'c'
+      WHERE conrelid = 'public.ausencia_requests'::regclass AND contype = 'c'
+      ORDER BY conname
     `);
-    expect(rows).toHaveLength(1);
-    const def: string = rows[0].def;
-    expect(def).toMatch(/estado/);
-    expect(def).toMatch(/rechazado/);
-    expect(def).toMatch(/motivo_rechazo IS NOT NULL/);
-    expect(def).toMatch(/btrim\(motivo_rechazo\)/);
+    // Definiciones capturadas contra Postgres 17.10 real (misma versión que prod)
+    // aplicando el archivo de migración 0012 tal cual, no adivinadas.
+    expect(rows).toEqual([
+      {
+        conname: 'ausencia_requests_rechazo_requiere_motivo',
+        def: "CHECK (((estado <> 'rechazado'::approval_status) OR ((motivo_rechazo IS NOT NULL) AND (btrim(motivo_rechazo) <> ''::text))))",
+      },
+      {
+        conname: 'ausencia_requests_resolucion_completa',
+        def: "CHECK (((estado = 'pendiente'::approval_status) OR ((reviewed_by IS NOT NULL) AND (reviewed_at IS NOT NULL))))",
+      },
+    ]);
   });
 
-  it('CHECK ausencia_requests_resolucion_completa exige reviewed_by + reviewed_at cuando estado != pendiente (migración 0012)', async () => {
+  it('ausencia_requests: inventario EXACTO de índices — pkey + el parcial de 0012, con definición canónica completa (FB-F3-AUD-14 Hallazgo Medio 1)', async () => {
     const { rows } = await client.query(`
-      SELECT pg_get_constraintdef(oid) AS def
-      FROM pg_constraint
-      WHERE conrelid = 'public.ausencia_requests'::regclass
-        AND conname = 'ausencia_requests_resolucion_completa'
-        AND contype = 'c'
-    `);
-    expect(rows).toHaveLength(1);
-    const def: string = rows[0].def;
-    expect(def).toMatch(/estado/);
-    expect(def).toMatch(/pendiente/);
-    expect(def).toMatch(/reviewed_by IS NOT NULL/);
-    expect(def).toMatch(/reviewed_at IS NOT NULL/);
-  });
-
-  it('ausencia_requests_pendiente_unica es UNIQUE parcial (user_id, motivo_ausencia, fecha_inicio, fecha_fin) WHERE estado = pendiente (migración 0012)', async () => {
-    const { rows } = await client.query(`
-      SELECT indexdef FROM pg_indexes
+      SELECT indexname, indexdef FROM pg_indexes
       WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
-        AND indexname = 'ausencia_requests_pendiente_unica'
+      ORDER BY indexname
     `);
-    expect(rows).toHaveLength(1);
-    const def: string = rows[0].indexdef;
-    expect(def).toMatch(/UNIQUE/);
-    expect(def).toMatch(/user_id, motivo_ausencia, fecha_inicio, fecha_fin/);
-    expect(def).toMatch(/WHERE \(estado = 'pendiente'::approval_status\)/);
+    expect(rows).toEqual([
+      {
+        indexname: 'ausencia_requests_pendiente_unica',
+        indexdef:
+          "CREATE UNIQUE INDEX ausencia_requests_pendiente_unica ON public.ausencia_requests USING btree (user_id, motivo_ausencia, fecha_inicio, fecha_fin) WHERE (estado = 'pendiente'::approval_status)",
+      },
+      {
+        indexname: 'ausencia_requests_pkey',
+        indexdef: 'CREATE UNIQUE INDEX ausencia_requests_pkey ON public.ausencia_requests USING btree (id)',
+      },
+    ]);
   });
 
   it('ausencia_requests: ni tabla ni RLS ni enums cambiaron de forma — solo se agregaron constraints (migración 0012 es delta puro)', async () => {
