@@ -431,4 +431,66 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'user_role',
     ]);
   });
+
+  // ─── FB-F3-17: función resolver_ausencia_request (0013) ───────────
+
+  it('función resolver_ausencia_request() existe con la firma (uuid, text, text), 1 default, retorna void', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        p.pronargs,
+        p.pronargdefaults,
+        pg_get_function_result(p.oid) AS ret,
+        (
+          SELECT array_agg(t.typname ORDER BY u.ord)
+          FROM unnest(p.proargtypes) WITH ORDINALITY AS u(oid, ord)
+          JOIN pg_type t ON t.oid = u.oid
+        ) AS arg_types
+      FROM pg_proc p
+      WHERE p.proname = 'resolver_ausencia_request' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].arg_types).toEqual(['uuid', 'text', 'text']);
+    expect(rows[0].pronargs).toBe(3);
+    expect(rows[0].pronargdefaults).toBe(1);
+    expect(rows[0].ret).toBe('void');
+  });
+
+  it('resolver_ausencia_request: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0013)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        has_function_privilege('authenticated', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS authenticated_can,
+        has_function_privilege('anon', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS anon_can,
+        has_function_privilege('public', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS public_can
+    `);
+    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
+  });
+
+  it('0013 es delta puro: RLS y enums de ausencia_requests/rotation_assignments/audit_log no cambiaron (solo se agregó la función)', async () => {
+    const { rows: ausenciaPolicies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+    `);
+    expect(ausenciaPolicies.map((r) => r.policyname).sort()).toEqual([
+      'ausencias_delete_admin',
+      'ausencias_insert_admin',
+      'ausencias_insert_non_admin',
+      'ausencias_select',
+      'ausencias_update_admin',
+    ]);
+
+    const { rows: rotationPolicies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'rotation_assignments'
+    `);
+    expect(rotationPolicies.map((r) => r.policyname).sort()).toEqual([
+      'rotation_assign_select',
+      'rotation_assign_write_admin',
+    ]);
+
+    const { rows: auditPolicies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'audit_log'
+    `);
+    expect(auditPolicies.map((r) => r.policyname)).toEqual(['audit_log_select_admin']);
+  });
 });
