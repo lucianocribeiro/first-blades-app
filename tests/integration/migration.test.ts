@@ -441,7 +441,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
         p.pronargdefaults,
         pg_get_function_result(p.oid) AS ret,
         (
-          SELECT array_agg(t.typname ORDER BY u.ord)
+          SELECT array_agg(t.typname::text ORDER BY u.ord)
           FROM unnest(p.proargtypes) WITH ORDINALITY AS u(oid, ord)
           JOIN pg_type t ON t.oid = u.oid
         ) AS arg_types

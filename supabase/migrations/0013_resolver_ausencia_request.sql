@@ -135,5 +135,11 @@ $$;
 -- Grants: solo el rol authenticated puede invocarla vía RPC; anon queda
 -- afuera. La guarda de admin de arriba adentro hace el resto del control de
 -- acceso (cualquier authenticated no-admin llega a la guarda y aborta).
+-- Se revoca de PUBLIC *y* explícitamente de anon: Supabase aplica ALTER
+-- DEFAULT PRIVILEGES otorgando EXECUTE a anon/authenticated/service_role en
+-- toda función nueva del schema public, además del grant implícito a
+-- PUBLIC que hace CREATE FUNCTION — revocar solo de PUBLIC no alcanza para
+-- sacarle el acceso a anon.
 REVOKE ALL ON FUNCTION public.resolver_ausencia_request(UUID, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.resolver_ausencia_request(UUID, TEXT, TEXT) FROM anon;
 GRANT EXECUTE ON FUNCTION public.resolver_ausencia_request(UUID, TEXT, TEXT) TO authenticated;
