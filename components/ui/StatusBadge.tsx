@@ -9,6 +9,8 @@ type Status =
 
 type StatusBadgeProps = {
   status: Status;
+  /** Sobrescribe el label por defecto (ej. concordancia de género: "Aprobada" en vez de "Aprobado"). */
+  label?: string;
 };
 
 const config: Record<
@@ -26,7 +28,7 @@ const config: Record<
   periodo_fuera_trabajo: { label: copy.status.periodo_fuera_trabajo, icon: XCircle,     className: 'bg-orange-50 text-orange-700 border-orange-200' },
 };
 
-export function StatusBadge({ status }: StatusBadgeProps) {
+export function StatusBadge({ status, label }: StatusBadgeProps) {
   const cfg = config[status];
   if (!cfg) return null;
   const Icon = cfg.icon;
@@ -36,7 +38,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.className}`}
     >
       <Icon size={11} />
-      {cfg.label}
+      {label ?? cfg.label}
     </span>
   );
 }
