@@ -250,6 +250,43 @@ export const copy = {
     },
   },
 
+  solicitudAusencia: {
+    formTitle:    'Solicitar día de trámite',
+    submitButton: 'Solicitar día de trámite',
+    fields: {
+      fecha: 'Fecha',
+      nota:  'Nota',
+    },
+    placeholders: {
+      nota: 'Agregá una aclaración (opcional).',
+    },
+    messages: {
+      success:  'Solicitud enviada. Quedará Pendiente hasta que Administración la apruebe.',
+      enviando: 'Enviando...',
+    },
+    errors: {
+      fechaRequerida:     'Seleccioná una fecha.',
+      pendienteDuplicada: 'Ya tenés una solicitud pendiente para ese día.',
+    },
+    listTitle:     'Mis solicitudes',
+    noSolicitudes: 'No hay solicitudes registradas aún.',
+    table: {
+      fecha:         'Fecha',
+      nota:          'Nota',
+      estado:        'Estado',
+      motivoRechazo: 'Motivo del rechazo',
+    },
+    estados: {
+      pendiente: 'Pendiente',
+      aprobado:  'Aprobada',
+      rechazado: 'Rechazada',
+    },
+    adminConsulta: {
+      message:   'Como administrador, gestionás estas solicitudes desde Aprobaciones.',
+      linkLabel: 'Ir a Aprobaciones',
+    },
+  },
+
   adminEmpleado: {
     selectorTitle:       'Administrar perfil de empleado',
     selectorPlaceholder: 'Buscar por nombre o correo…',
