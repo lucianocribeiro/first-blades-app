@@ -11,7 +11,7 @@ import type { AusenciaRequest } from '@/lib/db-types';
 export default async function SolicitudAusenciaPage() {
   const profile = await requireAuth();
 
-  // Admin entra en modo consulta (no envía); la bandeja de aprobación es FB-F3-17.
+  // Admin entra en modo consulta (no envía); gestiona estas solicitudes desde /aprobaciones (FB-F3-19).
   if (profile.role === 'admin') {
     return (
       <Card>
