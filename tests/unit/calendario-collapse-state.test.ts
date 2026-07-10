@@ -15,14 +15,14 @@ import {
 } from '@/app/(app)/calendario/collapseState';
 
 describe('parseCollapseState', () => {
-  it('sin cookie (undefined): usa el default (calendario expandido; alertas y resumen, colapsados)', () => {
+  it('sin cookie (undefined): usa el default (calendario expandido; el resto, colapsado)', () => {
     expect(parseCollapseState(undefined)).toEqual(DEFAULT_COLLAPSE_STATE);
-    expect(DEFAULT_COLLAPSE_STATE).toEqual({ alertas: false, resumen: false, calendario: true });
+    expect(DEFAULT_COLLAPSE_STATE).toEqual({ alertas: false, resumen: false, saldo: false, calendario: true });
   });
 
   it('cookie válida: devuelve exactamente los valores guardados, aunque difieran del default', () => {
-    const raw = JSON.stringify({ alertas: true, resumen: true, calendario: false });
-    expect(parseCollapseState(raw)).toEqual({ alertas: true, resumen: true, calendario: false });
+    const raw = JSON.stringify({ alertas: true, resumen: true, saldo: true, calendario: false });
+    expect(parseCollapseState(raw)).toEqual({ alertas: true, resumen: true, saldo: true, calendario: false });
   });
 
   it('JSON malformado: cae al default sin lanzar', () => {
@@ -33,8 +33,13 @@ describe('parseCollapseState', () => {
     expect(parseCollapseState(JSON.stringify({ alertas: true }))).toEqual(DEFAULT_COLLAPSE_STATE);
   });
 
+  it('cookie de una versión anterior (sin la clave "saldo" agregada en FB-F3-21): cae al default', () => {
+    const raw = JSON.stringify({ alertas: true, resumen: true, calendario: false });
+    expect(parseCollapseState(raw)).toEqual(DEFAULT_COLLAPSE_STATE);
+  });
+
   it('JSON válido pero con tipos inválidos (strings en vez de booleans): cae al default', () => {
-    const raw = JSON.stringify({ alertas: 'true', resumen: 'false', calendario: 'true' });
+    const raw = JSON.stringify({ alertas: 'true', resumen: 'false', saldo: 'false', calendario: 'true' });
     expect(parseCollapseState(raw)).toEqual(DEFAULT_COLLAPSE_STATE);
   });
 

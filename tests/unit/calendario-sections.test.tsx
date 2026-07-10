@@ -18,6 +18,7 @@ import type { RosterEmployee } from '@/app/(app)/calendario/RosterGrid';
 import type { RotationAssignment } from '@/lib/db-types';
 import type { MotivoDashboardRow } from '@/app/(app)/calendario/utils';
 import type { FrancoAlertRow } from '@/app/(app)/calendario/francoAlerts';
+import type { SaldoDiasTramite } from '@/lib/rotation/saldo-dias-tramite';
 
 const EMPLOYEES: RosterEmployee[] = [
   { id: 'e1', full_name: 'Empleado Uno', email: 'e1@test.com' },
@@ -64,7 +65,25 @@ const FRANCO_ROWS: FrancoAlertRow[] = [
   { employeeId: 'e2', fullName: 'Empleado Dos', email: 'e2@test.com', tipo: 'franco_excedido', valor: 10, umbral: 10, nivel: 1, rachaInicio: '2026-01-01' },
 ];
 
-const ALL_EXPANDED = { alertas: true, resumen: true, calendario: true };
+const SALDO_ROWS: SaldoDiasTramite[] = [
+  { employeeId: 'e1', fullName: 'Empleado Uno', email: 'e1@test.com', consumidos: 1, restantes: 2, excedido: false, fechas: [{ fecha: '2026-03-01', esEstimado: false }] },
+  {
+    employeeId: 'e2',
+    fullName: 'Empleado Dos',
+    email: 'e2@test.com',
+    consumidos: 4,
+    restantes: -1,
+    excedido: true,
+    fechas: [
+      { fecha: '2026-01-01', esEstimado: false },
+      { fecha: '2026-02-01', esEstimado: false },
+      { fecha: '2026-03-01', esEstimado: false },
+      { fecha: '2026-04-01', esEstimado: true },
+    ],
+  },
+];
+
+const ALL_EXPANDED = { alertas: true, resumen: true, saldo: true, calendario: true };
 
 function baseProps() {
   return {
@@ -76,6 +95,7 @@ function baseProps() {
     readOnly: true,
     motivoRows: MOTIVO_ROWS,
     francoAlertRows: FRANCO_ROWS,
+    saldoRows: SALDO_ROWS,
     showFilter: true,
   };
 }
@@ -102,7 +122,7 @@ describe('CalendarioSections — respeta una preferencia de colapsado ya dada', 
     render(
       <CalendarioSections
         {...baseProps()}
-        initialCollapseState={{ alertas: true, resumen: false, calendario: false }}
+        initialCollapseState={{ alertas: true, resumen: false, saldo: false, calendario: false }}
       />
     );
 
@@ -190,5 +210,32 @@ describe('CalendarioSections — francoAlertRows null (empleado): sección de al
   it('no renderiza el encabezado de alertas de franco cuando francoAlertRows es null', () => {
     render(<CalendarioSections {...baseProps()} francoAlertRows={null} />);
     expect(screen.queryByText(new RegExp(copy.calendario.alertasFranco.title))).not.toBeInTheDocument();
+  });
+});
+
+describe('CalendarioSections — saldoRows null (empleado): sección de saldo no se renderiza', () => {
+  it('no renderiza el encabezado de saldo de días de trámite cuando saldoRows es null', () => {
+    render(<CalendarioSections {...baseProps()} saldoRows={null} />);
+    expect(screen.queryByText(copy.calendario.saldoDiasTramite.title)).not.toBeInTheDocument();
+  });
+});
+
+describe('CalendarioSections — panel de saldo de días de trámite', () => {
+  it('expandido, muestra usados/restantes y el estado excedido del empleado que superó el tope', () => {
+    render(<CalendarioSections {...baseProps()} initialCollapseState={ALL_EXPANDED} />);
+    expect(screen.getByText(copy.calendario.saldoDiasTramite.table.usados)).toBeInTheDocument();
+    expect(screen.getByText(copy.calendario.saldoDiasTramite.estados.excedido)).toBeInTheDocument();
+  });
+
+  it('el filtro por empleado también acota la sección de saldo', () => {
+    render(<CalendarioSections {...baseProps()} initialCollapseState={ALL_EXPANDED} />);
+
+    fireEvent.click(screen.getByRole('button', { name: copy.calendario.filtroEmpleado.todos }));
+    fireEvent.click(within(screen.getByRole('listbox')).getByText('Empleado Uno'));
+    fireEvent.click(screen.getByRole('button', { name: `1 ${copy.calendario.filtroEmpleado.seleccionado}` }));
+
+    // Solo queda el estado "Disponible" de Empleado Uno; "Excedido" (Empleado Dos) desaparece.
+    expect(screen.queryByText(copy.calendario.saldoDiasTramite.estados.excedido)).not.toBeInTheDocument();
+    expect(screen.getByText(copy.calendario.saldoDiasTramite.estados.disponible)).toBeInTheDocument();
   });
 });

@@ -13,6 +13,12 @@ import {
 } from './francoAlerts';
 import { COLLAPSE_COOKIE_NAME, parseCollapseState } from './collapseState';
 import { getBusinessToday } from '@/lib/rotation/promote-estimated';
+import {
+  computeSaldoDiasTramite,
+  getYearRange,
+  type DiaTramiteRow,
+  type SaldoDiasTramite,
+} from '@/lib/rotation/saldo-dias-tramite';
 import type { RotationAssignment } from '@/lib/db-types';
 import type { RosterEmployee } from './RosterGrid';
 import type { MotivoDashboardRow } from './utils';
@@ -30,6 +36,7 @@ function RosterView({
   readOnly,
   motivoRows,
   francoAlertRows,
+  saldoRows,
   initialCollapseState,
   showFilter,
 }: {
@@ -41,6 +48,7 @@ function RosterView({
   readOnly: boolean;
   motivoRows: MotivoDashboardRow[];
   francoAlertRows: FrancoAlertRow[] | null;
+  saldoRows: SaldoDiasTramite[] | null;
   initialCollapseState: ReturnType<typeof parseCollapseState>;
   showFilter: boolean;
 }) {
@@ -60,6 +68,7 @@ function RosterView({
         readOnly={readOnly}
         motivoRows={motivoRows}
         francoAlertRows={francoAlertRows}
+        saldoRows={saldoRows}
         initialCollapseState={initialCollapseState}
         showFilter={showFilter}
       />
@@ -172,11 +181,39 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
     );
   }
 
+  // FB-F3-21: saldo de días de trámite del año en curso — herramienta de
+  // gestión, no visible para empleado (que ve el suyo en Solicitud de
+  // Ausencia). Ventana propia (el año calendario completo), independiente
+  // del mes que esté navegando la grilla.
+  let saldoRows: SaldoDiasTramite[] | null = null;
+  if (profile.role !== 'empleado' && employeeIds.length > 0) {
+    const { start: yearStart, end: yearEnd } = getYearRange();
+
+    const { data: diasTramiteRaw, error: saldoError } = await supabase
+      .from('rotation_assignments')
+      .select('user_id, fecha, es_estimado')
+      .in('user_id', employeeIds)
+      .eq('motivo_ausencia', 'dia_tramite')
+      .gte('fecha', yearStart)
+      .lte('fecha', yearEnd);
+
+    if (saldoError) {
+      console.error('[CalendarioPage] error al cargar el saldo de días de trámite:', saldoError.message);
+      return (
+        <Card>
+          <p className="text-error">{copy.errors.generic}</p>
+        </Card>
+      );
+    }
+
+    saldoRows = computeSaldoDiasTramite(employees, (diasTramiteRaw ?? []) as DiaTramiteRow[]);
+  }
+
   const motivoRows = computeMotivoDashboard(employees, assignments, days);
 
-  // FB-F3-11: preferencia de colapsado de las 3 secciones, leída del
+  // FB-F3-11: preferencia de colapsado de las secciones, leída del
   // cookie en el render inicial (sin parpadeo). Cookie ausente/malformada
-  // → default (calendario expandido; alertas y resumen, colapsados).
+  // → default (calendario expandido; el resto, colapsado).
   const cookieStore = await cookies();
   const initialCollapseState = parseCollapseState(cookieStore.get(COLLAPSE_COOKIE_NAME)?.value);
 
@@ -190,6 +227,7 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
       readOnly={!isAdmin}
       motivoRows={motivoRows}
       francoAlertRows={francoAlertRows}
+      saldoRows={saldoRows}
       initialCollapseState={initialCollapseState}
       showFilter={profile.role !== 'empleado'}
     />

@@ -285,6 +285,15 @@ export const copy = {
       message:   'Como administrador, gestionás estas solicitudes desde Aprobaciones.',
       linkLabel: 'Ir a Aprobaciones',
     },
+    saldo: {
+      title:           'Días de trámite',
+      restantesPrefix: 'Te quedan',
+      restantesSufijo: 'días de trámite este año.',
+      sinDisponibles:  'No te quedan días de trámite disponibles este año.',
+      excedido:        'Superaste el tope de días de trámite de este año.',
+      fechasTitle:     'Fechas usadas este año',
+      sinFechas:       'Todavía no usaste ningún día de trámite este año.',
+    },
   },
 
   adminEmpleado: {
@@ -334,6 +343,11 @@ export const copy = {
       alreadyResolved:    'Esta solicitud ya fue resuelta.',
       resolvedEmailFailed: 'Resuelto; no se pudo enviar el mail.',
       outOfScope:         'No se puede procesar esta solicitud desde esta bandeja.',
+    },
+    badgeSaldo: {
+      usado:   'Usó',
+      de:      'de',
+      excede:  'excede',
     },
   },
 
@@ -528,6 +542,21 @@ export const copy = {
       tipos: {
         sin_franco:       'días sin descanso',
         franco_excedido:  'días de franco prolongado',
+      },
+    },
+    saldoDiasTramite: {
+      title:        'Saldo de días de trámite',
+      subtitle:     'Días de trámite usados y disponibles este año, por empleado.',
+      sinEmpleados: 'No hay empleados activos para mostrar.',
+      table: {
+        empleado:  'Empleado',
+        usados:    'Usados',
+        restantes: 'Restantes',
+        estado:    'Estado',
+      },
+      estados: {
+        disponible: 'Disponible',
+        excedido:   'Excedido',
       },
     },
     filtroEmpleado: {

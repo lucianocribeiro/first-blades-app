@@ -9,12 +9,14 @@ import { Legend } from './Legend';
 import { RosterGrid } from './RosterGrid';
 import { MotivoDashboard } from './MotivoDashboard';
 import { FrancoAlertPanel } from './FrancoAlertPanel';
+import { SaldoDiasTramitePanel } from './SaldoDiasTramitePanel';
 import { EmployeeFilter } from './EmployeeFilter';
 import { DEFAULT_COLLAPSE_STATE, setCollapseCookie, type CollapseState, type SeccionId } from './collapseState';
 import type { RotationAssignment } from '@/lib/db-types';
 import type { RosterEmployee } from './RosterGrid';
 import type { MotivoDashboardRow } from './utils';
 import type { FrancoAlertRow } from './francoAlerts';
+import type { SaldoDiasTramite } from '@/lib/rotation/saldo-dias-tramite';
 
 type CalendarioSectionsProps = {
   year: number;
@@ -25,6 +27,7 @@ type CalendarioSectionsProps = {
   readOnly: boolean;
   motivoRows: MotivoDashboardRow[];
   francoAlertRows: FrancoAlertRow[] | null;
+  saldoRows: SaldoDiasTramite[] | null;
   initialCollapseState?: CollapseState;
   showFilter: boolean;
 };
@@ -44,6 +47,7 @@ export function CalendarioSections({
   readOnly,
   motivoRows,
   francoAlertRows,
+  saldoRows,
   initialCollapseState = DEFAULT_COLLAPSE_STATE,
   showFilter,
 }: CalendarioSectionsProps) {
@@ -78,6 +82,13 @@ export function CalendarioSections({
     ? new Set(filteredFrancoRows.map((row) => row.employeeId)).size
     : 0;
 
+  const filteredSaldoRows =
+    saldoRows === null
+      ? null
+      : selectedSet
+        ? saldoRows.filter((row) => selectedSet.has(row.employeeId))
+        : saldoRows;
+
   return (
     <div className="space-y-4">
       {showFilter && (
@@ -93,6 +104,17 @@ export function CalendarioSections({
           onToggle={() => toggleSection('alertas')}
         >
           <FrancoAlertPanel rows={filteredFrancoRows} />
+        </CollapsibleSection>
+      )}
+
+      {filteredSaldoRows !== null && (
+        <CollapsibleSection
+          title={copy.calendario.saldoDiasTramite.title}
+          subtitle={copy.calendario.saldoDiasTramite.subtitle}
+          expanded={collapseState.saldo}
+          onToggle={() => toggleSection('saldo')}
+        >
+          <SaldoDiasTramitePanel rows={filteredSaldoRows} />
         </CollapsibleSection>
       )}
 
