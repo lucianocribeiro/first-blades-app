@@ -455,6 +455,43 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     expect(rows[0].ret).toBe('void');
   });
 
+  it('resolver_ausencia_request: SECURITY DEFINER con search_path fijo y owner consistente con is_admin()/auth_role() (FB-F3-18, cierra Nota de FB-F3-AUD-17)', async () => {
+    // prosecdef + proconfig: la guarda de admin de adentro de la función es
+    // el control de seguridad real (bypassea RLS de audit_log/rotation_assignments),
+    // así que si algún día se pierde SECURITY DEFINER o el search_path fijo,
+    // este test tiene que romper.
+    const { rows } = await client.query(`
+      SELECT p.prosecdef, p.proconfig, r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname = 'resolver_ausencia_request' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].prosecdef).toBe(true);
+    expect(rows[0].proconfig).toContain('search_path=public');
+
+    // El owner concreto (nombre de rol) difiere entre el Postgres local de
+    // CI y producción, así que no se afirma un nombre hardcodeado. Lo que
+    // importa para la seguridad es: (a) no es un rol de app (authenticated/
+    // anon podrían escalar si fueran owner) y (b) es el mismo rol que ya es
+    // owner de los otros SECURITY DEFINER de RLS (is_admin/auth_role) — si
+    // resolver_ausencia_request quedara con un owner distinto, sería una
+    // señal de drift en cómo se aplicó la migración.
+    expect(['authenticated', 'anon', 'public']).not.toContain(rows[0].owner);
+
+    const { rows: helperOwners } = await client.query(`
+      SELECT p.proname, r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname IN ('is_admin', 'auth_role') AND p.pronamespace = 'public'::regnamespace
+      ORDER BY p.proname
+    `);
+    expect(helperOwners).toHaveLength(2);
+    for (const helper of helperOwners) {
+      expect(helper.owner).toBe(rows[0].owner);
+    }
+  });
+
   it('resolver_ausencia_request: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0013)', async () => {
     const { rows } = await client.query(`
       SELECT
