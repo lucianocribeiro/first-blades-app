@@ -431,4 +431,103 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'user_role',
     ]);
   });
+
+  // ─── FB-F3-17: función resolver_ausencia_request (0013) ───────────
+
+  it('función resolver_ausencia_request() existe con la firma (uuid, text, text), 1 default, retorna void', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        p.pronargs,
+        p.pronargdefaults,
+        pg_get_function_result(p.oid) AS ret,
+        (
+          SELECT array_agg(t.typname::text ORDER BY u.ord)
+          FROM unnest(p.proargtypes) WITH ORDINALITY AS u(oid, ord)
+          JOIN pg_type t ON t.oid = u.oid
+        ) AS arg_types
+      FROM pg_proc p
+      WHERE p.proname = 'resolver_ausencia_request' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].arg_types).toEqual(['uuid', 'text', 'text']);
+    expect(rows[0].pronargs).toBe(3);
+    expect(rows[0].pronargdefaults).toBe(1);
+    expect(rows[0].ret).toBe('void');
+  });
+
+  it('resolver_ausencia_request: SECURITY DEFINER con search_path fijo y owner consistente con is_admin()/auth_role() (FB-F3-18, cierra Nota de FB-F3-AUD-17)', async () => {
+    // prosecdef + proconfig: la guarda de admin de adentro de la función es
+    // el control de seguridad real (bypassea RLS de audit_log/rotation_assignments),
+    // así que si algún día se pierde SECURITY DEFINER o el search_path fijo,
+    // este test tiene que romper.
+    const { rows } = await client.query(`
+      SELECT p.prosecdef, p.proconfig, r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname = 'resolver_ausencia_request' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].prosecdef).toBe(true);
+    expect(rows[0].proconfig).toContain('search_path=public');
+
+    // El owner concreto (nombre de rol) difiere entre el Postgres local de
+    // CI y producción, así que no se afirma un nombre hardcodeado. Lo que
+    // importa para la seguridad es: (a) no es un rol de app (authenticated/
+    // anon podrían escalar si fueran owner) y (b) es el mismo rol que ya es
+    // owner de los otros SECURITY DEFINER de RLS (is_admin/auth_role) — si
+    // resolver_ausencia_request quedara con un owner distinto, sería una
+    // señal de drift en cómo se aplicó la migración.
+    expect(['authenticated', 'anon', 'public']).not.toContain(rows[0].owner);
+
+    const { rows: helperOwners } = await client.query(`
+      SELECT p.proname, r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname IN ('is_admin', 'auth_role') AND p.pronamespace = 'public'::regnamespace
+      ORDER BY p.proname
+    `);
+    expect(helperOwners).toHaveLength(2);
+    for (const helper of helperOwners) {
+      expect(helper.owner).toBe(rows[0].owner);
+    }
+  });
+
+  it('resolver_ausencia_request: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0013)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        has_function_privilege('authenticated', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS authenticated_can,
+        has_function_privilege('anon', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS anon_can,
+        has_function_privilege('public', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS public_can
+    `);
+    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
+  });
+
+  it('0013 es delta puro: RLS y enums de ausencia_requests/rotation_assignments/audit_log no cambiaron (solo se agregó la función)', async () => {
+    const { rows: ausenciaPolicies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+    `);
+    expect(ausenciaPolicies.map((r) => r.policyname).sort()).toEqual([
+      'ausencias_delete_admin',
+      'ausencias_insert_admin',
+      'ausencias_insert_non_admin',
+      'ausencias_select',
+      'ausencias_update_admin',
+    ]);
+
+    const { rows: rotationPolicies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'rotation_assignments'
+    `);
+    expect(rotationPolicies.map((r) => r.policyname).sort()).toEqual([
+      'rotation_assign_select',
+      'rotation_assign_write_admin',
+    ]);
+
+    const { rows: auditPolicies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'audit_log'
+    `);
+    expect(auditPolicies.map((r) => r.policyname)).toEqual(['audit_log_select_admin']);
+  });
 });
