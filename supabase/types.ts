@@ -571,6 +571,14 @@ export type Database = {
         }
         Returns: undefined
       }
+      resolver_ausencia_request: {
+        Args: {
+          p_accion: string
+          p_motivo_rechazo?: string
+          p_request_id: string
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       approval_status: "pendiente" | "aprobado" | "rechazado"
