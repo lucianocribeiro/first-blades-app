@@ -21,6 +21,32 @@ type ServerSupabase = Awaited<ReturnType<typeof createServerClient>>;
 
 export type ResolveAusenciaResult = { emailSent: boolean };
 
+// Revalida el scope de esta bandeja ANTES de invocar la RPC: la RPC valida
+// admin + estado pendiente, pero no limita el motivo (es genérica, pensada
+// también para otros tipos de ausencia en Fase 4). Sin este chequeo, un
+// requestId manipulado o desactualizado podría colar una solicitud de otro
+// motivo (ej. 'vacaciones') a través de esta action de días de trámite y
+// disparar el mail equivocado. Capa de scope de app superpuesta a la RPC —
+// no la reemplaza, la RPC sigue siendo la autoridad de admin/estado/atomicidad.
+async function assertInQueueScope(supabase: ServerSupabase, requestId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('ausencia_requests')
+    .select('estado, motivo_ausencia')
+    .eq('id', requestId)
+    .single();
+
+  if (error || !data) {
+    throw new Error(copy.aprobaciones.messages.alreadyResolved);
+  }
+  const row = data as { estado: string; motivo_ausencia: string };
+  if (row.estado !== 'pendiente') {
+    throw new Error(copy.aprobaciones.messages.alreadyResolved);
+  }
+  if (row.motivo_ausencia !== 'dia_tramite') {
+    throw new Error(copy.aprobaciones.messages.outOfScope);
+  }
+}
+
 // Vuelve a leer la solicitud + el perfil del dueño DESPUÉS de resolverla, para
 // no confiar en datos que el cliente pudo haber tenido desactualizados o
 // manipulados — mismo criterio que rejectDocument en aprobaciones/actions.ts.
@@ -44,6 +70,8 @@ async function fetchRequestForNotification(supabase: ServerSupabase, requestId: 
 export async function approveAusencia(requestId: string): Promise<ResolveAusenciaResult> {
   await requireAdmin();
   const supabase = await createServerClient();
+
+  await assertInQueueScope(supabase, requestId);
 
   // El cliente de createServerClient() (@supabase/ssr) colapsa el genérico de
   // postgrest-js a `never`/`undefined` en .rpc() (mismo bug ya documentado
@@ -100,6 +128,8 @@ export async function rejectAusencia(requestId: string, motivo: string): Promise
 
   await requireAdmin();
   const supabase = await createServerClient();
+
+  await assertInQueueScope(supabase, requestId);
 
   const { error } = await supabase.rpc('resolver_ausencia_request', {
     p_request_id:     requestId,

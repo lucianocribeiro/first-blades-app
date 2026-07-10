@@ -40,6 +40,8 @@ import { approveAusencia, rejectAusencia } from '@/app/(app)/aprobaciones/ausenc
 import { copy } from '@/lib/copy';
 
 type RequestData = {
+  estado: string;
+  motivo_ausencia: string;
   fecha_inicio: string;
   user_profile: { full_name: string | null; email: string | null } | null;
 } | null;
@@ -52,12 +54,19 @@ interface ServerClientOptions {
   requestError?: unknown;
 }
 
+// requestData sirve tanto para la revalidación de scope (assertInQueueScope:
+// estado + motivo_ausencia) como para la notificación post-resolución
+// (fetchRequestForNotification: fecha_inicio + user_profile) — el mock no
+// distingue qué columnas pidió cada .select(), así que una sola fila
+// "superset" alcanza para ambas llamadas.
 function makeServerClient(opts: ServerClientOptions = {}) {
   const {
     role = 'admin',
     userId = 'admin-id',
     rpcError = null,
     requestData = {
+      estado: 'pendiente',
+      motivo_ausencia: 'dia_tramite',
       fecha_inicio: '2027-03-15',
       user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
     },
@@ -142,7 +151,12 @@ describe('approveAusencia: happy path', () => {
   it('caso email nulo: loguea el skip, no envía, no crashea', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockClient({
-      requestData: { fecha_inicio: '2027-03-15', user_profile: { full_name: 'Sin Mail', email: null } },
+      requestData: {
+        estado: 'pendiente',
+        motivo_ausencia: 'dia_tramite',
+        fecha_inicio: '2027-03-15',
+        user_profile: { full_name: 'Sin Mail', email: null },
+      },
     });
 
     const result = await approveAusencia('req-1');
@@ -228,6 +242,88 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
     await expect(rejectAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
     expect(sendAusenciaRejectionEmail).not.toHaveBeenCalled();
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
+  });
+});
+
+// ─── FB-F3-20: revalidación de scope server-side antes de la RPC ─────────
+
+describe('scope de la cola (FB-F3-20): la RPC no limita motivo, la action sí', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('approveAusencia: otro motivo (vacaciones) pendiente → outOfScope, NO llama la RPC ni manda mail', async () => {
+    const client = mockClient({
+      requestData: {
+        estado: 'pendiente',
+        motivo_ausencia: 'vacaciones',
+        fecha_inicio: '2027-03-15',
+        user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
+      },
+    });
+
+    await expect(approveAusencia('req-1')).rejects.toThrow(copy.aprobaciones.messages.outOfScope);
+    expect(client.rpc).not.toHaveBeenCalled();
+    expect(sendAusenciaApprovalEmail).not.toHaveBeenCalled();
+  });
+
+  it('rejectAusencia: otro motivo (vacaciones) pendiente → outOfScope, NO llama la RPC ni manda mail', async () => {
+    const client = mockClient({
+      requestData: {
+        estado: 'pendiente',
+        motivo_ausencia: 'vacaciones',
+        fecha_inicio: '2027-03-15',
+        user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
+      },
+    });
+
+    await expect(rejectAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobaciones.messages.outOfScope);
+    expect(client.rpc).not.toHaveBeenCalled();
+    expect(sendAusenciaRejectionEmail).not.toHaveBeenCalled();
+  });
+
+  it('approveAusencia: ya resuelta (estado aprobado) detectada en el pre-check → alreadyResolved, NO llega a invocar la RPC', async () => {
+    const client = mockClient({
+      requestData: {
+        estado: 'aprobado',
+        motivo_ausencia: 'dia_tramite',
+        fecha_inicio: '2027-03-15',
+        user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
+      },
+    });
+
+    await expect(approveAusencia('req-1')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    expect(client.rpc).not.toHaveBeenCalled();
+    expect(sendAusenciaApprovalEmail).not.toHaveBeenCalled();
+  });
+
+  it('approveAusencia: solicitud inexistente en el pre-check → alreadyResolved, NO llega a invocar la RPC', async () => {
+    const client = mockClient({ requestData: null, requestError: { message: 'no rows' } });
+
+    await expect(approveAusencia('req-1')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it('regresión: día de trámite pendiente sigue resolviéndose normal (aprobar) y manda el mail', async () => {
+    const client = mockClient();
+
+    const result = await approveAusencia('req-1');
+
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(sendAusenciaApprovalEmail).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ emailSent: true });
+  });
+
+  it('regresión: día de trámite pendiente sigue resolviéndose normal (rechazar) y manda el mail con el motivo', async () => {
+    const client = mockClient();
+
+    const result = await rejectAusencia('req-1', 'motivo real');
+
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(sendAusenciaRejectionEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ motivo: 'motivo real' })
+    );
+    expect(result).toEqual({ emailSent: true });
   });
 });
 

@@ -333,6 +333,7 @@ export const copy = {
       rejectError:        'Error al rechazar la solicitud.',
       alreadyResolved:    'Esta solicitud ya fue resuelta.',
       resolvedEmailFailed: 'Resuelto; no se pudo enviar el mail.',
+      outOfScope:         'No se puede procesar esta solicitud desde esta bandeja.',
     },
   },
 
