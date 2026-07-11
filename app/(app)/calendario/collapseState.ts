@@ -1,8 +1,9 @@
-// FB-F3-11: preferencia de colapsado/expandido de las 3 secciones de
+// FB-F3-11: preferencia de colapsado/expandido de las secciones de
 // /calendario, persistida por cookie (no localStorage, no base — es
 // cosmético). Se lee en el server component en el render inicial (sin
 // parpadeo) y se escribe desde el cliente al togglear una sección.
-export type SeccionId = 'alertas' | 'resumen' | 'calendario';
+// FB-F3-21: agrega 'saldo' (panel de saldo de días de trámite).
+export type SeccionId = 'alertas' | 'resumen' | 'saldo' | 'calendario';
 
 // true = expandida.
 export type CollapseState = Record<SeccionId, boolean>;
@@ -11,10 +12,11 @@ export const COLLAPSE_COOKIE_NAME = 'fb_calendario_secciones';
 const COLLAPSE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 año
 
 // Default SOLO cuando todavía no hay cookie guardada (PRD: calendario
-// arranca expandido; alertas y resumen, colapsados).
+// arranca expandido; el resto, colapsado).
 export const DEFAULT_COLLAPSE_STATE: CollapseState = {
   alertas: false,
   resumen: false,
+  saldo: false,
   calendario: true,
 };
 
@@ -24,6 +26,7 @@ function isCollapseState(value: unknown): value is CollapseState {
   return (
     typeof v.alertas === 'boolean' &&
     typeof v.resumen === 'boolean' &&
+    typeof v.saldo === 'boolean' &&
     typeof v.calendario === 'boolean'
   );
 }

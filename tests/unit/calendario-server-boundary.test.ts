@@ -336,7 +336,7 @@ describe('CalendarioPage: initialCollapseState leído de la cookie', () => {
     vi.clearAllMocks();
   });
 
-  it('sin cookie: usa el default (calendario expandido; alertas y resumen, colapsados)', async () => {
+  it('sin cookie: usa el default (calendario expandido; el resto, colapsado)', async () => {
     mockProfileRole('admin');
     mockEmptyProfilesQuery();
     mockCookies(undefined);
@@ -347,6 +347,7 @@ describe('CalendarioPage: initialCollapseState leído de la cookie', () => {
     expect(sections?.props?.initialCollapseState).toEqual({
       alertas: false,
       resumen: false,
+      saldo: false,
       calendario: true,
     });
   });
@@ -354,7 +355,7 @@ describe('CalendarioPage: initialCollapseState leído de la cookie', () => {
   it('con cookie guardada: respeta esa preferencia por sobre el default', async () => {
     mockProfileRole('admin');
     mockEmptyProfilesQuery();
-    mockCookies(JSON.stringify({ alertas: true, resumen: true, calendario: false }));
+    mockCookies(JSON.stringify({ alertas: true, resumen: true, saldo: true, calendario: false }));
 
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
@@ -362,6 +363,7 @@ describe('CalendarioPage: initialCollapseState leído de la cookie', () => {
     expect(sections?.props?.initialCollapseState).toEqual({
       alertas: true,
       resumen: true,
+      saldo: true,
       calendario: false,
     });
   });
@@ -377,6 +379,7 @@ describe('CalendarioPage: initialCollapseState leído de la cookie', () => {
     expect(sections?.props?.initialCollapseState).toEqual({
       alertas: false,
       resumen: false,
+      saldo: false,
       calendario: true,
     });
   });
@@ -449,5 +452,50 @@ describe('CalendarioPage: visibilidad del panel de alertas de franco por rol', (
 
     const sections = findElement(result, CalendarioSections);
     expect(sections?.props?.francoAlertRows).toEqual([]);
+  });
+});
+
+// ─── SaldoDiasTramitePanel: visible solo para admin/supervisor (FB-F3-21) ─
+//
+// Mismo criterio de producto que el panel de alertas de franco: herramienta
+// de gestión, empleado ve el suyo en Solicitud de Ausencia, no acá.
+
+describe('CalendarioPage: visibilidad del panel de saldo de días de trámite por rol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('empleado: NO ve el panel de saldo (saldoRows llega null a CalendarioSections)', async () => {
+    mockProfileRole('empleado', 'emp-9');
+    mockProfilesAndAssignments([{ id: 'emp-9', full_name: 'Empleado Nueve', email: 'emp9@test.com' }]);
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.saldoRows).toBeNull();
+  });
+
+  it('admin: SÍ ve el panel de saldo (saldoRows llega como array)', async () => {
+    mockProfileRole('admin');
+    mockProfilesAndAssignments([{ id: 'e1', full_name: 'Empleado Uno', email: 'e1@test.com' }]);
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.saldoRows).toEqual([
+      { employeeId: 'e1', fullName: 'Empleado Uno', email: 'e1@test.com', consumidos: 0, restantes: 3, excedido: false, fechas: [] },
+    ]);
+  });
+
+  it('supervisor: SÍ ve el panel de saldo (saldoRows llega como array)', async () => {
+    mockProfileRole('supervisor', 'sup-1');
+    mockProfilesAndAssignments([{ id: 'sup-1', full_name: 'Sup Uno', email: 'sup1@test.com' }]);
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const sections = findElement(result, CalendarioSections);
+    expect(sections?.props?.saldoRows).toEqual([
+      { employeeId: 'sup-1', fullName: 'Sup Uno', email: 'sup1@test.com', consumidos: 0, restantes: 3, excedido: false, fechas: [] },
+    ]);
   });
 });

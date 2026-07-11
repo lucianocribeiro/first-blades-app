@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { InfoBanner } from '@/components/ui/InfoBanner';
 import { approveDocument, rejectDocument } from './actions';
 import { approveAusencia, rejectAusencia } from './ausencia-actions';
+import { TOPE_DIAS_TRAMITE_ANUAL, type SaldoDiasTramite } from '@/lib/rotation/saldo-dias-tramite';
 import type { AusenciaRequest, Document, Profile } from '@/lib/db-types';
 
 type UserProfilePick = Pick<Profile, 'full_name' | 'email'>;
@@ -20,8 +21,18 @@ export type PendingItem =
   | { kind: 'documento'; data: DocumentWithUser }
   | { kind: 'ausencia'; data: AusenciaWithUser };
 
+type SaldoBadgeInfo = Pick<SaldoDiasTramite, 'consumidos' | 'excedido'>;
+
 type AprobacionesTableProps = {
   items: PendingItem[];
+  // FB-F3-21: saldo del solicitante, keyeado por user_id — solo aplica a
+  // items kind='ausencia'. No bloquea la aprobación, es informativo.
+  saldoByUser?: Record<string, SaldoBadgeInfo>;
+  // FB-F3-22: si la query de saldo falló server-side, `saldoByUser` queda
+  // vacío — eso NO puede leerse como "sin días consumidos" (dato válido).
+  // Con esta señal, la celda muestra un estado de error visible en vez de
+  // simplemente omitir el badge.
+  saldoLoadFailed?: boolean;
 };
 
 function documentTypeLabel(type: string): string {
@@ -45,7 +56,34 @@ function userName(item: PendingItem): string {
   return p.full_name || p.email || '—';
 }
 
-function DetalleCell({ item }: { item: PendingItem }) {
+function SaldoBadge({ saldo }: { saldo: SaldoBadgeInfo }) {
+  const t = copy.aprobaciones.badgeSaldo;
+  const label = saldo.excedido
+    ? `${saldo.consumidos}/${TOPE_DIAS_TRAMITE_ANUAL} — ${t.excede}`
+    : `${t.usado} ${saldo.consumidos} ${t.de} ${TOPE_DIAS_TRAMITE_ANUAL}`;
+
+  return (
+    <span
+      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${
+        saldo.excedido
+          ? 'bg-error/10 text-error border border-error/30'
+          : 'bg-surface text-neutral border border-color-border'
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function DetalleCell({
+  item,
+  saldoByUser,
+  saldoLoadFailed,
+}: {
+  item: PendingItem;
+  saldoByUser: Record<string, SaldoBadgeInfo>;
+  saldoLoadFailed: boolean;
+}) {
   if (item.kind === 'documento') {
     const doc = item.data;
     return (
@@ -62,10 +100,20 @@ function DetalleCell({ item }: { item: PendingItem }) {
   }
 
   const req = item.data;
+  const saldo = saldoByUser[req.user_id];
   return (
     <>
       <div>{formatFecha(req.fecha_inicio)}</div>
       {req.notas && <div className="text-xs mt-0.5">{req.notas}</div>}
+      {saldoLoadFailed ? (
+        <div className="text-xs text-error mt-1">{copy.aprobaciones.badgeSaldo.error}</div>
+      ) : (
+        saldo && (
+          <div>
+            <SaldoBadge saldo={saldo} />
+          </div>
+        )
+      )}
     </>
   );
 }
@@ -130,7 +178,7 @@ function RejectModal({
   );
 }
 
-export function AprobacionesTable({ items }: AprobacionesTableProps) {
+export function AprobacionesTable({ items, saldoByUser = {}, saldoLoadFailed = false }: AprobacionesTableProps) {
   const [isPending, startTransition] = useTransition();
   const [actionError, setActionError] = useState('');
   const [actionNotice, setActionNotice] = useState('');
@@ -220,7 +268,7 @@ export function AprobacionesTable({ items }: AprobacionesTableProps) {
                   {userName(item)}
                 </td>
                 <td className="py-3 px-3 text-neutral">
-                  <DetalleCell item={item} />
+                  <DetalleCell item={item} saldoByUser={saldoByUser} saldoLoadFailed={saldoLoadFailed} />
                 </td>
                 <td className="py-3 px-3 text-neutral text-xs whitespace-nowrap">
                   {new Date(item.data.created_at).toLocaleDateString('es-AR')}

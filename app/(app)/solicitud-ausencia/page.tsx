@@ -6,6 +6,12 @@ import { Card } from '@/components/ui/Card';
 import { InfoBanner } from '@/components/ui/InfoBanner';
 import { SolicitudAusenciaForm } from './SolicitudAusenciaForm';
 import { MisSolicitudesTable } from './MisSolicitudesTable';
+import { SaldoDiasTramiteCard } from './SaldoDiasTramiteCard';
+import {
+  computeSaldoDiasTramite,
+  getYearRange,
+  type DiaTramiteRow,
+} from '@/lib/rotation/saldo-dias-tramite';
 import type { AusenciaRequest } from '@/lib/db-types';
 
 export default async function SolicitudAusenciaPage() {
@@ -46,8 +52,36 @@ export default async function SolicitudAusenciaPage() {
 
   const requests = (data ?? []) as AusenciaRequest[];
 
+  // FB-F3-21: saldo de días de trámite del año en curso, derivado del
+  // calendario (rotation_assignments), no de ausencia_requests — la fuente
+  // de consumo real es lo que quedó asentado en el roster, no la solicitud
+  // en sí (una solicitud pendiente todavía no consume nada).
+  const { start: yearStart, end: yearEnd } = getYearRange();
+  const { data: diasTramiteRaw, error: saldoError } = await supabase
+    .from('rotation_assignments')
+    .select('user_id, fecha, es_estimado')
+    .eq('user_id', profile.id)
+    .eq('motivo_ausencia', 'dia_tramite')
+    .gte('fecha', yearStart)
+    .lte('fecha', yearEnd);
+
+  if (saldoError) {
+    console.error('[SolicitudAusenciaPage] error al cargar el saldo de días de trámite:', saldoError.message);
+    return (
+      <Card>
+        <p className="text-error text-sm">{copy.errors.generic}</p>
+      </Card>
+    );
+  }
+
+  const [saldo] = computeSaldoDiasTramite(
+    [{ id: profile.id, full_name: profile.full_name, email: profile.email }],
+    (diasTramiteRaw ?? []) as DiaTramiteRow[]
+  );
+
   return (
     <div className="space-y-6">
+      <SaldoDiasTramiteCard saldo={saldo} />
       <SolicitudAusenciaForm />
       <MisSolicitudesTable requests={requests} />
     </div>

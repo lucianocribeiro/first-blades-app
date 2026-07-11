@@ -29,12 +29,18 @@ import { translateAusenciaInsertError } from '@/app/(app)/solicitud-ausencia/log
 import SolicitudAusenciaPage from '@/app/(app)/solicitud-ausencia/page';
 import { SolicitudAusenciaForm } from '@/app/(app)/solicitud-ausencia/SolicitudAusenciaForm';
 import { MisSolicitudesTable } from '@/app/(app)/solicitud-ausencia/MisSolicitudesTable';
+import { SaldoDiasTramiteCard } from '@/app/(app)/solicitud-ausencia/SaldoDiasTramiteCard';
 import { Card } from '@/components/ui/Card';
 import { copy } from '@/lib/copy';
 
 function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vi.mocked(requireAuth).mockResolvedValue({ id, role } as any);
+  vi.mocked(requireAuth).mockResolvedValue({
+    id,
+    role,
+    full_name: `Test ${role}`,
+    email: `${id}@test.com`,
+  } as any);
 }
 
 function mockSupabaseInsert(error: { code?: string; message: string } | null = null) {
@@ -45,14 +51,30 @@ function mockSupabaseInsert(error: { code?: string; message: string } | null = n
   return { insertMock, fromMock };
 }
 
-function mockSupabaseSelect(result: { data: unknown[] | null; error: { message: string } | null }) {
-  const orderMock = vi.fn().mockResolvedValue(result);
+// Mockea AMBAS queries que arma page.tsx: la de "mis solicitudes"
+// (ausencia_requests) y la del saldo de días de trámite (rotation_assignments,
+// FB-F3-21). Rutea por nombre de tabla — cada una tiene una forma de cadena
+// distinta (.eq().order() vs .eq().eq().gte().lte()).
+function mockSupabaseSelect(
+  ausenciaResult: { data: unknown[] | null; error: { message: string } | null },
+  saldoResult: { data: unknown[] | null; error: { message: string } | null } = { data: [], error: null }
+) {
+  const orderMock = vi.fn().mockResolvedValue(ausenciaResult);
   const eqMock = vi.fn().mockReturnValue({ order: orderMock });
   const selectMock = vi.fn().mockReturnValue({ eq: eqMock });
-  const fromMock = vi.fn().mockReturnValue({ select: selectMock });
+
+  const saldoLteMock = vi.fn().mockResolvedValue(saldoResult);
+  const saldoGteMock = vi.fn().mockReturnValue({ lte: saldoLteMock });
+  const saldoEqMotivoMock = vi.fn().mockReturnValue({ gte: saldoGteMock });
+  const saldoEqUserMock = vi.fn().mockReturnValue({ eq: saldoEqMotivoMock });
+  const saldoSelectMock = vi.fn().mockReturnValue({ eq: saldoEqUserMock });
+
+  const fromMock = vi.fn((table: string) =>
+    table === 'ausencia_requests' ? { select: selectMock } : { select: saldoSelectMock }
+  );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from: fromMock } as any);
-  return { orderMock, eqMock, selectMock, fromMock };
+  return { orderMock, eqMock, selectMock, fromMock, saldoEqUserMock, saldoEqMotivoMock, saldoGteMock, saldoLteMock };
 }
 
 // ─── createDiaTramiteRequest: gating e integridad del purgatorio ───────────
@@ -166,31 +188,41 @@ describe('SolicitudAusenciaPage: branch por rol (FB-F3-16)', () => {
     expect((result as any).type).toBe(Card);
   });
 
-  it('empleado: recibe el formulario y su lista propia, filtrada por user_id explícito', async () => {
+  it('empleado: recibe el formulario, su lista propia (filtrada por user_id explícito) y su saldo de días de trámite', async () => {
     mockProfile('empleado', 'emp-1');
     const rows = [{ id: 'a1', user_id: 'emp-1', estado: 'pendiente' }];
-    const { eqMock } = mockSupabaseSelect({ data: rows, error: null });
+    const diasTramite = [{ user_id: 'emp-1', fecha: '2027-03-01', es_estimado: false }];
+    const { eqMock, saldoEqUserMock, saldoEqMotivoMock } = mockSupabaseSelect(
+      { data: rows, error: null },
+      { data: diasTramite, error: null }
+    );
 
     const result = await SolicitudAusenciaPage();
 
     expect(eqMock).toHaveBeenCalledWith('user_id', 'emp-1');
+    expect(saldoEqUserMock).toHaveBeenCalledWith('user_id', 'emp-1');
+    expect(saldoEqMotivoMock).toHaveBeenCalledWith('motivo_ausencia', 'dia_tramite');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const children = (result as any).props.children as any[];
+    const saldoCard = children.find((c) => c?.type === SaldoDiasTramiteCard);
     const form = children.find((c) => c?.type === SolicitudAusenciaForm);
     const table = children.find((c) => c?.type === MisSolicitudesTable);
     expect(form).toBeTruthy();
     expect(table).toBeTruthy();
     expect(table.props.requests).toEqual(rows);
+    expect(saldoCard).toBeTruthy();
+    expect(saldoCard.props.saldo).toMatchObject({ employeeId: 'emp-1', consumidos: 1, restantes: 2, excedido: false, fechas: [{ fecha: '2027-03-01', esEstimado: false }] });
   });
 
-  it('supervisor: también recibe el formulario + lista propia (no modo consulta)', async () => {
+  it('supervisor: también recibe el formulario + lista propia + saldo propio (no modo consulta)', async () => {
     mockProfile('supervisor', 'sup-1');
-    const { eqMock } = mockSupabaseSelect({ data: [], error: null });
+    const { eqMock, saldoEqUserMock } = mockSupabaseSelect({ data: [], error: null });
 
     const result = await SolicitudAusenciaPage();
 
     expect(eqMock).toHaveBeenCalledWith('user_id', 'sup-1');
+    expect(saldoEqUserMock).toHaveBeenCalledWith('user_id', 'sup-1');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((result as any).type).not.toBe(Card);
   });
