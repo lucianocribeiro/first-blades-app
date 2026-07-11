@@ -56,6 +56,11 @@ export default async function AprobacionesPage() {
   // sí (una solicitud pendiente todavía no consumió nada).
   const solicitanteIds = [...new Set(ausencias.map((item) => item.data.user_id))];
   let saldoByUser = new Map<string, SaldoDiasTramite>();
+  // FB-F3-22: si falla la query, la ausencia de badge NO puede leerse como
+  // "sin días consumidos" (dato válido) — eso ocultaría la falla y podría
+  // llevar al admin a aprobar sobre un supuesto falso. Se señaliza aparte
+  // para que la tabla muestre un estado de error visible, no silencio.
+  let saldoLoadFailed = false;
   if (solicitanteIds.length > 0) {
     const { start: yearStart, end: yearEnd } = getYearRange();
     const { data: diasTramiteRaw, error: saldoError } = await supabase
@@ -68,6 +73,7 @@ export default async function AprobacionesPage() {
 
     if (saldoError) {
       console.error('[AprobacionesPage] error al cargar el saldo de días de trámite:', saldoError.message);
+      saldoLoadFailed = true;
     } else {
       const saldoRows = computeSaldoDiasTramite(
         solicitanteIds.map((id) => ({ id, full_name: null, email: '' })),
@@ -88,7 +94,11 @@ export default async function AprobacionesPage() {
         {error ? (
           <p className="text-error text-sm py-4">{copy.errors.generic}</p>
         ) : (
-          <AprobacionesTable items={items} saldoByUser={Object.fromEntries(saldoByUser)} />
+          <AprobacionesTable
+            items={items}
+            saldoByUser={Object.fromEntries(saldoByUser)}
+            saldoLoadFailed={saldoLoadFailed}
+          />
         )}
       </Card>
     </div>

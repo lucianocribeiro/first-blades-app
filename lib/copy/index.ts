@@ -348,6 +348,7 @@ export const copy = {
       usado:   'Usó',
       de:      'de',
       excede:  'excede',
+      error:   'No se pudo calcular el saldo.',
     },
   },
 

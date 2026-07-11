@@ -114,7 +114,7 @@ describe('AprobacionesPage: saldoByUser', () => {
     });
   });
 
-  it('error al cargar el saldo: no bloquea la cola (badge simplemente no aparece), logueado', async () => {
+  it('error al cargar el saldo: se señaliza como saldoLoadFailed=true (FB-F3-22), no bloquea la cola, logueado', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const ausencias = [
       { id: 'req-1', user_id: 'emp-1', estado: 'pendiente', motivo_ausencia: 'dia_tramite', created_at: '2027-01-01T00:00:00Z' },
@@ -126,6 +126,9 @@ describe('AprobacionesPage: saldoByUser', () => {
 
     const table = findElement(result, AprobacionesTable);
     expect(table?.props?.saldoByUser).toEqual({});
+    // FB-F3-22: la ausencia de badge NO se presenta como "sin días
+    // consumidos" (dato válido) — se señaliza explícitamente como falla.
+    expect(table?.props?.saldoLoadFailed).toBe(true);
     // La cola sigue renderizando (no es el error genérico de página completa).
     expect(table?.props?.items).toHaveLength(1);
     expect(errorSpy).toHaveBeenCalledWith(
@@ -133,5 +136,17 @@ describe('AprobacionesPage: saldoByUser', () => {
       expect.any(String)
     );
     errorSpy.mockRestore();
+  });
+
+  it('saldo cargado OK: saldoLoadFailed=false — regresión', async () => {
+    const ausencias = [
+      { id: 'req-1', user_id: 'emp-1', estado: 'pendiente', motivo_ausencia: 'dia_tramite', created_at: '2027-01-01T00:00:00Z' },
+    ];
+    mockQueries({ documents: [], ausencias, diasTramite: [] });
+
+    const result = await AprobacionesPage();
+
+    const table = findElement(result, AprobacionesTable);
+    expect(table?.props?.saldoLoadFailed).toBe(false);
   });
 });

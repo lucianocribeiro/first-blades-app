@@ -28,6 +28,11 @@ type AprobacionesTableProps = {
   // FB-F3-21: saldo del solicitante, keyeado por user_id — solo aplica a
   // items kind='ausencia'. No bloquea la aprobación, es informativo.
   saldoByUser?: Record<string, SaldoBadgeInfo>;
+  // FB-F3-22: si la query de saldo falló server-side, `saldoByUser` queda
+  // vacío — eso NO puede leerse como "sin días consumidos" (dato válido).
+  // Con esta señal, la celda muestra un estado de error visible en vez de
+  // simplemente omitir el badge.
+  saldoLoadFailed?: boolean;
 };
 
 function documentTypeLabel(type: string): string {
@@ -70,7 +75,15 @@ function SaldoBadge({ saldo }: { saldo: SaldoBadgeInfo }) {
   );
 }
 
-function DetalleCell({ item, saldoByUser }: { item: PendingItem; saldoByUser: Record<string, SaldoBadgeInfo> }) {
+function DetalleCell({
+  item,
+  saldoByUser,
+  saldoLoadFailed,
+}: {
+  item: PendingItem;
+  saldoByUser: Record<string, SaldoBadgeInfo>;
+  saldoLoadFailed: boolean;
+}) {
   if (item.kind === 'documento') {
     const doc = item.data;
     return (
@@ -92,10 +105,14 @@ function DetalleCell({ item, saldoByUser }: { item: PendingItem; saldoByUser: Re
     <>
       <div>{formatFecha(req.fecha_inicio)}</div>
       {req.notas && <div className="text-xs mt-0.5">{req.notas}</div>}
-      {saldo && (
-        <div>
-          <SaldoBadge saldo={saldo} />
-        </div>
+      {saldoLoadFailed ? (
+        <div className="text-xs text-error mt-1">{copy.aprobaciones.badgeSaldo.error}</div>
+      ) : (
+        saldo && (
+          <div>
+            <SaldoBadge saldo={saldo} />
+          </div>
+        )
       )}
     </>
   );
@@ -161,7 +178,7 @@ function RejectModal({
   );
 }
 
-export function AprobacionesTable({ items, saldoByUser = {} }: AprobacionesTableProps) {
+export function AprobacionesTable({ items, saldoByUser = {}, saldoLoadFailed = false }: AprobacionesTableProps) {
   const [isPending, startTransition] = useTransition();
   const [actionError, setActionError] = useState('');
   const [actionNotice, setActionNotice] = useState('');
@@ -251,7 +268,7 @@ export function AprobacionesTable({ items, saldoByUser = {} }: AprobacionesTable
                   {userName(item)}
                 </td>
                 <td className="py-3 px-3 text-neutral">
-                  <DetalleCell item={item} saldoByUser={saldoByUser} />
+                  <DetalleCell item={item} saldoByUser={saldoByUser} saldoLoadFailed={saldoLoadFailed} />
                 </td>
                 <td className="py-3 px-3 text-neutral text-xs whitespace-nowrap">
                   {new Date(item.data.created_at).toLocaleDateString('es-AR')}

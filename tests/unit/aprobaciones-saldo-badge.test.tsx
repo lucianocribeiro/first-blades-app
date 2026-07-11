@@ -115,6 +115,42 @@ describe('AprobacionesTable: badge de saldo de días de trámite', () => {
   });
 });
 
+describe('AprobacionesTable: falla de carga del saldo (FB-F3-22)', () => {
+  it('saldoLoadFailed=true: muestra el estado de error visible, NO el badge, aunque saldoByUser esté vacío', () => {
+    render(
+      <AprobacionesTable items={[ausenciaItem('req-1', 'emp-1')]} saldoByUser={{}} saldoLoadFailed={true} />
+    );
+    expect(screen.getByText(copy.aprobaciones.badgeSaldo.error)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(copy.aprobaciones.badgeSaldo.usado))).not.toBeInTheDocument();
+  });
+
+  it('saldoLoadFailed=true no rompe la cola: el resto de la fila (usuario, fecha, acciones) sigue visible', () => {
+    render(
+      <AprobacionesTable items={[ausenciaItem('req-1', 'emp-1')]} saldoByUser={{}} saldoLoadFailed={true} />
+    );
+    expect(screen.getByText(copy.aprobaciones.actions.aprobar)).toBeInTheDocument();
+    expect(screen.getByText(copy.aprobaciones.actions.rechazar)).toBeInTheDocument();
+  });
+
+  it('saldoLoadFailed=true no afecta items kind=documento (no aplica saldo)', () => {
+    render(
+      <AprobacionesTable items={[documentoItem('doc-1', 'emp-1')]} saldoByUser={{}} saldoLoadFailed={true} />
+    );
+    expect(screen.queryByText(copy.aprobaciones.badgeSaldo.error)).not.toBeInTheDocument();
+  });
+
+  it('saldoLoadFailed=false (default) con saldo cargado OK: el badge se muestra normalmente — regresión', () => {
+    render(
+      <AprobacionesTable
+        items={[ausenciaItem('req-1', 'emp-1')]}
+        saldoByUser={{ 'emp-1': { consumidos: 2, excedido: false } }}
+      />
+    );
+    expect(screen.queryByText(copy.aprobaciones.badgeSaldo.error)).not.toBeInTheDocument();
+    expect(screen.getByText(`${copy.aprobaciones.badgeSaldo.usado} 2 ${copy.aprobaciones.badgeSaldo.de} 3`)).toBeInTheDocument();
+  });
+});
+
 // FB-F3-21: "Nada de 'saldo derivado', 'es_estimado', 'umbral' visibles."
 function collectStrings(value: unknown, acc: string[] = []): string[] {
   if (typeof value === 'string') {
