@@ -1,6 +1,6 @@
 # CLAUDE.md — Portal First Blades
 
-Contexto operativo para Claude Code. Construí **según** la constitución (`/docs/first-blades-constitucion-portal-v0.3.md`) y el PRD de la fase activa (`/docs/`). Codex audita **contra** esos documentos. Ante conflicto entre este archivo y la constitución, **gana la constitución**.
+Contexto operativo para Claude Code. Construí **según** la constitución (`/docs/constitucion.md`) y el PRD de la fase activa (`/docs/`). Codex audita **contra** esos documentos. Ante conflicto entre este archivo y la constitución, **gana la constitución**.
 
 ## Qué es
 

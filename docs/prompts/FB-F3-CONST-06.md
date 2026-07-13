@@ -97,3 +97,7 @@ Edición quirúrgica sobre `docs/constitucion.md` (v0.5 → v0.6). Numeración d
 **Deltas NO incorporados como texto nuevo porque ya estaban cubiertos** (delta G): 3 roles, ausencias nativas, viáticos externo, calendario de 4 estados y Visma diferido ya estaban en §4 y en "Decisiones cerradas (v0.5)" — se confirmó la redacción existente, no se duplicó.
 
 **Dos inconsistencias preexistentes que quedaron señaladas pero NO corregidas** (ningún delta las pedía, así que no se tocaron para mantener la edición quirúrgica): los encabezados `### Alcance del módulo Calendario (Fase 2)` y `### Alcance de Viáticos (Fase 3)` en §5 conservan la numeración de fases que anticipaba v0.5, que ya no coincide con cómo se ejecutó realmente el trabajo (Calendario se construyó en lo que este ciclo llamó "Fase 3"). Queda a criterio de Luciano si amerita una limpieza de numeración de fases en una revisión futura.
+
+## FB-F3-CONST-06-FIX (mismo PR #19)
+
+Luciano revisó el diff de v0.6 y aprobó sumar, dentro del mismo PR, la segunda inconsistencia que había quedado señalada sin corregir: `CLAUDE.md` (línea 3) referenciaba `/docs/first-blades-constitucion-portal-v0.3.md`, un archivo que **no existe** en el repo. Se corrige a `/docs/constitucion.md` (el archivo real, ahora en v0.6). Grep confirmado: no quedan otras referencias a `first-blades-constitucion-portal-v0*` en el repo. Sigue siendo docs-only, sin código/tests/migración.
