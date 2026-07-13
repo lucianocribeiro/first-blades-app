@@ -18,14 +18,16 @@ type CellEditModalProps = {
   onClose: () => void;
 };
 
-const ESTADO_OPTIONS: { value: EstadoDia; label: string }[] = [
+// Exportados para que RangeEditModal (FB-F3-23) reuse la misma fuente de
+// opciones en vez de duplicar el mapeo enum → copy.
+export const ESTADO_OPTIONS: { value: EstadoDia; label: string }[] = [
   { value: 'trabajando', label: copy.status.trabajando },
   { value: 'en_viaje', label: copy.status.en_viaje },
   { value: 'en_franco', label: copy.status.en_franco },
   { value: 'periodo_fuera_trabajo', label: copy.status.periodo_fuera_trabajo },
 ];
 
-const MOTIVO_OPTIONS: { value: MotivoAusencia; label: string }[] = [
+export const MOTIVO_OPTIONS: { value: MotivoAusencia; label: string }[] = [
   { value: 'vacaciones', label: copy.calendario.motivos.vacaciones },
   { value: 'licencia_medica', label: copy.calendario.motivos.licencia_medica },
   { value: 'dia_tramite', label: copy.calendario.motivos.dia_tramite },

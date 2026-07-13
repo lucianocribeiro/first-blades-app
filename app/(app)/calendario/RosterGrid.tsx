@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { copy } from '@/lib/copy';
-import { buildAssignmentIndex, assignmentKey, getCellVisual } from './utils';
+import { buildAssignmentIndex, assignmentKey, getCellVisual, getDateRange } from './utils';
 import { CellEditModal } from './CellEditModal';
+import { RangeEditModal } from './RangeEditModal';
 import type { RotationAssignment } from '@/lib/db-types';
 
 export type RosterEmployee = {
@@ -25,9 +26,68 @@ type SelectedCell = {
   assignment: RotationAssignment | undefined;
 };
 
+type SelectedRange = {
+  employee: RosterEmployee;
+  fechas: string[];
+};
+
+type Anchor = {
+  employeeId: string;
+  fecha: string;
+};
+
 export function RosterGrid({ employees, days, assignments, readOnly = false }: RosterGridProps) {
   const [selected, setSelected] = useState<SelectedCell | null>(null);
+  const [selectedRange, setSelectedRange] = useState<SelectedRange | null>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
   const index = buildAssignmentIndex(assignments);
+
+  // Esc cancela un ancla de rango pendiente (FB-F3-24). Solo se escucha
+  // mientras hay un ancla fijada — nunca coincide con un modal abierto (ver
+  // handleCellClick: fijar el ancla y abrir un modal son mutuamente
+  // excluyentes por construcción).
+  useEffect(() => {
+    if (!anchor) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAnchor(null);
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [anchor]);
+
+  // UX tipo planilla (FB-F3-24, fix sobre FB-F3-23): en el navegador real,
+  // CellEditModal usa <dialog>.showModal(), que inertiza la página — si el
+  // primer click de un rango abriera ese modal, el segundo shift-click no
+  // podría dispararse hasta cerrarlo. Por eso fijar el ancla de rango NUNCA
+  // abre CellEditModal: es un gesto puramente de shift-click, desacoplado
+  // del click simple.
+  //   · Click simple → edita ese día (CellEditModal) y cancela cualquier
+  //     ancla de rango pendiente.
+  //   · Primer shift-click → fija el ancla (estado visual, sin modal).
+  //   · Segundo shift-click en la MISMA fila → abre el modal de rango con el
+  //     rango inclusivo entre ancla y destino (en cualquier orden).
+  //   · Shift-click en OTRA fila → resetea el ancla a esa celda (nuevo
+  //     inicio), sin abrir ningún modal — el pintado por rango es de una
+  //     sola fila, nunca cruza empleados.
+  function handleCellClick(
+    employee: RosterEmployee,
+    fecha: string,
+    assignment: RotationAssignment | undefined,
+    shiftKey: boolean
+  ) {
+    if (shiftKey) {
+      if (anchor && anchor.employeeId === employee.id) {
+        setAnchor(null);
+        setSelectedRange({ employee, fechas: getDateRange(anchor.fecha, fecha) });
+        return;
+      }
+      setAnchor({ employeeId: employee.id, fecha });
+      return;
+    }
+    setAnchor(null);
+    setSelectedRange(null);
+    setSelected({ employee, fecha, assignment });
+  }
 
   if (employees.length === 0) {
     return (
@@ -68,6 +128,7 @@ export function RosterGrid({ employees, days, assignments, readOnly = false }: R
                     const assignment = index.get(assignmentKey(emp.id, fecha));
                     const visual = getCellVisual(assignment);
                     const nombre = emp.full_name || emp.email;
+                    const isAnchor = anchor?.employeeId === emp.id && anchor.fecha === fecha;
                     const label = `${nombre} — ${fecha} — ${visual.label}`;
                     return (
                       <td key={fecha} className="p-0.5 text-center">
@@ -82,8 +143,11 @@ export function RosterGrid({ employees, days, assignments, readOnly = false }: R
                             type="button"
                             title={visual.label}
                             aria-label={label}
-                            onClick={() => setSelected({ employee: emp, fecha, assignment })}
-                            className={`w-7 h-7 rounded ${visual.bgClass} hover:ring-2 hover:ring-primary transition-shadow`}
+                            aria-pressed={isAnchor}
+                            onClick={(e) => handleCellClick(emp, fecha, assignment, e.shiftKey)}
+                            className={`w-7 h-7 rounded ${visual.bgClass} hover:ring-2 hover:ring-primary transition-shadow ${
+                              isAnchor ? 'ring-2 ring-primary ring-offset-1' : ''
+                            }`}
                           />
                         )}
                       </td>
@@ -96,12 +160,22 @@ export function RosterGrid({ employees, days, assignments, readOnly = false }: R
         </table>
       </div>
 
+      {anchor && <p className="text-xs text-neutral mt-2">{copy.calendario.range.seleccion.anclaHint}</p>}
+
       {selected && (
         <CellEditModal
           employee={selected.employee}
           fecha={selected.fecha}
           assignment={selected.assignment}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {selectedRange && (
+        <RangeEditModal
+          employee={selectedRange.employee}
+          fechas={selectedRange.fechas}
+          onClose={() => setSelectedRange(null)}
         />
       )}
     </>

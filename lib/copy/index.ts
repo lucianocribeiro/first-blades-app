@@ -527,6 +527,32 @@ export const copy = {
       fallecimiento:   'Fallecimiento',
       otros:           'Otros',
     },
+    range: {
+      modal: {
+        title:   'Aplicar a varios días',
+        guardar: 'Aplicar',
+        cerrar:  'Cerrar',
+        rango:   'Rango',
+      },
+      seleccion: {
+        diaSingular: 'día seleccionado',
+        diasPlural:  'días seleccionados',
+        anclaHint:   'Elegí el último día del rango con shift-click, o presioná Esc para cancelar.',
+      },
+      resultado: {
+        aplicaronPrefijo: 'Se aplicaron',
+        de:               'de',
+        diaSingular:      'día',
+        diasPlural:       'días',
+        fallaronTitulo:   'No se pudieron aplicar estos días:',
+      },
+      errors: {
+        diaTramiteNoDisponible:
+          'El motivo "Día de trámite" no está disponible acá: se gestiona por Solicitud de Ausencia con aprobación del admin.',
+        permisoDenegado: 'No tenés permiso para modificar este día.',
+        diaFallidoGenerico: 'No se pudo guardar este día.',
+      },
+    },
     dashboard: {
       title:    'Resumen de ausencias del mes',
       subtitle: 'Días por motivo, por empleado, en el mes visible.',

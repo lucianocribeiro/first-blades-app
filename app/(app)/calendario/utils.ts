@@ -25,6 +25,26 @@ export function getDaysInMonth(year: number, month: number): string[] {
   return days;
 }
 
+// Fechas ISO (YYYY-MM-DD) inclusive entre dos fechas cualquiera, en orden
+// ascendente sin importar cuál de las dos se pasó primero (soporta
+// shift-click en cualquier dirección dentro de la fila).
+export function getDateRange(fechaA: string, fechaB: string): string[] {
+  const [ay, am, ad] = fechaA.split('-').map(Number);
+  const [by, bm, bd] = fechaB.split('-').map(Number);
+  const startMs = Math.min(Date.UTC(ay, am - 1, ad), Date.UTC(by, bm - 1, bd));
+  const endMs = Math.max(Date.UTC(ay, am - 1, ad), Date.UTC(by, bm - 1, bd));
+
+  const days: string[] = [];
+  for (let ms = startMs; ms <= endMs; ms += 24 * 60 * 60 * 1000) {
+    const d = new Date(ms);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    days.push(`${y}-${m}-${day}`);
+  }
+  return days;
+}
+
 export function assignmentKey(userId: string, fecha: string): string {
   return `${userId}_${fecha}`;
 }
@@ -161,4 +181,20 @@ export function validateAssignmentInput(input: ValidateAssignmentInput): Validat
   }
 
   return { valid: true };
+}
+
+// Traduce el mensaje crudo de Postgres/Postgrest de un upsert fallido dentro
+// del pintado por rango a un motivo legible por el admin (FB-F3-23). El
+// estado/motivo del rango ya se valida una vez arriba (validateAssignmentInput)
+// antes de escribir ningún día, así que estas fallas por día son casos que esa
+// validación no cubre: RLS/permiso, u otro error de base no anticipado.
+export function describeRangeUpsertError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes('rotation_assignments_motivo_requerido')) {
+    return copy.calendario.errors.motivoRequerido;
+  }
+  if (lower.includes('permission denied') || lower.includes('row-level security') || lower.includes('policy')) {
+    return copy.calendario.range.errors.permisoDenegado;
+  }
+  return copy.calendario.range.errors.diaFallidoGenerico;
 }
