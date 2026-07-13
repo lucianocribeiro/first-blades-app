@@ -6,55 +6,37 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
-import { upsertRotationAssignment } from './actions';
-import { computeDefaultEsEstimado, validateAssignmentInput } from './utils';
-import type { EstadoDia, MotivoAusencia, RotationAssignment } from '@/lib/db-types';
+import { upsertRotationRange, type UpsertRotationRangeResult } from './actions';
+import { validateAssignmentInput } from './utils';
+import { ESTADO_OPTIONS, MOTIVO_OPTIONS as ALL_MOTIVO_OPTIONS } from './CellEditModal';
+import type { EstadoDia, MotivoAusencia } from '@/lib/db-types';
 import type { RosterEmployee } from './RosterGrid';
 
-type CellEditModalProps = {
+type RangeEditModalProps = {
   employee: RosterEmployee;
-  fecha: string;
-  assignment: RotationAssignment | undefined;
+  fechas: string[];
   onClose: () => void;
 };
 
-// Exportados para que RangeEditModal (FB-F3-23) reuse la misma fuente de
-// opciones en vez de duplicar el mapeo enum → copy.
-export const ESTADO_OPTIONS: { value: EstadoDia; label: string }[] = [
-  { value: 'trabajando', label: copy.status.trabajando },
-  { value: 'en_viaje', label: copy.status.en_viaje },
-  { value: 'en_franco', label: copy.status.en_franco },
-  { value: 'periodo_fuera_trabajo', label: copy.status.periodo_fuera_trabajo },
-];
+// dia_tramite se gestiona por su propio flujo de Solicitud de Ausencia +
+// aprobación (cupo incluido) — el pintado por rango no lo ofrece.
+const MOTIVO_OPTIONS = ALL_MOTIVO_OPTIONS.filter((o) => o.value !== 'dia_tramite');
 
-export const MOTIVO_OPTIONS: { value: MotivoAusencia; label: string }[] = [
-  { value: 'vacaciones', label: copy.calendario.motivos.vacaciones },
-  { value: 'licencia_medica', label: copy.calendario.motivos.licencia_medica },
-  { value: 'dia_tramite', label: copy.calendario.motivos.dia_tramite },
-  { value: 'matrimonio', label: copy.calendario.motivos.matrimonio },
-  { value: 'fallecimiento', label: copy.calendario.motivos.fallecimiento },
-  { value: 'otros', label: copy.calendario.motivos.otros },
-];
-
-function getToday(): string {
-  return new Date().toISOString().split('T')[0];
-}
-
-export function CellEditModal({ employee, fecha, assignment, onClose }: CellEditModalProps) {
+export function RangeEditModal({ employee, fechas, onClose }: RangeEditModalProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState('');
-  const [estadoDia, setEstadoDia] = useState<EstadoDia>(assignment?.estado_dia ?? 'trabajando');
-  const [motivoAusencia, setMotivoAusencia] = useState<MotivoAusencia | ''>(
-    assignment?.motivo_ausencia ?? ''
-  );
-  const [motivoOtrosTexto, setMotivoOtrosTexto] = useState(assignment?.motivo_otros_texto ?? '');
-  const [esEstimado, setEsEstimado] = useState(
-    assignment?.es_estimado ?? computeDefaultEsEstimado(fecha, getToday())
-  );
+  const [report, setReport] = useState<UpsertRotationRangeResult | null>(null);
+  const [estadoDia, setEstadoDia] = useState<EstadoDia>('trabajando');
+  const [motivoAusencia, setMotivoAusencia] = useState<MotivoAusencia | ''>('');
+  const [motivoOtrosTexto, setMotivoOtrosTexto] = useState('');
 
   const isFueraTrabajo = estadoDia === 'periodo_fuera_trabajo';
   const isOtros = motivoAusencia === 'otros';
   const nombre = employee.full_name || employee.email;
+  const total = fechas.length;
+  const primerDia = fechas[0];
+  const ultimoDia = fechas[total - 1];
+  const diasLabel = total === 1 ? copy.calendario.range.seleccion.diaSingular : copy.calendario.range.seleccion.diasPlural;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -76,42 +58,84 @@ export function CellEditModal({ employee, fecha, assignment, onClose }: CellEdit
 
     startTransition(async () => {
       try {
-        await upsertRotationAssignment({
+        const rangeResult = await upsertRotationRange({
           user_id: employee.id,
-          fecha,
+          fechas,
           estado_dia: estadoDia,
-          es_estimado: esEstimado,
           motivo_ausencia: motivoAusenciaValue,
           motivo_otros_texto: motivoOtrosValue,
         });
-        onClose();
+        setReport(rangeResult);
       } catch (err) {
         setError(err instanceof Error ? err.message : copy.calendario.messages.upsertError);
       }
     });
   }
 
+  if (report) {
+    const allOk = report.failed.length === 0;
+    const summary = allOk
+      ? copy.calendario.range.resultado.todoOk
+      : `${copy.calendario.range.resultado.aplicaronPrefijo} ${report.applied.length} ${copy.calendario.range.resultado.de} ${total} ${
+          total === 1 ? copy.calendario.range.resultado.diaSingular : copy.calendario.range.resultado.diasPlural
+        }.`;
+
+    return (
+      <Modal
+        open
+        onClose={onClose}
+        title={copy.calendario.range.modal.title}
+        size="sm"
+        footer={
+          <Button variant="primary" onClick={onClose}>
+            {copy.calendario.range.modal.cerrar}
+          </Button>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="font-medium text-secondary">{nombre}</p>
+          <p className={allOk ? 'text-secondary' : 'text-error'}>{summary}</p>
+          {!allOk && (
+            <div>
+              <p className="font-medium text-secondary">{copy.calendario.range.resultado.fallaronTitulo}</p>
+              <ul className="list-disc pl-5 text-neutral">
+                {report.failed.map((f) => (
+                  <li key={f.fecha}>
+                    {f.fecha}: {f.motivo}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       open
       onClose={onClose}
-      title={copy.calendario.modal.title}
+      title={copy.calendario.range.modal.title}
       size="sm"
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={isPending}>
             {copy.general.cancel}
           </Button>
-          <Button variant="primary" type="submit" form="cell-edit-form" loading={isPending}>
-            {copy.calendario.modal.guardar}
+          <Button variant="primary" type="submit" form="range-edit-form" loading={isPending}>
+            {copy.calendario.range.modal.guardar}
           </Button>
         </>
       }
     >
-      <form id="cell-edit-form" onSubmit={handleSubmit} className="space-y-4">
+      <form id="range-edit-form" onSubmit={handleSubmit} className="space-y-4">
         <div className="text-sm text-neutral">
           <p className="font-medium text-secondary">{nombre}</p>
-          <p>{fecha}</p>
+          <p>
+            {copy.calendario.range.modal.rango}: {primerDia} – {ultimoDia} ({total} {diasLabel})
+          </p>
+          <p className="text-xs mt-1">{copy.calendario.modal.hints.estimado}</p>
         </div>
 
         <Select
@@ -144,17 +168,6 @@ export function CellEditModal({ employee, fecha, assignment, onClose }: CellEdit
             )}
           </>
         )}
-
-        <label className="flex items-center gap-2 text-sm text-secondary">
-          <input
-            type="checkbox"
-            checked={esEstimado}
-            onChange={(e) => setEsEstimado(e.target.checked)}
-            className="rounded border-color-border text-primary focus:ring-primary"
-          />
-          {copy.calendario.modal.fields.estimado}
-        </label>
-        <p className="text-xs text-neutral -mt-2">{copy.calendario.modal.hints.estimado}</p>
 
         {error && (
           <p className="text-sm text-error bg-red-50 border border-red-200 rounded-lg px-3 py-2">

@@ -17,6 +17,8 @@ import {
   buildAssignmentIndex,
   getCellVisual,
   computeDefaultEsEstimado,
+  getDateRange,
+  describeRangeUpsertError,
 } from '@/app/(app)/calendario/utils';
 import type { RotationAssignment } from '@/lib/db-types';
 
@@ -151,5 +153,65 @@ describe('computeDefaultEsEstimado', () => {
   it('fecha pasada o de hoy NO es estimado', () => {
     expect(computeDefaultEsEstimado('2026-07-01', '2026-07-01')).toBe(false);
     expect(computeDefaultEsEstimado('2026-06-20', '2026-07-01')).toBe(false);
+  });
+});
+
+// ─── getDateRange (FB-F3-23: pintado por rango) ────────────────
+
+describe('getDateRange', () => {
+  it('rango ascendente entre dos fechas (inclusive)', () => {
+    expect(getDateRange('2026-07-01', '2026-07-03')).toEqual([
+      '2026-07-01',
+      '2026-07-02',
+      '2026-07-03',
+    ]);
+  });
+
+  it('funciona en cualquier orden de los dos extremos (shift-click hacia atrás)', () => {
+    expect(getDateRange('2026-07-03', '2026-07-01')).toEqual([
+      '2026-07-01',
+      '2026-07-02',
+      '2026-07-03',
+    ]);
+  });
+
+  it('mismo día en ambos extremos devuelve un solo día', () => {
+    expect(getDateRange('2026-07-05', '2026-07-05')).toEqual(['2026-07-05']);
+  });
+
+  it('cruza el límite de mes correctamente', () => {
+    expect(getDateRange('2026-07-30', '2026-08-02')).toEqual([
+      '2026-07-30',
+      '2026-07-31',
+      '2026-08-01',
+      '2026-08-02',
+    ]);
+  });
+});
+
+// ─── describeRangeUpsertError (FB-F3-23: reporte por día legible) ─
+
+describe('describeRangeUpsertError', () => {
+  it('violación del CHECK de motivo requerido se traduce al copy de motivo requerido', () => {
+    expect(
+      describeRangeUpsertError(
+        'new row for relation "rotation_assignments" violates check constraint "rotation_assignments_motivo_requerido"'
+      )
+    ).toBe(copy.calendario.errors.motivoRequerido);
+  });
+
+  it('error de permiso/RLS se traduce al copy de permiso denegado', () => {
+    expect(describeRangeUpsertError('permission denied for table rotation_assignments')).toBe(
+      copy.calendario.range.errors.permisoDenegado
+    );
+    expect(describeRangeUpsertError('new row violates row-level security policy')).toBe(
+      copy.calendario.range.errors.permisoDenegado
+    );
+  });
+
+  it('cualquier otro error de base cae al copy genérico legible', () => {
+    expect(describeRangeUpsertError('db error interno')).toBe(
+      copy.calendario.range.errors.diaFallidoGenerico
+    );
   });
 });

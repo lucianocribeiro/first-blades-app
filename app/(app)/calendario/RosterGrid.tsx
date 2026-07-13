@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { copy } from '@/lib/copy';
-import { buildAssignmentIndex, assignmentKey, getCellVisual } from './utils';
+import { buildAssignmentIndex, assignmentKey, getCellVisual, getDateRange } from './utils';
 import { CellEditModal } from './CellEditModal';
+import { RangeEditModal } from './RangeEditModal';
 import type { RotationAssignment } from '@/lib/db-types';
 
 export type RosterEmployee = {
@@ -25,9 +26,43 @@ type SelectedCell = {
   assignment: RotationAssignment | undefined;
 };
 
+type SelectedRange = {
+  employee: RosterEmployee;
+  fechas: string[];
+};
+
+type Anchor = {
+  employeeId: string;
+  fecha: string;
+};
+
 export function RosterGrid({ employees, days, assignments, readOnly = false }: RosterGridProps) {
   const [selected, setSelected] = useState<SelectedCell | null>(null);
+  const [selectedRange, setSelectedRange] = useState<SelectedRange | null>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
   const index = buildAssignmentIndex(assignments);
+
+  // UX tipo planilla (FB-F3-23): click en una celda fija el ancla (y abre el
+  // modal de un día, sin regresión); shift-click en OTRA celda de la MISMA
+  // fila extiende la selección al rango entre el ancla y esa celda (en
+  // cualquier orden) y abre el modal de rango en su lugar. Shift-click en
+  // otra fila, o sin ancla previo, se trata como un click normal — el
+  // pintado por rango es de una sola fila, nunca cruza empleados.
+  function handleCellClick(
+    employee: RosterEmployee,
+    fecha: string,
+    assignment: RotationAssignment | undefined,
+    shiftKey: boolean
+  ) {
+    if (shiftKey && anchor && anchor.employeeId === employee.id && anchor.fecha !== fecha) {
+      setSelected(null);
+      setSelectedRange({ employee, fechas: getDateRange(anchor.fecha, fecha) });
+      return;
+    }
+    setAnchor({ employeeId: employee.id, fecha });
+    setSelectedRange(null);
+    setSelected({ employee, fecha, assignment });
+  }
 
   if (employees.length === 0) {
     return (
@@ -82,7 +117,7 @@ export function RosterGrid({ employees, days, assignments, readOnly = false }: R
                             type="button"
                             title={visual.label}
                             aria-label={label}
-                            onClick={() => setSelected({ employee: emp, fecha, assignment })}
+                            onClick={(e) => handleCellClick(emp, fecha, assignment, e.shiftKey)}
                             className={`w-7 h-7 rounded ${visual.bgClass} hover:ring-2 hover:ring-primary transition-shadow`}
                           />
                         )}
@@ -102,6 +137,14 @@ export function RosterGrid({ employees, days, assignments, readOnly = false }: R
           fecha={selected.fecha}
           assignment={selected.assignment}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {selectedRange && (
+        <RangeEditModal
+          employee={selectedRange.employee}
+          fechas={selectedRange.fechas}
+          onClose={() => setSelectedRange(null)}
         />
       )}
     </>
