@@ -23,6 +23,13 @@ import type { RosterEmployee } from '@/app/(app)/calendario/RosterGrid';
 const EMPLOYEE: RosterEmployee = { id: 'emp-1', full_name: 'Ana Gómez', email: 'ana@test.com' };
 const FECHAS = ['2026-07-10', '2026-07-11', '2026-07-12'];
 
+// FB-F3-24: mismo formato de conteo en éxito total y en fallo parcial —
+// "Se aplicaron N de N días." en vez de una frase distinta para el caso feliz.
+function countSummary(applied: number, total: number): string {
+  const r = copy.calendario.range.resultado;
+  return `${r.aplicaronPrefijo} ${applied} ${r.de} ${total} ${total === 1 ? r.diaSingular : r.diasPlural}.`;
+}
+
 function submitForm(container: HTMLElement) {
   const form = container.querySelector('#range-edit-form');
   if (!form) throw new Error('No se encontró el form #range-edit-form');
@@ -93,7 +100,7 @@ describe('RangeEditModal: envío y reporte', () => {
     vi.clearAllMocks();
   });
 
-  it('rango feliz: invoca la action con user_id + fechas del rango, y muestra "todos aplicados"', async () => {
+  it('rango feliz: invoca la action con user_id + fechas del rango, y muestra "N de N días" (FB-F3-24)', async () => {
     vi.mocked(upsertRotationRange).mockResolvedValue({ applied: FECHAS, failed: [] });
 
     const { container } = render(
@@ -107,7 +114,7 @@ describe('RangeEditModal: envío y reporte', () => {
       expect.objectContaining({ user_id: 'emp-1', fechas: FECHAS, estado_dia: 'trabajando' })
     );
 
-    expect(await screen.findByText(copy.calendario.range.resultado.todoOk)).toBeInTheDocument();
+    expect(await screen.findByText(countSummary(FECHAS.length, FECHAS.length))).toBeInTheDocument();
   });
 
   it('fallo parcial: muestra el resumen "X de N" y lista el/los días fallidos con su motivo', async () => {
@@ -121,10 +128,10 @@ describe('RangeEditModal: envío y reporte', () => {
     );
     submitForm(container);
 
-    expect(await screen.findByText(copy.calendario.range.resultado.fallaronTitulo)).toBeInTheDocument();
+    expect(await screen.findByText(countSummary(2, FECHAS.length))).toBeInTheDocument();
+    expect(screen.getByText(copy.calendario.range.resultado.fallaronTitulo)).toBeInTheDocument();
     expect(container.textContent).toContain('2026-07-11');
     expect(container.textContent).toContain(copy.calendario.range.errors.permisoDenegado);
-    expect(screen.queryByText(copy.calendario.range.resultado.todoOk)).not.toBeInTheDocument();
   });
 
   it('el botón "Cerrar" del reporte invoca onClose', async () => {

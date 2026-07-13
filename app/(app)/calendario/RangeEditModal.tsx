@@ -74,11 +74,12 @@ export function RangeEditModal({ employee, fechas, onClose }: RangeEditModalProp
 
   if (report) {
     const allOk = report.failed.length === 0;
-    const summary = allOk
-      ? copy.calendario.range.resultado.todoOk
-      : `${copy.calendario.range.resultado.aplicaronPrefijo} ${report.applied.length} ${copy.calendario.range.resultado.de} ${total} ${
-          total === 1 ? copy.calendario.range.resultado.diaSingular : copy.calendario.range.resultado.diasPlural
-        }.`;
+    // Mismo formato de conteo en éxito total y en fallo parcial (FB-F3-24):
+    // "Se aplicaron N de N días." es más claro que una frase distinta para
+    // el caso feliz, y evita mantener dos redacciones del mismo resultado.
+    const summary = `${copy.calendario.range.resultado.aplicaronPrefijo} ${report.applied.length} ${copy.calendario.range.resultado.de} ${total} ${
+      total === 1 ? copy.calendario.range.resultado.diaSingular : copy.calendario.range.resultado.diasPlural
+    }.`;
 
     return (
       <Modal

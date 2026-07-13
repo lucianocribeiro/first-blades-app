@@ -537,9 +537,9 @@ export const copy = {
       seleccion: {
         diaSingular: 'día seleccionado',
         diasPlural:  'días seleccionados',
+        anclaHint:   'Elegí el último día del rango con shift-click, o presioná Esc para cancelar.',
       },
       resultado: {
-        todoOk:           'Se aplicó correctamente a todos los días seleccionados.',
         aplicaronPrefijo: 'Se aplicaron',
         de:               'de',
         diaSingular:      'día',
