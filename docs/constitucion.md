@@ -1,6 +1,6 @@
-# First Blades — Constitución del Portal (v0.5)
+# First Blades — Constitución del Portal (v0.6)
 
-> **Estado:** Fases 0 y 1 cerradas. v0.5 incorpora aprendizajes de Fase 1: gobernanza de despliegue de migraciones, deploy adelantado a producción, nombre unificado (`full_name`) y retención de documentos.
+> **Estado:** Fases 0, 1, 2 y 3 cerradas. v0.6 incorpora aprendizajes de Fase 3: capa de notificaciones por email (Gmail, service account), patrón purgatorio de ausencias con día de trámite, RPC `SECURITY DEFINER` para transiciones atómicas, gobernanza reforzada de migraciones y `db push`, calendario per-día con pintado por rango, y corrección de §5 (`rotation_assignments`, `profiles.dni`).
 > **Propósito:** Fuente única de verdad del portal de First Blades. El chat PM la sostiene y la adjudica. Claude Code construye *según* ella. Codex la audita *contra* ella. Cada chat de módulo la hereda.
 > **Idioma:** Documento en español (es-AR). Todo el producto en español (es-AR).
 
@@ -24,7 +24,7 @@
 - **Fuente de verdad:** Supabase — Postgres, Auth, Storage, Row-Level Security (par de keys publishable/secret).
 - **Hosting:** Vercel — **la app ya está en producción** (deploy adelantado en Fase 1; dominio, SSL, env vars). **Sin entorno de staging separado** — riesgo a gestionar: cuidado con pruebas destructivas contra la base real.
 - **Testing/CI:** Vitest + Playwright; GitHub Actions.
-- **Notificaciones (app):** Gmail (dirección a proveer) — mails a quien aprueba (pasajes y ausencias).
+- **Notificaciones (app):** Gmail API (service account, domain-wide delegation) — ver §2.4.
 - **Viáticos / Rendición de Gastos: externo en Google Workspace** — Google Form → Drive → Sheets → Apps Script. Se accede por **link** desde la app. No usa n8n.
 
 ### 2.1 Autenticación
@@ -36,6 +36,16 @@
 
 ### 2.3 Despliegue de migraciones (gobernanza)
 - **CI valida pero NO aplica** los cambios a la base remota. Tras CI verde, todo cambio de esquema requiere un `supabase db push` **explícito** y **verificación en producción**. Ningún cambio de base de datos está "hecho" hasta aplicarse y verificarse en prod.
+- **Auditoría de esquema obligatoria antes del push** de toda migración no trivial (funciones con privilegios, constraints). **Delta-only:** inspeccionar el esquema real primero y escribir solo el delta; nunca asumir que la branch matchea prod.
+- **Runbook de push** (gateado por Luciano): pre-push (auditoría de esquema) → push → **verificación de catálogo post-push** (para funciones: `owner` / `prosecdef` / `proconfig` / `proacl`) → `migration list` Local=Remote → regenerar `types.ts --linked`.
+- **Hallazgo incorporado (Fase 3):** hubo un push off-script (la migración 0012 llegó a producción fuera del gate). Regla: **todo `db push` va por el runbook gateado**, y Claude Code **reporta cualquier acción que toque producción, aunque sea en otra sesión**.
+- **Ruta sancionada de acceso a la base:** MCP de Supabase (apuntada a la org del cliente). La **conexión directa** a Postgres con `SUPABASE_DB_PASSWORD` es una **excepción** —para el push real u operaciones que la MCP no cubra—, gateada y con higiene: solo lectura fuera del push, no imprimir la credencial, borrar scripts temporales.
+- **Drift detector** (`migration.test.ts`): inventario exacto (`toEqual`) de enums/tablas/constraints/índices/funciones; para funciones `SECURITY DEFINER` incluye `prosecdef`, `proconfig` (search_path) y owner-consistency. Se actualiza intencionalmente al cambiar el esquema.
+
+### 2.4 Notificaciones por email
+- Gmail API vía **service account con domain-wide delegation**, envía como `contacto@first-blades.com`, scope `gmail.send`. Patrón `notification_log` para idempotencia de alertas recurrentes (franco, vencimiento de documentos). Skill `email-notification`.
+- **Principio:** toda información que dispara un mail debe tener **representación consultable in-app**; el mail avisa, la app es la fuente de verdad.
+- Los mails de flujo (aprobación/rechazo) son **best-effort post-commit**: un fallo de envío no revierte la transacción ni rompe la consistencia; la representación in-app (estado de la solicitud) es la verdad.
 
 ---
 
@@ -93,7 +103,7 @@ Enums:
 - `motivo_viaje` (pasaje): `inicio_franco` | `fin_franco` | `traslado_proyectos`
 
 ### `profiles`
-`id` (uuid, FK auth.users) · `role` (user_role) · `estado` (employee_status) · `supervisor_id` (uuid, FK profiles, nullable) · `full_name` · `email` (login) · `telefono` · `cuit` · `winda_id` · `entrevista_tecnica` (jsonb, **solo admin**) · `created_at` · `updated_at`
+`id` (uuid, FK auth.users) · `role` (user_role) · `estado` (employee_status) · `supervisor_id` (uuid, FK profiles, nullable) · `full_name` · `email` (login) · `telefono` · `cuit` · `dni` (text, **UNIQUE**, nullable — clave de import de historial) · `winda_id` · `entrevista_tecnica` (jsonb, **solo admin**) · `created_at` · `updated_at`
 
 ### `documents` — tabla unificada de purgatorio
 `id` · `profile_id` · `tipo` (`dni` | `licencia` | `foto_carnet` | `estudio_medico` | `certificado`) · `certificado_tipo` (`gwo` | `espacio_confinado` | `manejo_defensivo` | `otros`, nullable) · `certificado_otros_texto` (varchar 30, nullable) · `file_path` · `fecha_vencimiento` (nullable) · `estado` (approval_status) · `motivo_rechazo` (nullable) · `submitted_by` · `reviewed_by` · `submitted_at` · `reviewed_at`
@@ -104,10 +114,21 @@ Enums:
 
 ### `ausencia_requests`
 `id` · `profile_id` · `motivo` (motivo_ausencia) · `motivo_otros_texto` (nullable) · `fecha_inicio` · `fecha_fin` · `estado` · `motivo_rechazo` · `reviewed_by` · `submitted_at` · `reviewed_at`
-> Al aprobarse, genera el estado `periodo_fuera_trabajo` en el calendario con su motivo.
+> Al aprobarse, genera el estado `periodo_fuera_trabajo` en el calendario con su motivo (ver §6.1 para el patrón RPC que ejecuta esta transición). Es el **patrón transversal** solicitud→aprobación para ausencias — **día de trámite es el primer tipo** que lo usa (Fase 4 reusa la tabla para los demás motivos). **Modelo de rango** (`fecha_inicio`/`fecha_fin`); para un día puntual, inicio = fin — no confundir con `rotation_assignments`, que es per-día.
+>
+> Invariantes: no-admin inserta solo lo propio + `estado='pendiente'` (policy `ausencias_insert_non_admin`); ningún no-admin modifica `estado`; toda transición se registra en `audit_log`; el rechazo exige motivo. La capa de app **superpone scope de negocio a la RLS**: la cola de aprobación filtra por motivo + estado, y la action **revalida el scope server-side** (`estado='pendiente'` + `motivo_ausencia='dia_tramite'`) antes de resolver — la RLS y la guarda de la RPC no limitan el motivo por diseño.
+>
+> **Saldo de días de trámite** — derivado del calendario, sin tabla ni contador propio: consumidos = filas `dia_tramite` del año calendario (`getBusinessToday`, zona `America/Argentina/Buenos_Aires`); restantes = `3 − consumidos`; tope **3/año plano, no acumulable**; excedido cuando `> 3`; alerta no bloqueante, consultable in-app, sin importar el camino de carga (roster admin o solicitud aprobada). **`es_estimado` SÍ cuenta** para este saldo — regla explícita, no copiar por analogía la lógica de otras alertas del calendario donde un día estimado no cuenta.
 
 ### `rotation_groups` · `rotation_assignments`
-`rotation_assignments`: `id` · `profile_id` · `group_id` · `fecha_inicio` · `fecha_fin` · `estado_dia` · `motivo_ausencia` (nullable, requerido si `periodo_fuera_trabajo`) · `motivo_otros_texto` (nullable). Cadencia mensual; detalle en Fase 2.
+> **Corrige v0.5:** `rotation_assignments` es **per-día** (una fila por `(user_id, fecha)`), no modelo de rango — v0.5 anticipaba `fecha_inicio`/`fecha_fin`, pero eso no matcheó lo construido. No confundir con `ausencia_requests`, que sí es un modelo de rango.
+
+`rotation_assignments`: `id` · `user_id` (FK profiles) · `fecha` · `estado_dia` · `es_estimado` (bool) · `motivo_ausencia` (nullable, requerido si `periodo_fuera_trabajo`) · `motivo_otros_texto` (nullable) · `rotation_group_id` (nullable, FK rotation_groups) · `notas` · `created_at` · `updated_at`. **`UNIQUE(user_id, fecha)`.**
+> `es_estimado` → `false` (real) vía cron nocturno cuando `fecha <= hoy + 7`; "hoy" siempre en zona `America/Argentina/Buenos_Aires` (`getBusinessToday`), nunca UTC crudo.
+>
+> **Pintado por rango:** el admin edita un rango de fechas consecutivas para **una fila** (un `user_id`) de una sola vez. Escritura **best-effort**: un fallo por día no aborta el resto, se reporta cada día fallido con motivo legible; reintentar es seguro (upsert idempotente). `es_estimado` se recalcula por fecha. **`dia_tramite` queda excluido** del pintado por rango — se carga solo por su flujo de solicitud/aprobación (ver `ausencia_requests` arriba), para no saltear el purgatorio ni descuadrar el saldo. Gesto: click simple edita un día; shift-click fija el ancla del rango **sin abrir ningún modal**; el segundo shift-click en la misma fila abre el modal de rango.
+>
+> `rotation_groups` es **admin-only** (sin `SELECT` para no-admin) — tabla inerte en Fase 3, sin UI ni consumidor de grupos.
 
 ### `procedures` · `audit_log`
 (Viáticos no tiene tabla en Supabase: vive en Google Workspace.)
@@ -126,8 +147,13 @@ Google Form → Drive → Sheets → Apps Script (Carla revisa, mails por cambio
 - **documents:** Empleado/Supervisor `SELECT`/`INSERT` propios (estado forzado `pendiente`, sin cambiar `estado`); Admin completo.
 - **pasaje_requests:** Empleado `INSERT`/`SELECT` propios; Supervisor para/de su equipo; Admin completo.
 - **ausencia_requests:** Empleado/Supervisor `INSERT`/`SELECT` propios; Admin completo.
-- **rotation_*:** Empleado `SELECT` su calendario; Supervisor su calendario + el de su equipo; sin escritura. Admin completo.
+- **rotation_assignments:** Empleado `SELECT` su calendario; Supervisor su calendario + el de su equipo; sin escritura. Admin completo. **rotation_groups** es **admin-only** (sin `SELECT` para no-admin).
 - **procedures:** Empleado/Supervisor solo `SELECT`; Admin completo.
+
+### 6.1 Patrón RPC `SECURITY DEFINER` para transiciones atómicas
+- Cuando una transición escribe en varias tablas todo-o-nada (ej. `resolver_ausencia_request`: estado + `audit_log` + calendario), va en una **función Postgres invocada con `.rpc()`**, no en escrituras secuenciales del cliente (que no dan transacción).
+- Reglas de la función: `SECURITY DEFINER` con **`search_path` fijo explícito**; las **guardas internas son el control de seguridad principal** (admin chequeado contra `auth.uid()`, tratando **NULL como no-admin**, nunca desde un parámetro; estado `pendiente` con `SELECT ... FOR UPDATE` para serializar); `EXECUTE` solo a `authenticated`, con **`REVOKE` explícito de `anon`** (Supabase lo re-otorga por default) y de `PUBLIC`; **owner** de la función = rol de administración (no un rol de app), verificado por catálogo post-push (ver §2.3).
+- Las actions invocan la RPC con **`createServerClient()`**, NO `createAdminClient()`: `service_role` no tiene `sub` en el JWT y la guarda `auth.uid()` abortaría siempre.
 
 ---
 
@@ -156,7 +182,7 @@ Empleado/Supervisor envía (formulario nativo)
 
 Tokens de marca: `--color-primary #0D7EC7` · `--color-secondary #003E68` · `--color-neutral #666666` · `--color-bg #FFFFFF`.
 Soporte: `--color-surface #F4F6F8` · `--color-border #E2E8F0` · `--color-success #2E7D32` · `--color-error #C62828` · `--color-warning #F9A825`.
-Estados del calendario (propuestos, confirmar en Fase 2): `trabajando #2E7D32` · `en_viaje #F9A825` · `en_franco #607D8B` · `periodo_fuera_trabajo #C62828`.
+Estados del calendario (**confirmados en Fase 3**): `trabajando` verde (`#2E7D32`, `--color-success`) · `en_franco` rojo (`#C62828`, `--color-error`) · `periodo_fuera_trabajo` amarillo (`#F9A825`, `--color-warning`) · `en_viaje` azul (`#0D7EC7`, `--color-primary`) · sin asignar = gris. Tokens cosméticos: se ajustan sin refactor.
 Badges: `pendiente` warning · `aprobado` success · `rechazado` error. Tipografía: system/Inter. Logo: `/public/logo.fb.png`.
 
 ---
@@ -166,8 +192,8 @@ Toda la UI, etiquetas, mensajes, correos y errores en español (es-AR). Fechas/n
 
 ---
 
-## 11. Skills (en el repo desde Fase 0)
-`new-module` · `purgatorio-form` · `supabase-migration` · `design-system` · `dod-checklist`. Viven en `.claude/skills/`. Las fases siguientes **reutilizan**; extienden solo si hace falta.
+## 11. Skills (en el repo desde Fase 0, ampliadas en fases siguientes)
+`new-module` · `purgatorio-form` · `supabase-migration` · `design-system` · `dod-checklist` · `email-notification` (Fase 3). Viven en `.claude/skills/`. Las fases siguientes **reutilizan**; extienden solo si hace falta.
 
 ---
 
@@ -177,21 +203,26 @@ Toda la UI, etiquetas, mensajes, correos y errores en español (es-AR). Fechas/n
 3. Carga de archivos — validación, control de acceso en Storage, signed URLs.
 4. Link de aprobación — requiere auth de admin; no token abierto.
 5. Sin secretos en el código.
+6. Funciones `SECURITY DEFINER` — guardas internas (nunca desde un parámetro), `search_path` fijo, `REVOKE` explícito de `anon`/`PUBLIC`, owner correcto (ver §6.1); verificado por catálogo post-push.
+7. Gobernanza de `db push` — todo push va por el runbook gateado (§2.3); ningún cambio de esquema en producción sin verificación de catálogo post-push.
 
 ---
 
 ## 13. Definición de Done
-Criterios del PRD · tests pasando (incluido límite de rol para los 3 roles) · typecheck/lint/build en CI · RLS testeada por tabla · auditoría de Codex limpia · copy es-AR · sin secretos · **migraciones aplicadas y verificadas en producción** (`supabase db push` tras CI verde).
+Criterios del PRD · tests pasando (incluido límite de rol para los 3 roles) · typecheck/lint/build en CI · RLS testeada por tabla · auditoría de Codex limpia · copy es-AR · sin secretos · **migraciones aplicadas y verificadas en producción** (`supabase db push` tras CI verde, por el runbook gateado de §2.3, con verificación de catálogo para funciones `SECURITY DEFINER`).
 
 ---
 
 ## 14. Pendientes
-1. **Dirección de Gmail** para notificaciones (se confirma al developer de Fase 2).
-2. **Flujo de alta:** hoy contraseña inicial por admin; al configurar email (Fase 2), decidir si se pasa a invitación por correo.
-3. **Umbrales y destinatarios de las alertas de vencimiento** (Fase 2).
-4. **Colores de los 4 estados del calendario** (§9) — confirmar en Fase 3.
-5. **Listas de Carla:** campos de ingreso/precarga; campos del Google Form de viáticos + Sheet + Drive + mails (Fase 6).
-6. **Rango de fechas permitido para viáticos** (Carla/Nicolás).
+1. **Flujo de alta:** hoy contraseña inicial por admin; con email ya operativo (§2.4), decidir si se pasa a invitación por correo.
+2. **Umbrales y destinatarios de las alertas de vencimiento** (Fase 2).
+3. **Listas de Carla:** campos de ingreso/precarga; campos del Google Form de viáticos + Sheet + Drive + mails (Fase 6).
+4. **Rango de fechas permitido para viáticos** (Carla/Nicolás).
+5. **e2e fuera de la compuerta de CI:** solo corren unit + integración RLS; Playwright no está wireado a ningún workflow. Bugs de interacción real de browser (ej. inertización de `<dialog>.showModal()`) no tienen compuerta automática — se cubren con guards RTL puntuales. Deuda a evaluar.
+6. **Parking lot:** Import/Export Excel (cargado en el log de Airtable) — diferido a decisión go/no-go post-MVP.
 
 ### Decisiones cerradas (v0.5)
 Supabase fuente de verdad · **3 roles con RLS** · `supervisor_id` · pasajes con solicitante + empleado · ausencias nativas · purgatorio con **bandeja única Aprobaciones** · 4 estados de calendario + motivos · empleado y supervisor ven calendario en lectura (supervisor también su equipo) · **auth email + contraseña (admin setea contraseña inicial; sin invitación/magic link/OAuth; primer admin por seed)** · Viáticos externo en Google Workspace · paleta + fondo blanco · español (es-AR) · Gmail · **Visma fuera de alcance (no se usa)** · **deploy en producción adelantado (Vercel, sin staging)** · **nombre unificado en `full_name`** · **retención de documentos rechazados a 30 días** · **gobernanza de migraciones (push a prod tras CI)** · Fases 0 y 1 cerradas.
+
+### Decisiones cerradas (v0.6) — 2026-07-13
+**Email operativo:** Gmail API vía service account (`contacto@first-blades.com`, scope `gmail.send`), patrón `notification_log` para idempotencia, mails de flujo best-effort post-commit (skill `email-notification`) · **patrón purgatorio de ausencias:** `ausencia_requests` es el modelo transversal de rango para ausencias, día de trámite el primer tipo (Fase 4 reusa la tabla) · **saldo de días de trámite derivado del calendario** (3/año plano, `es_estimado` cuenta) · **patrón RPC `SECURITY DEFINER`** para transiciones atómicas multi-tabla (§6.1) · **gobernanza de migraciones reforzada:** runbook gateado con verificación de catálogo post-push, ruta sancionada MCP de Supabase (org del cliente), conexión directa a Postgres como excepción gateada, drift detector actualizado intencionalmente · **§5 corregido:** `rotation_assignments` es per-día (`UNIQUE(user_id, fecha)`), no rango; `profiles.dni` existe (`UNIQUE`) · **pintado por rango** en el roster (best-effort por día, `dia_tramite` excluido) · **colores de los 4 estados del calendario confirmados** (§9) · **`rotation_groups` admin-only** · Fases 2 y 3 cerradas.
