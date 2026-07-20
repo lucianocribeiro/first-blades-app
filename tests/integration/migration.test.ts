@@ -383,23 +383,48 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     ]);
   });
 
-  it('ausencia_requests: inventario EXACTO de índices — pkey + el parcial de 0012, con definición canónica completa (FB-F3-AUD-14 Hallazgo Medio 1)', async () => {
+  it('ausencia_requests: inventario EXACTO de índices — pkey + el índice de respaldo de la exclusion constraint de 0014 (el parcial de 0012 fue reemplazado, FB-F4-01)', async () => {
     const { rows } = await client.query(`
       SELECT indexname, indexdef FROM pg_indexes
       WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
       ORDER BY indexname
     `);
-    expect(rows).toEqual([
-      {
-        indexname: 'ausencia_requests_pendiente_unica',
-        indexdef:
-          "CREATE UNIQUE INDEX ausencia_requests_pendiente_unica ON public.ausencia_requests USING btree (user_id, motivo_ausencia, fecha_inicio, fecha_fin) WHERE (estado = 'pendiente'::approval_status)",
-      },
-      {
-        indexname: 'ausencia_requests_pkey',
-        indexdef: 'CREATE UNIQUE INDEX ausencia_requests_pkey ON public.ausencia_requests USING btree (id)',
-      },
+    // El nombre de ambos índices sí se afirma exacto (determinístico: pkey
+    // explícito + el backing index de una EXCLUDE constraint sin índice
+    // nombrado aparte toma el nombre de la constraint). El indexdef del
+    // backing index se valida por componentes semánticos, no toEqual
+    // literal completo: la forma en que ruleutils.c castea el literal
+    // '[]' dentro de daterange(...) es dependiente de versión de Postgres
+    // (mismo criterio ya aplicado más abajo al pg_get_constraintdef de la
+    // propia exclusion constraint, y arriba al CHECK de rotation_assignments).
+    expect(rows.map((r) => r.indexname).sort()).toEqual([
+      'ausencia_requests_no_solapamiento_pendiente',
+      'ausencia_requests_pkey',
     ]);
+
+    const pkey = rows.find((r) => r.indexname === 'ausencia_requests_pkey');
+    expect(pkey.indexdef).toBe(
+      'CREATE UNIQUE INDEX ausencia_requests_pkey ON public.ausencia_requests USING btree (id)'
+    );
+
+    const exclIndex = rows.find((r) => r.indexname === 'ausencia_requests_no_solapamiento_pendiente');
+    expect(exclIndex.indexdef).toMatch(/^CREATE INDEX ausencia_requests_no_solapamiento_pendiente/);
+    expect(exclIndex.indexdef).toMatch(/USING gist/);
+    expect(exclIndex.indexdef).toMatch(/user_id/);
+    expect(exclIndex.indexdef).toMatch(/daterange\(fecha_inicio, fecha_fin, '\[\]'/);
+    expect(exclIndex.indexdef).toMatch(/WHERE \(estado = 'pendiente'::approval_status\)/);
+    // No es UNIQUE: una exclusion constraint no es una unique index (impone
+    // no-solapamiento vía operadores, no igualdad estricta).
+    expect(exclIndex.indexdef).not.toMatch(/CREATE UNIQUE INDEX/);
+  });
+
+  it('ausencia_requests_pendiente_unica (índice de 0012) fue removido por 0014', async () => {
+    const { rows } = await client.query(`
+      SELECT indexname FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+        AND indexname = 'ausencia_requests_pendiente_unica'
+    `);
+    expect(rows).toHaveLength(0);
   });
 
   it('ausencia_requests: ni tabla ni RLS ni enums cambiaron de forma — solo se agregaron constraints (migración 0012 es delta puro)', async () => {
@@ -529,5 +554,70 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       WHERE schemaname = 'public' AND tablename = 'audit_log'
     `);
     expect(auditPolicies.map((r) => r.policyname)).toEqual(['audit_log_select_admin']);
+  });
+
+  // ─── FB-F4-01: no-solapamiento de ausencias pendientes (0014) ───────────
+
+  it('extensión btree_gist instalada en schema extensions (0014)', async () => {
+    const { rows } = await client.query(`
+      SELECT e.extname, n.nspname AS schema
+      FROM pg_extension e
+      JOIN pg_namespace n ON n.oid = e.extnamespace
+      WHERE e.extname = 'btree_gist'
+    `);
+    expect(rows).toEqual([{ extname: 'btree_gist', schema: 'extensions' }]);
+  });
+
+  it('ausencia_requests: exclusion constraint ausencia_requests_no_solapamiento_pendiente existe (contype EXCLUDE, gist, user_id + daterange, predicado pendiente) (0014)', async () => {
+    const { rows } = await client.query(`
+      SELECT conname, contype, pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.ausencia_requests'::regclass
+        AND conname = 'ausencia_requests_no_solapamiento_pendiente'
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].contype).toBe('x');
+
+    // No se afirma el string completo de pg_get_constraintdef: el casteo
+    // exacto del literal '[]' dentro de daterange(...) es dependiente de
+    // versión de Postgres (mismo criterio que el resto del archivo cuando
+    // ruleutils.c normaliza expresiones). Se validan los componentes
+    // semánticos que importan para la regla de negocio.
+    const def: string = rows[0].def;
+    expect(def).toMatch(/EXCLUDE USING gist/);
+    expect(def).toMatch(/user_id WITH =/);
+    expect(def).toMatch(/daterange\(fecha_inicio, fecha_fin, '\[\]'/);
+    expect(def).toMatch(/WITH &&/);
+    expect(def).toMatch(/WHERE \(\(?estado = 'pendiente'::approval_status\)?\)/);
+  });
+
+  it('ausencia_requests: ni RLS ni enums cambiaron de forma en 0014 — el delta es solo la extensión + el reemplazo de índice por exclusion constraint', async () => {
+    const { rows: policies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+    `);
+    expect(policies.map((r) => r.policyname).sort()).toEqual([
+      'ausencias_delete_admin',
+      'ausencias_insert_admin',
+      'ausencias_insert_non_admin',
+      'ausencias_select',
+      'ausencias_update_admin',
+    ]);
+
+    const { rows: enums } = await client.query(`
+      SELECT typname FROM pg_type
+      WHERE typtype = 'e' AND typnamespace = 'public'::regnamespace
+      ORDER BY typname
+    `);
+    expect(enums.map((r) => r.typname)).toEqual([
+      'approval_status',
+      'certificado_tipo',
+      'employee_status',
+      'estado_dia',
+      'motivo_ausencia',
+      'motivo_viaje',
+      'notification_type',
+      'user_role',
+    ]);
   });
 });

@@ -6,13 +6,13 @@
  * el mismo patrón que tests/unit/calendario-server-boundary.test.ts.
  *
  * Las invariantes de RLS (INSERT propio forzado a pendiente, scope de "mis
- * solicitudes" por rol, rechazo del índice único ausencia_requests_pendiente_unica)
- * ya están cubiertas a nivel de base en tests/integration/rls.test.ts
- * (RLS: ausencia_requests) y tests/integration/ausencia-requests-purgatorio.test.ts
- * (FB-F3-14/15); acá se testea que el código de la app arma el payload
- * correcto, nunca deja pasar un estado/user_id distinto, y traduce el choque
- * del índice único a copy amigable en vez de propagar el error crudo o
- * tragarlo silenciosamente.
+ * solicitudes" por rol, rechazo de la exclusion constraint
+ * ausencia_requests_no_solapamiento_pendiente) ya están cubiertas a nivel de
+ * base en tests/integration/rls.test.ts (RLS: ausencia_requests) y
+ * tests/integration/ausencia-no-solapamiento.test.ts (FB-F4-01); acá se
+ * testea que el código de la app arma el payload correcto, nunca deja pasar
+ * un estado/user_id distinto, y traduce el choque de la exclusion constraint
+ * a copy amigable en vez de propagar el error crudo o tragarlo silenciosamente.
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -142,11 +142,11 @@ describe('createDiaTramiteRequest: gating e integridad del purgatorio (FB-F3-16)
     ]);
   });
 
-  it('choque con el índice único parcial (23505) se traduce a copy amigable, no al error crudo', async () => {
+  it('choque con la exclusion constraint de no-solapamiento (23P01) se traduce a copy amigable, no al error crudo', async () => {
     mockProfile('empleado', 'emp-1');
     mockSupabaseInsert({
-      code: '23505',
-      message: 'duplicate key value violates unique constraint "ausencia_requests_pendiente_unica"',
+      code: '23P01',
+      message: 'conflicting key value violates exclusion constraint "ausencia_requests_no_solapamiento_pendiente"',
     });
 
     await expect(createDiaTramiteRequest({ fecha: '2026-09-05' })).rejects.toThrow(
@@ -165,7 +165,7 @@ describe('createDiaTramiteRequest: gating e integridad del purgatorio (FB-F3-16)
 // ─── translateAusenciaInsertError (unidad pura) ────────────────────────────
 
 describe('translateAusenciaInsertError', () => {
-  it('no traduce (devuelve null) errores sin código 23505, para no tragarlos', () => {
+  it('no traduce (devuelve null) errores sin código 23P01, para no tragarlos', () => {
     expect(translateAusenciaInsertError({ code: '23514' })).toBeNull();
     expect(translateAusenciaInsertError(null)).toBeNull();
     expect(translateAusenciaInsertError(undefined)).toBeNull();

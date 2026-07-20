@@ -6,10 +6,11 @@
  *     SIEMPRE tiene motivo_rechazo no vacío.
  *  2. CHECK ausencia_requests_resolucion_completa: una fila resuelta
  *     (aprobado/rechazado) SIEMPRE tiene reviewed_by + reviewed_at.
- *  3. Índice único parcial ausencia_requests_pendiente_unica: no se puede
- *     tener dos solicitudes pendientes de la misma fecha/motivo para el
- *     mismo empleado; sí se puede volver a solicitar tras un rechazo, y sí
- *     se puede solicitar otro motivo o otra fecha.
+ *
+ * El no-solapamiento de rangos pendientes (originalmente un índice único
+ * parcial exacto por fecha/motivo, reemplazado en 0014 por una exclusion
+ * constraint de rangos) se cubre en tests/integration/ausencia-no-solapamiento.test.ts
+ * (FB-F4-01).
  *
  * Las pruebas de RLS (quién puede insertar/leer/actualizar) viven en
  * tests/integration/rls.test.ts — este archivo cubre solo los constraints
@@ -131,85 +132,6 @@ describe.skipIf(!dbAvailable)('ausencia_requests: CHECK resolucion_completa (FB-
          VALUES ($1::uuid, 'dia_tramite', '2026-08-03', '2026-08-03', 'aprobado', $2::uuid, now())
          RETURNING id`,
         [IDS.employee1, IDS.admin]
-      );
-      expect(res.rows).toHaveLength(1);
-    });
-  });
-});
-
-// ─── UNIQUE parcial: sin pendientes duplicados ─────────────────
-
-describe.skipIf(!dbAvailable)('ausencia_requests_pendiente_unica: sin pendientes duplicados (FB-F3-14)', () => {
-  it('rechaza una segunda solicitud pendiente de la misma fecha/motivo', async () => {
-    await expect(
-      asServiceRole(async (client) => {
-        await client.query(
-          `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin)
-           VALUES ($1::uuid, 'dia_tramite', '2026-08-10', '2026-08-10')`,
-          [IDS.employee2]
-        );
-        await client.query(
-          `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin)
-           VALUES ($1::uuid, 'dia_tramite', '2026-08-10', '2026-08-10')`,
-          [IDS.employee2]
-        );
-      })
-    ).rejects.toThrow();
-  });
-
-  it('permite volver a solicitar la misma fecha/motivo si la anterior quedó rechazada', async () => {
-    await asServiceRole(async (client) => {
-      const first = await client.query(
-        `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin)
-         VALUES ($1::uuid, 'dia_tramite', '2026-08-11', '2026-08-11')
-         RETURNING id`,
-        [IDS.employee2]
-      );
-      await client.query(
-        `UPDATE ausencia_requests
-         SET estado = 'rechazado', motivo_rechazo = 'No corresponde', reviewed_by = $2::uuid, reviewed_at = now()
-         WHERE id = $1`,
-        [first.rows[0].id, IDS.admin]
-      );
-      const second = await client.query(
-        `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin)
-         VALUES ($1::uuid, 'dia_tramite', '2026-08-11', '2026-08-11')
-         RETURNING id`,
-        [IDS.employee2]
-      );
-      expect(second.rows).toHaveLength(1);
-    });
-  });
-
-  it('permite pendientes simultáneas de la misma fecha con motivos distintos', async () => {
-    await asServiceRole(async (client) => {
-      await client.query(
-        `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin)
-         VALUES ($1::uuid, 'dia_tramite', '2026-08-12', '2026-08-12')`,
-        [IDS.employee3]
-      );
-      const res = await client.query(
-        `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin)
-         VALUES ($1::uuid, 'vacaciones', '2026-08-12', '2026-08-20')
-         RETURNING id`,
-        [IDS.employee3]
-      );
-      expect(res.rows).toHaveLength(1);
-    });
-  });
-
-  it('permite pendientes simultáneas del mismo motivo con fechas distintas', async () => {
-    await asServiceRole(async (client) => {
-      await client.query(
-        `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin)
-         VALUES ($1::uuid, 'dia_tramite', '2026-08-13', '2026-08-13')`,
-        [IDS.employee1]
-      );
-      const res = await client.query(
-        `INSERT INTO ausencia_requests (user_id, motivo_ausencia, fecha_inicio, fecha_fin)
-         VALUES ($1::uuid, 'dia_tramite', '2026-08-14', '2026-08-14')
-         RETURNING id`,
-        [IDS.employee1]
       );
       expect(res.rows).toHaveLength(1);
     });
