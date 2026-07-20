@@ -1,10 +1,11 @@
 import { copy } from '@/lib/copy';
 import type { AusenciaRequestInsert } from '@/lib/db-types';
 
-// Postgres SQLSTATE de unique_violation — dispara con el índice único parcial
-// ausencia_requests_pendiente_unica (0012) cuando ya existe una solicitud
-// pendiente para el mismo user_id/motivo/fecha.
-const UNIQUE_VIOLATION = '23505';
+// Postgres SQLSTATE de exclusion_violation — dispara con la exclusion
+// constraint ausencia_requests_no_solapamiento_pendiente (0014) cuando ya
+// existe una solicitud pendiente del mismo user_id cuyo rango se solapa
+// (mismo motivo o no; un día de trámite es un rango de un solo día).
+const EXCLUSION_VIOLATION = '23P01';
 
 export type CreateDiaTramiteInput = {
   fecha: string;
@@ -28,13 +29,13 @@ export function buildAusenciaInsertPayload(
   };
 }
 
-// Traduce el choque con el índice único parcial a copy amigable.
+// Traduce el choque con la exclusion constraint a copy amigable.
 // Devuelve null para cualquier otro error — la action no debe tragarlo,
 // sino propagar el mensaje genérico.
 export function translateAusenciaInsertError(
   error: { code?: string } | null | undefined
 ): string | null {
   if (!error) return null;
-  if (error.code === UNIQUE_VIOLATION) return copy.solicitudAusencia.errors.pendienteDuplicada;
+  if (error.code === EXCLUSION_VIOLATION) return copy.solicitudAusencia.errors.pendienteDuplicada;
   return null;
 }
