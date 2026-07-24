@@ -161,3 +161,14 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- ─── Grants: re-aseverados explícitamente (FB-F4-AUD-02) ───────────────────
+-- CREATE OR REPLACE preserva el ACL cuando la firma no cambia (confirmado
+-- por catálogo antes de este CREATE OR REPLACE), así que estas tres
+-- sentencias no alteran el end-state que ya valida el drift detector. Se
+-- repiten acá, verbatim de 0013, para que 0015 no dependa de ese
+-- comportamiento implícito de Postgres: un objeto SECURITY DEFINER sensible
+-- debe dejar su propio ACL explícito en la migración que lo reemplaza.
+REVOKE ALL ON FUNCTION public.resolver_ausencia_request(UUID, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.resolver_ausencia_request(UUID, TEXT, TEXT) FROM anon;
+GRANT EXECUTE ON FUNCTION public.resolver_ausencia_request(UUID, TEXT, TEXT) TO authenticated;

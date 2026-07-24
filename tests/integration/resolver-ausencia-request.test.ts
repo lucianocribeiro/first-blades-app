@@ -463,34 +463,50 @@ describe.skipIf(!dbAvailable)('resolver_ausencia_request: expansión de rango pe
   });
 
   it('atomicidad de rango: un fallo a mitad del rango revierte TODAS las filas del rango, incluidas las que el loop ya había insertado antes de la que falla', async () => {
-    await asAdminSuperuser(async (c) => {
+    // Setup DDL privilegiado (fixture): agrega temporalmente un CHECK que
+    // fuerza el fallo a mitad de rango. ALTER TABLE requiere el rol
+    // propietario de la tabla (no authenticated), así que corre en una
+    // conexión aparte y se COMMITea de una — fuera de la invocación
+    // afirmada de abajo — para que sea visible en la conexión separada de
+    // asUser(). Como queda committeado (no dentro de una transacción que
+    // se revierte), se limpia explícitamente en el finally.
+    const setupClient = new Client({ connectionString: DB_URL });
+    await setupClient.connect();
+    try {
       // El rango es 2027-03-20..24; el loop inserta en orden ascendente, así
       // que al forzar el fallo en el día del medio (03-22), 03-20 y 03-21 ya
       // se habrían insertado en la MISMA transacción antes de llegar al
       // error — la prueba real de atomicidad es que ESOS también desaparecen.
-      await c.query(`
+      await setupClient.query(`
         ALTER TABLE rotation_assignments
         ADD CONSTRAINT test_force_fail_rango CHECK (fecha <> '2027-03-22')
       `);
 
-      await callExpectingThrow(
-        c,
-        `SELECT public.resolver_ausencia_request($1, 'aprobar', NULL)`,
-        [REQ_ATOMICIDAD_RANGO]
-      );
+      // Paso afirmado: corre bajo asUser(IDS.admin) — rol authenticated +
+      // claims de admin, el camino de ejecución real del RPC — no como
+      // postgres/superusuario (FB-F4-AUD-02).
+      await asUser(IDS.admin, async (c) => {
+        await callExpectingThrow(
+          c,
+          `SELECT public.resolver_ausencia_request($1, 'aprobar', NULL)`,
+          [REQ_ATOMICIDAD_RANGO]
+        );
 
-      const { rows: reqRows } = await c.query(`SELECT estado FROM ausencia_requests WHERE id = $1`, [REQ_ATOMICIDAD_RANGO]);
-      expect(reqRows[0].estado).toBe('pendiente');
+        const { rows: reqRows } = await c.query(`SELECT estado FROM ausencia_requests WHERE id = $1`, [REQ_ATOMICIDAD_RANGO]);
+        expect(reqRows[0].estado).toBe('pendiente');
 
-      const { rows: auditRows } = await c.query(`SELECT * FROM audit_log WHERE record_id = $1`, [REQ_ATOMICIDAD_RANGO]);
-      expect(auditRows).toHaveLength(0);
+        const { rows: auditRows } = await c.query(`SELECT * FROM audit_log WHERE record_id = $1`, [REQ_ATOMICIDAD_RANGO]);
+        expect(auditRows).toHaveLength(0);
 
-      const { rows: calRows } = await c.query(
-        `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha BETWEEN '2027-03-20' AND '2027-03-24'`,
-        [IDS.employee3]
-      );
-      expect(calRows).toHaveLength(0);
-      // El ROLLBACK final de asAdminSuperuser descarta también el ALTER TABLE.
-    });
+        const { rows: calRows } = await c.query(
+          `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha BETWEEN '2027-03-20' AND '2027-03-24'`,
+          [IDS.employee3]
+        );
+        expect(calRows).toHaveLength(0);
+      });
+    } finally {
+      await setupClient.query(`ALTER TABLE rotation_assignments DROP CONSTRAINT IF EXISTS test_force_fail_rango`);
+      await setupClient.end();
+    }
   });
 });
