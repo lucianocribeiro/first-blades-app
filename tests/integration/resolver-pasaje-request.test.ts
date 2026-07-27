@@ -532,9 +532,16 @@ describe.skipIf(!dbAvailable)('resolver_pasaje_request: guardas de §6.1', () =>
 
   it('aprobar una fila con dias_viaje NULL (legacy, previa a FB-F4-08) → abort con mensaje amigable, no el error crudo de FOREACH', async () => {
     await asUser(IDS.admin, async (c) => {
+      // SAVEPOINT: un RAISE EXCEPTION no capturado deja la transacción
+      // abortada — cualquier query posterior (el SELECT de abajo) fallaría
+      // con "current transaction is aborted" sin este rollback parcial
+      // (mismo criterio que callExpectingThrow, acá inline porque además
+      // se afirma el mensaje de error específico).
+      await c.query('SAVEPOINT sp_sin_dias');
       await expect(
         c.query(`SELECT public.resolver_pasaje_request($1, 'aprobar', NULL)`, [REQ_SIN_DIAS])
       ).rejects.toThrow(/días de viaje/);
+      await c.query('ROLLBACK TO SAVEPOINT sp_sin_dias');
 
       const { rows } = await c.query(`SELECT estado FROM pasaje_requests WHERE id = $1`, [REQ_SIN_DIAS]);
       expect(rows[0].estado).toBe('pendiente');
