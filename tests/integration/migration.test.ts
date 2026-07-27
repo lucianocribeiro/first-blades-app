@@ -691,4 +691,155 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     // confirma que 0015 no aflojó ninguna guarda de acceso de §6.1.
     expect(grants[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
   });
+
+  // ─── FB-F4-07: dias_viaje + resolver_pasaje_request (0016) ───────────
+
+  it('pasaje_requests.dias_viaje existe: date[], nullable (0016)', async () => {
+    const { rows } = await client.query(`
+      SELECT data_type, udt_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'pasaje_requests' AND column_name = 'dias_viaje'
+    `);
+    expect(rows).toHaveLength(1);
+    // Postgres reporta 'ARRAY' en data_type para cualquier columna de tipo
+    // array; udt_name da el tipo de elemento real ('_date' = array de date).
+    expect(rows[0].data_type).toBe('ARRAY');
+    expect(rows[0].udt_name).toBe('_date');
+    expect(rows[0].is_nullable).toBe('YES');
+  });
+
+  it('CHECK pasaje_requests_dias_viaje_no_vacio: NULL permitido, array vacío rechazado (0016)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.pasaje_requests'::regclass
+        AND conname = 'pasaje_requests_dias_viaje_no_vacio'
+        AND contype = 'c'
+    `);
+    expect(rows).toHaveLength(1);
+    // Se valida por componentes semánticos (mismo criterio que el resto del
+    // archivo para expresiones que Postgres normaliza con paréntesis extra).
+    // Importa explícitamente que use cardinality() y NO array_length(): esta
+    // última devuelve NULL (no 0) para un array vacío, lo que con el OR de
+    // "IS NULL" dejaría pasar un '{}' — cardinality() sí devuelve 0.
+    const def: string = rows[0].def;
+    expect(def).toMatch(/dias_viaje IS NULL/);
+    expect(def).toMatch(/OR/);
+    expect(def).toMatch(/cardinality\(dias_viaje\) >= 1/);
+    expect(def).not.toMatch(/array_length/);
+  });
+
+  it('pasaje_requests: RLS y enums no cambiaron en 0016 — el delta es solo la columna + su CHECK', async () => {
+    const { rows: policies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'pasaje_requests'
+    `);
+    expect(policies.map((r) => r.policyname).sort()).toEqual([
+      'pasajes_delete_admin',
+      'pasajes_insert_admin',
+      'pasajes_insert_empleado',
+      'pasajes_insert_supervisor',
+      'pasajes_select',
+      'pasajes_update_admin',
+    ]);
+
+    const { rows: enums } = await client.query(`
+      SELECT typname FROM pg_type
+      WHERE typtype = 'e' AND typnamespace = 'public'::regnamespace
+      ORDER BY typname
+    `);
+    expect(enums.map((r) => r.typname)).toEqual([
+      'approval_status',
+      'certificado_tipo',
+      'employee_status',
+      'estado_dia',
+      'motivo_ausencia',
+      'motivo_viaje',
+      'notification_type',
+      'user_role',
+    ]);
+  });
+
+  it('función resolver_pasaje_request() existe con la firma (uuid, text, text), 1 default, retorna void (0016)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        p.pronargs,
+        p.pronargdefaults,
+        pg_get_function_result(p.oid) AS ret,
+        (
+          SELECT array_agg(t.typname::text ORDER BY u.ord)
+          FROM unnest(p.proargtypes) WITH ORDINALITY AS u(oid, ord)
+          JOIN pg_type t ON t.oid = u.oid
+        ) AS arg_types
+      FROM pg_proc p
+      WHERE p.proname = 'resolver_pasaje_request' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].arg_types).toEqual(['uuid', 'text', 'text']);
+    expect(rows[0].pronargs).toBe(3);
+    expect(rows[0].pronargdefaults).toBe(1);
+    expect(rows[0].ret).toBe('void');
+  });
+
+  it('resolver_pasaje_request: SECURITY DEFINER con search_path fijo y owner consistente con is_admin()/auth_role() (0016, réplica de §6.1)', async () => {
+    const { rows } = await client.query(`
+      SELECT p.prosecdef, p.proconfig, r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname = 'resolver_pasaje_request' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].prosecdef).toBe(true);
+    expect(rows[0].proconfig).toContain('search_path=public');
+
+    // Mismo criterio que resolver_ausencia_request: no se afirma un nombre
+    // de rol hardcodeado (difiere entre CI y prod), pero sí que no es un rol
+    // de app y que coincide con el owner de is_admin()/auth_role() — si
+    // resolver_pasaje_request quedara con un owner distinto, sería drift.
+    expect(['authenticated', 'anon', 'public']).not.toContain(rows[0].owner);
+
+    const { rows: helperOwners } = await client.query(`
+      SELECT p.proname, r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname IN ('is_admin', 'auth_role') AND p.pronamespace = 'public'::regnamespace
+      ORDER BY p.proname
+    `);
+    expect(helperOwners).toHaveLength(2);
+    for (const helper of helperOwners) {
+      expect(helper.owner).toBe(rows[0].owner);
+    }
+  });
+
+  it('resolver_pasaje_request: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0016)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        has_function_privilege('authenticated', 'public.resolver_pasaje_request(uuid,text,text)', 'EXECUTE') AS authenticated_can,
+        has_function_privilege('anon', 'public.resolver_pasaje_request(uuid,text,text)', 'EXECUTE') AS anon_can,
+        has_function_privilege('public', 'public.resolver_pasaje_request(uuid,text,text)', 'EXECUTE') AS public_can
+    `);
+    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
+  });
+
+  it('rotation_assignments: CHECK motivo_requerido y UNIQUE(user_id, fecha) siguen intactos — resolver_pasaje_request depende de ambos para en_viaje/upsert (0016 no los toca)', async () => {
+    const { rows: check } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.rotation_assignments'::regclass
+        AND conname = 'rotation_assignments_motivo_requerido'
+        AND contype = 'c'
+    `);
+    expect(check).toHaveLength(1);
+    expect(check[0].def).toMatch(/estado_dia/);
+    expect(check[0].def).toMatch(/periodo_fuera_trabajo/);
+    expect(check[0].def).toMatch(/motivo_ausencia IS NOT NULL/);
+
+    const { rows: unique } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.rotation_assignments'::regclass AND contype = 'u'
+    `);
+    expect(unique).toHaveLength(1);
+    expect(unique[0].def).toBe('UNIQUE (user_id, fecha)');
+  });
 });
