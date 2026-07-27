@@ -109,11 +109,17 @@ async function insertPasaje(
   }
 ): Promise<void> {
   const fechaViaje = opts.diasViaje?.[0] ?? '2027-04-01';
+  // reviewedAt se calcula en JS (no en un CASE sobre $7 en SQL): reusar el
+  // mismo parámetro posicional en dos contextos distintos (valor directo de
+  // reviewed_by y condición de un CASE) le impide a Postgres inferir su
+  // tipo ("could not determine data type of parameter $7") — cada
+  // parámetro queda mapeado 1:1 a una sola columna con tipo inequívoco.
+  const reviewedAt = opts.reviewedBy ? new Date() : null;
   await client.query(
     `INSERT INTO pasaje_requests
        (id, solicitante_id, empleado_id, motivo_viaje, fecha_viaje, origen, destino, dias_viaje, estado, reviewed_by, reviewed_at)
      VALUES
-       ($1, $2, $3, 'traslado_proyectos', $4, 'Base', 'Sitio', $5::date[], $6, $7, CASE WHEN $7 IS NOT NULL THEN now() ELSE NULL END)`,
+       ($1, $2, $3, 'traslado_proyectos', $4, 'Base', 'Sitio', $5::date[], $6, $7, $8)`,
     [
       opts.id,
       opts.solicitanteId,
@@ -122,6 +128,7 @@ async function insertPasaje(
       opts.diasViaje,
       opts.estado ?? 'pendiente',
       opts.reviewedBy ?? null,
+      reviewedAt,
     ]
   );
 }
