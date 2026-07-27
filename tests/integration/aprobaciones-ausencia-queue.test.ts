@@ -85,11 +85,13 @@ beforeAll(async () => {
 
   // Días ya cargados en el calendario de employee3, dentro del rango de
   // REQ_OVERWRITE_RANGO (2027-08-10..14) — uno de ellos es_estimado=true.
+  // periodo_fuera_trabajo requiere motivo_ausencia (CHECK
+  // rotation_assignments_motivo_requerido, 0009).
   await db.query(`
-    INSERT INTO rotation_assignments (user_id, fecha, estado_dia, es_estimado)
+    INSERT INTO rotation_assignments (user_id, fecha, estado_dia, motivo_ausencia, es_estimado)
     VALUES
-      ($1, '2027-08-11', 'trabajando', false),
-      ($1, '2027-08-13', 'periodo_fuera_trabajo', true)
+      ($1, '2027-08-11', 'trabajando', NULL, false),
+      ($1, '2027-08-13', 'periodo_fuera_trabajo', 'vacaciones', true)
   `, [IDS.employee3]);
 }, 30_000);
 
