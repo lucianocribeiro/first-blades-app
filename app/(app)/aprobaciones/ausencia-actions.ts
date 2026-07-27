@@ -9,6 +9,7 @@ import {
   sendAusenciaRejectionEmail,
 } from '@/lib/email/ausencia-resolution-email';
 import { translateResolverAusenciaError } from './ausencia-logic';
+import type { MotivoAusencia } from '@/lib/db-types';
 
 // resolver_ausencia_request (0013) es SECURITY DEFINER y valida admin por
 // dentro leyendo auth.uid(): necesita la sesión real del admin (JWT con
@@ -21,39 +22,48 @@ type ServerSupabase = Awaited<ReturnType<typeof createServerClient>>;
 
 export type ResolveAusenciaResult = { emailSent: boolean };
 
-// Revalida el scope de esta bandeja ANTES de invocar la RPC: la RPC valida
-// admin + estado pendiente, pero no limita el motivo (es genérica, pensada
-// también para otros tipos de ausencia en Fase 4). Sin este chequeo, un
-// requestId manipulado o desactualizado podría colar una solicitud de otro
-// motivo (ej. 'vacaciones') a través de esta action de días de trámite y
-// disparar el mail equivocado. Capa de scope de app superpuesta a la RPC —
-// no la reemplaza, la RPC sigue siendo la autoridad de admin/estado/atomicidad.
-async function assertInQueueScope(supabase: ServerSupabase, requestId: string): Promise<void> {
+// Re-lee la solicitud ANTES de invocar la RPC: la RPC valida admin + estado
+// pendiente por dentro, pero esta re-lectura server-side es la que da un
+// error amigable de "ya fue resuelta" sin depender del texto crudo de
+// Postgres, y evita invocar la RPC (y el mail) para un requestId ya resuelto
+// o inexistente. Capa de app superpuesta a la RPC — no la reemplaza, la RPC
+// sigue siendo la autoridad de admin/estado/atomicidad.
+//
+// FB-F4-05: hasta acá esta bandeja también revalidaba motivo_ausencia ===
+// 'dia_tramite' (scope acotado a un solo motivo, Fase 3). La bandeja de
+// Aprobaciones ahora resuelve ausencias de cualquier motivo, así que ese
+// chequeo se retira — el único scope que queda es "pendiente". La RLS y la
+// guarda de la RPC nunca limitaron el motivo por diseño; ese límite siempre
+// vivió acá, y ahora el límite correcto es "cualquier ausencia pendiente".
+async function assertPendiente(supabase: ServerSupabase, requestId: string): Promise<void> {
   const { data, error } = await supabase
     .from('ausencia_requests')
-    .select('estado, motivo_ausencia')
+    .select('estado')
     .eq('id', requestId)
     .single();
 
   if (error || !data) {
     throw new Error(copy.aprobaciones.messages.alreadyResolved);
   }
-  const row = data as { estado: string; motivo_ausencia: string };
+  const row = data as { estado: string };
   if (row.estado !== 'pendiente') {
     throw new Error(copy.aprobaciones.messages.alreadyResolved);
-  }
-  if (row.motivo_ausencia !== 'dia_tramite') {
-    throw new Error(copy.aprobaciones.messages.outOfScope);
   }
 }
 
 // Vuelve a leer la solicitud + el perfil del dueño DESPUÉS de resolverla, para
 // no confiar en datos que el cliente pudo haber tenido desactualizados o
 // manipulados — mismo criterio que rejectDocument en aprobaciones/actions.ts.
+//
+// FB-F4-06: re-lee fecha_fin + motivo_ausencia + motivo_otros_texto además de
+// fecha_inicio — el mail de resolución generalizado (cualquier motivo, no
+// solo día de trámite) los necesita para armar el rango y el motivo amigable.
 async function fetchRequestForNotification(supabase: ServerSupabase, requestId: string) {
   const { data, error } = await supabase
     .from('ausencia_requests')
-    .select('fecha_inicio, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)')
+    .select(
+      'fecha_inicio, fecha_fin, motivo_ausencia, motivo_otros_texto, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)'
+    )
     .eq('id', requestId)
     .single();
 
@@ -63,6 +73,9 @@ async function fetchRequestForNotification(supabase: ServerSupabase, requestId: 
 
   return data as unknown as {
     fecha_inicio: string;
+    fecha_fin: string;
+    motivo_ausencia: MotivoAusencia;
+    motivo_otros_texto: string | null;
     user_profile: { full_name: string | null; email: string | null } | null;
   };
 }
@@ -71,7 +84,7 @@ export async function approveAusencia(requestId: string): Promise<ResolveAusenci
   await requireAdmin();
   const supabase = await createServerClient();
 
-  await assertInQueueScope(supabase, requestId);
+  await assertPendiente(supabase, requestId);
 
   // El cliente de createServerClient() (@supabase/ssr) colapsa el genérico de
   // postgrest-js a `never`/`undefined` en .rpc() (mismo bug ya documentado
@@ -109,9 +122,12 @@ export async function approveAusencia(requestId: string): Promise<ResolveAusenci
       );
     } else {
       await sendAusenciaApprovalEmail({
-        to:          owner.email,
-        fullName:    owner.full_name,
-        fechaInicio: req.fecha_inicio,
+        to:                owner.email,
+        fullName:          owner.full_name,
+        fechaInicio:       req.fecha_inicio,
+        fechaFin:          req.fecha_fin,
+        motivoAusencia:    req.motivo_ausencia,
+        motivoOtrosTexto:  req.motivo_otros_texto,
       });
       emailSent = true;
     }
@@ -129,7 +145,7 @@ export async function rejectAusencia(requestId: string, motivo: string): Promise
   await requireAdmin();
   const supabase = await createServerClient();
 
-  await assertInQueueScope(supabase, requestId);
+  await assertPendiente(supabase, requestId);
 
   const { error } = await supabase.rpc('resolver_ausencia_request', {
     p_request_id:     requestId,
@@ -160,10 +176,13 @@ export async function rejectAusencia(requestId: string, motivo: string): Promise
       );
     } else {
       await sendAusenciaRejectionEmail({
-        to:          owner.email,
-        fullName:    owner.full_name,
-        fechaInicio: req.fecha_inicio,
-        motivo:      trimmed,
+        to:                owner.email,
+        fullName:          owner.full_name,
+        fechaInicio:       req.fecha_inicio,
+        fechaFin:          req.fecha_fin,
+        motivoAusencia:    req.motivo_ausencia,
+        motivoOtrosTexto:  req.motivo_otros_texto,
+        motivoRechazo:     trimmed,
       });
       emailSent = true;
     }

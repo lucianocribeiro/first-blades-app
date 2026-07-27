@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
 import { upsertRotationAssignment } from './actions';
 import { computeDefaultEsEstimado, validateAssignmentInput } from './utils';
+import { MOTIVO_OPTIONS } from '@/lib/rotation/motivo-options';
 import type { EstadoDia, MotivoAusencia, RotationAssignment } from '@/lib/db-types';
 import type { RosterEmployee } from './RosterGrid';
 
@@ -18,7 +19,7 @@ type CellEditModalProps = {
   onClose: () => void;
 };
 
-// Exportados para que RangeEditModal (FB-F3-23) reuse la misma fuente de
+// Exportado para que RangeEditModal (FB-F3-23) reuse la misma fuente de
 // opciones en vez de duplicar el mapeo enum → copy.
 export const ESTADO_OPTIONS: { value: EstadoDia; label: string }[] = [
   { value: 'trabajando', label: copy.status.trabajando },
@@ -27,14 +28,10 @@ export const ESTADO_OPTIONS: { value: EstadoDia; label: string }[] = [
   { value: 'periodo_fuera_trabajo', label: copy.status.periodo_fuera_trabajo },
 ];
 
-export const MOTIVO_OPTIONS: { value: MotivoAusencia; label: string }[] = [
-  { value: 'vacaciones', label: copy.calendario.motivos.vacaciones },
-  { value: 'licencia_medica', label: copy.calendario.motivos.licencia_medica },
-  { value: 'dia_tramite', label: copy.calendario.motivos.dia_tramite },
-  { value: 'matrimonio', label: copy.calendario.motivos.matrimonio },
-  { value: 'fallecimiento', label: copy.calendario.motivos.fallecimiento },
-  { value: 'otros', label: copy.calendario.motivos.otros },
-];
+// Re-exportado (FB-F4-05: extraído a lib/rotation/motivo-options.ts para que
+// Solicitud de Ausencia lo reuse también) para no tocar el import de
+// RangeEditModal.tsx.
+export { MOTIVO_OPTIONS };
 
 function getToday(): string {
   return new Date().toISOString().split('T')[0];

@@ -1,16 +1,11 @@
 // Cron de promoción estimado → real (FB-F3-07, PRD Fase 3: "un estimado
 // pasa a real automáticamente 1 semana antes de la fecha").
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getBusinessToday } from '@/lib/business-date';
 
-const BUSINESS_TIMEZONE = 'America/Argentina/Buenos_Aires';
+export { getBusinessToday };
+
 export const PROMOTION_WINDOW_DAYS = 7;
-
-// Fecha local YYYY-MM-DD en la zona horaria del negocio (Argentina), no UTC
-// crudo. Evita que el límite de 7 días se corra un día por el offset AR
-// (UTC-3): a las 00:00–02:59 UTC todavía es "ayer" en Argentina.
-export function getBusinessToday(referenceDate: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: BUSINESS_TIMEZONE }).format(referenceDate);
-}
 
 // Fecha límite de la ventana de promoción: hoy + 7 días. Cálculo en UTC
 // sobre el string YYYY-MM-DD (fecha calendario pura, sin componente

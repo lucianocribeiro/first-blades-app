@@ -10,6 +10,8 @@ import { InfoBanner } from '@/components/ui/InfoBanner';
 import { approveDocument, rejectDocument } from './actions';
 import { approveAusencia, rejectAusencia } from './ausencia-actions';
 import { TOPE_DIAS_TRAMITE_ANUAL, type SaldoDiasTramite } from '@/lib/rotation/saldo-dias-tramite';
+import { formatFechaAusencia, formatRangoAusencia, motivoAusenciaLabel } from '@/lib/rotation/ausencia-display';
+import type { OverwriteDay, OverwriteStatus } from './page';
 import type { AusenciaRequest, Document, Profile } from '@/lib/db-types';
 
 type UserProfilePick = Pick<Profile, 'full_name' | 'email'>;
@@ -26,13 +28,19 @@ type SaldoBadgeInfo = Pick<SaldoDiasTramite, 'consumidos' | 'excedido'>;
 type AprobacionesTableProps = {
   items: PendingItem[];
   // FB-F3-21: saldo del solicitante, keyeado por user_id — solo aplica a
-  // items kind='ausencia'. No bloquea la aprobación, es informativo.
+  // items kind='ausencia' con motivo_ausencia='dia_tramite'. No bloquea la
+  // aprobación, es informativo.
   saldoByUser?: Record<string, SaldoBadgeInfo>;
   // FB-F3-22: si la query de saldo falló server-side, `saldoByUser` queda
   // vacío — eso NO puede leerse como "sin días consumidos" (dato válido).
   // Con esta señal, la celda muestra un estado de error visible en vez de
   // simplemente omitir el badge.
   saldoLoadFailed?: boolean;
+  // FB-F4-06: estado de la previsualización de sobrescritura por request id
+  // — solo aplica a items kind='ausencia'. 'ok' distingue días=[] (nada que
+  // sobrescribir) de 'error' (no se pudo calcular); ambos casos son no
+  // bloqueantes: aprobar/rechazar sigue disponible siempre.
+  overwriteStatusByRequest?: Record<string, OverwriteStatus>;
 };
 
 function documentTypeLabel(type: string): string {
@@ -44,10 +52,6 @@ function certTipoLabel(tipo: string | null | undefined): string {
   if (!tipo) return '';
   const labels = copy.documentos.certificadoTipos as Record<string, string>;
   return labels[tipo] ?? tipo;
-}
-
-function formatFecha(fecha: string): string {
-  return new Date(`${fecha}T00:00:00`).toLocaleDateString('es-AR');
 }
 
 function userName(item: PendingItem): string {
@@ -75,14 +79,32 @@ function SaldoBadge({ saldo }: { saldo: SaldoBadgeInfo }) {
   );
 }
 
+function SobrescrituraAviso({ dias }: { dias: OverwriteDay[] }) {
+  return (
+    <div className="text-xs text-amber-700 mt-1">
+      <p>{copy.aprobaciones.sobrescritura.aviso}</p>
+      <ul className="list-disc pl-4">
+        {dias.map((d) => (
+          <li key={d.fecha}>
+            {formatFechaAusencia(d.fecha)}: {copy.status[d.estado_dia]}
+            {d.es_estimado && ` (${copy.calendario.leyenda.estimado})`}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function DetalleCell({
   item,
   saldoByUser,
   saldoLoadFailed,
+  overwriteStatusByRequest,
 }: {
   item: PendingItem;
   saldoByUser: Record<string, SaldoBadgeInfo>;
   saldoLoadFailed: boolean;
+  overwriteStatusByRequest: Record<string, OverwriteStatus>;
 }) {
   if (item.kind === 'documento') {
     const doc = item.data;
@@ -100,19 +122,34 @@ function DetalleCell({
   }
 
   const req = item.data;
-  const saldo = saldoByUser[req.user_id];
+  // El badge de saldo solo tiene sentido para día de trámite: es el único
+  // motivo con tope anual (FB-F3-21). Un solicitante puede tener consumo de
+  // día de trámite este año aunque el ítem pendiente sea de otro motivo —
+  // el badge no debe mostrarse en ese caso.
+  const showSaldo = req.motivo_ausencia === 'dia_tramite';
+  const saldo = showSaldo ? saldoByUser[req.user_id] : undefined;
+  const overwriteStatus = overwriteStatusByRequest[req.id];
+
   return (
     <>
-      <div>{formatFecha(req.fecha_inicio)}</div>
+      <div>{motivoAusenciaLabel(req.motivo_ausencia, req.motivo_otros_texto)}</div>
+      <div className="text-xs mt-0.5">{formatRangoAusencia(req.fecha_inicio, req.fecha_fin)}</div>
       {req.notas && <div className="text-xs mt-0.5">{req.notas}</div>}
-      {saldoLoadFailed ? (
-        <div className="text-xs text-error mt-1">{copy.aprobaciones.badgeSaldo.error}</div>
-      ) : (
-        saldo && (
-          <div>
-            <SaldoBadge saldo={saldo} />
-          </div>
-        )
+      {showSaldo &&
+        (saldoLoadFailed ? (
+          <div className="text-xs text-error mt-1">{copy.aprobaciones.badgeSaldo.error}</div>
+        ) : (
+          saldo && (
+            <div>
+              <SaldoBadge saldo={saldo} />
+            </div>
+          )
+        ))}
+      {overwriteStatus?.status === 'error' && (
+        <div className="text-xs text-error mt-1">{copy.aprobaciones.sobrescritura.error}</div>
+      )}
+      {overwriteStatus?.status === 'ok' && overwriteStatus.days.length > 0 && (
+        <SobrescrituraAviso dias={overwriteStatus.days} />
       )}
     </>
   );
@@ -178,7 +215,12 @@ function RejectModal({
   );
 }
 
-export function AprobacionesTable({ items, saldoByUser = {}, saldoLoadFailed = false }: AprobacionesTableProps) {
+export function AprobacionesTable({
+  items,
+  saldoByUser = {},
+  saldoLoadFailed = false,
+  overwriteStatusByRequest = {},
+}: AprobacionesTableProps) {
   const [isPending, startTransition] = useTransition();
   const [actionError, setActionError] = useState('');
   const [actionNotice, setActionNotice] = useState('');
@@ -268,7 +310,12 @@ export function AprobacionesTable({ items, saldoByUser = {}, saldoLoadFailed = f
                   {userName(item)}
                 </td>
                 <td className="py-3 px-3 text-neutral">
-                  <DetalleCell item={item} saldoByUser={saldoByUser} saldoLoadFailed={saldoLoadFailed} />
+                  <DetalleCell
+                    item={item}
+                    saldoByUser={saldoByUser}
+                    saldoLoadFailed={saldoLoadFailed}
+                    overwriteStatusByRequest={overwriteStatusByRequest}
+                  />
                 </td>
                 <td className="py-3 px-3 text-neutral text-xs whitespace-nowrap">
                   {new Date(item.data.created_at).toLocaleDateString('es-AR')}

@@ -17,6 +17,9 @@
  *    revierte (no throw), se loguea, y la action devuelve emailSent:false
  *    para que la UI muestre un aviso suave.
  *  - Límite de rol (admin / supervisor / empleado) sobre ambas actions.
+ *  - FB-F4-05: el pre-check server-side (assertPendiente) ya no restringe
+ *    motivo_ausencia — la bandeja resuelve ausencias de cualquier motivo,
+ *    no solo día de trámite. Solo revalida estado='pendiente'.
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -43,6 +46,8 @@ type RequestData = {
   estado: string;
   motivo_ausencia: string;
   fecha_inicio: string;
+  fecha_fin: string;
+  motivo_otros_texto?: string | null;
   user_profile: { full_name: string | null; email: string | null } | null;
 } | null;
 
@@ -68,6 +73,8 @@ function makeServerClient(opts: ServerClientOptions = {}) {
       estado: 'pendiente',
       motivo_ausencia: 'dia_tramite',
       fecha_inicio: '2027-03-15',
+      fecha_fin: '2027-03-15',
+      motivo_otros_texto: null,
       user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
     },
     requestError = null,
@@ -142,6 +149,9 @@ describe('approveAusencia: happy path', () => {
       to: 'owner@test.com',
       fullName: 'Owner Test',
       fechaInicio: '2027-03-15',
+      fechaFin: '2027-03-15',
+      motivoAusencia: 'dia_tramite',
+      motivoOtrosTexto: null,
     });
     expect(result).toEqual({ emailSent: true });
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
@@ -155,6 +165,8 @@ describe('approveAusencia: happy path', () => {
         estado: 'pendiente',
         motivo_ausencia: 'dia_tramite',
         fecha_inicio: '2027-03-15',
+        fecha_fin: '2027-03-15',
+        motivo_otros_texto: null,
         user_profile: { full_name: 'Sin Mail', email: null },
       },
     });
@@ -213,7 +225,10 @@ describe('rejectAusencia: happy path y validación', () => {
       to: 'owner@test.com',
       fullName: 'Owner Test',
       fechaInicio: '2027-03-15',
-      motivo: 'No corresponde',
+      fechaFin: '2027-03-15',
+      motivoAusencia: 'dia_tramite',
+      motivoOtrosTexto: null,
+      motivoRechazo: 'No corresponde',
     });
     expect(result).toEqual({ emailSent: true });
   });
@@ -245,41 +260,67 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
   });
 });
 
-// ─── FB-F3-20: revalidación de scope server-side antes de la RPC ─────────
+// ─── FB-F4-05: scope de la cola generalizado a cualquier motivo ──────────
 
-describe('scope de la cola (FB-F3-20): la RPC no limita motivo, la action sí', () => {
+describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquier motivo', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('approveAusencia: otro motivo (vacaciones) pendiente → outOfScope, NO llama la RPC ni manda mail', async () => {
+  it('approveAusencia: otro motivo (vacaciones, rango de varios días) → mail generalizado con fechaFin y motivoAusencia re-leídos', async () => {
     const client = mockClient({
       requestData: {
         estado: 'pendiente',
         motivo_ausencia: 'vacaciones',
         fecha_inicio: '2027-03-15',
+        fecha_fin: '2027-03-20',
+        motivo_otros_texto: null,
         user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
       },
     });
 
-    await expect(approveAusencia('req-1')).rejects.toThrow(copy.aprobaciones.messages.outOfScope);
-    expect(client.rpc).not.toHaveBeenCalled();
-    expect(sendAusenciaApprovalEmail).not.toHaveBeenCalled();
+    const result = await approveAusencia('req-1');
+
+    expect(client.rpc).toHaveBeenCalledWith(
+      'resolver_ausencia_request',
+      expect.objectContaining({ p_request_id: 'req-1', p_accion: 'aprobar' })
+    );
+    expect(sendAusenciaApprovalEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fechaInicio: '2027-03-15',
+        fechaFin: '2027-03-20',
+        motivoAusencia: 'vacaciones',
+      })
+    );
+    expect(result).toEqual({ emailSent: true });
   });
 
-  it('rejectAusencia: otro motivo (vacaciones) pendiente → outOfScope, NO llama la RPC ni manda mail', async () => {
+  it('rejectAusencia: motivo "otros" → mail generalizado re-lee motivo_otros_texto', async () => {
     const client = mockClient({
       requestData: {
         estado: 'pendiente',
-        motivo_ausencia: 'vacaciones',
+        motivo_ausencia: 'otros',
         fecha_inicio: '2027-03-15',
+        fecha_fin: '2027-03-15',
+        motivo_otros_texto: 'Mudanza',
         user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
       },
     });
 
-    await expect(rejectAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobaciones.messages.outOfScope);
-    expect(client.rpc).not.toHaveBeenCalled();
-    expect(sendAusenciaRejectionEmail).not.toHaveBeenCalled();
+    const result = await rejectAusencia('req-1', 'motivo');
+
+    expect(client.rpc).toHaveBeenCalledWith(
+      'resolver_ausencia_request',
+      expect.objectContaining({ p_request_id: 'req-1', p_accion: 'rechazar' })
+    );
+    expect(sendAusenciaRejectionEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        motivoAusencia: 'otros',
+        motivoOtrosTexto: 'Mudanza',
+        motivoRechazo: 'motivo',
+      })
+    );
+    expect(result).toEqual({ emailSent: true });
   });
 
   it('approveAusencia: ya resuelta (estado aprobado) detectada en el pre-check → alreadyResolved, NO llega a invocar la RPC', async () => {
@@ -288,6 +329,8 @@ describe('scope de la cola (FB-F3-20): la RPC no limita motivo, la action sí', 
         estado: 'aprobado',
         motivo_ausencia: 'dia_tramite',
         fecha_inicio: '2027-03-15',
+        fecha_fin: '2027-03-15',
+        motivo_otros_texto: null,
         user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
       },
     });
@@ -321,7 +364,7 @@ describe('scope de la cola (FB-F3-20): la RPC no limita motivo, la action sí', 
 
     expect(client.rpc).toHaveBeenCalledTimes(1);
     expect(sendAusenciaRejectionEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ motivo: 'motivo real' })
+      expect.objectContaining({ motivoRechazo: 'motivo real' })
     );
     expect(result).toEqual({ emailSent: true });
   });

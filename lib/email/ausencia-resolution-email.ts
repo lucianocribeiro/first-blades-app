@@ -1,9 +1,12 @@
-// Emails de resolución de solicitud de ausencia (día de trámite) — FB-F3-19.
+// Emails de resolución de solicitud de ausencia — FB-F3-19, generalizado a
+// cualquier motivo en FB-F4-06 (antes hardcodeado a "día de trámite").
 // Arma el contenido en es-AR desde /lib/copy y lo envía con `sendEmail`.
 // SOLO para uso server-side. Mismo patrón que lib/email/rejection-email.ts.
 import { copy } from '@/lib/copy';
 import { sendEmail, type SendEmailParams } from './send-email';
 import type { GmailTransport } from './gmail-transport';
+import type { MotivoAusencia } from '@/lib/db-types';
+import { formatRangoAusencia, motivoAusenciaLabel } from '@/lib/rotation/ausencia-display';
 
 // Color primario de marca (design-system). Email simple, estilos inline.
 const BRAND_PRIMARY = '#0D7EC7';
@@ -17,17 +20,13 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-// fecha_inicio viene como 'YYYY-MM-DD' (columna date); T00:00:00 local evita
-// que el locale corra un día por interpretarlo como UTC (mismo patrón que
-// MisSolicitudesTable.tsx).
-function formatFecha(fecha: string): string {
-  return new Date(`${fecha}T00:00:00`).toLocaleDateString('es-AR');
-}
-
 export interface AusenciaApprovalEmailInput {
   to: string;
   fullName?: string | null;
   fechaInicio: string;
+  fechaFin: string;
+  motivoAusencia: MotivoAusencia;
+  motivoOtrosTexto?: string | null;
 }
 
 export function buildAusenciaApprovalEmail(
@@ -36,14 +35,16 @@ export function buildAusenciaApprovalEmail(
   const t = copy.emails.ausenciaAprobada;
   const nombre = input.fullName?.trim();
   const saludo = nombre ? `${t.saludo} ${nombre},` : `${t.saludo},`;
-  const fecha = formatFecha(input.fechaInicio);
+  const periodo = formatRangoAusencia(input.fechaInicio, input.fechaFin);
+  const motivo = motivoAusenciaLabel(input.motivoAusencia, input.motivoOtrosTexto);
 
   const text = [
     saludo,
     '',
     t.intro,
     '',
-    `${t.fechaLabel}: ${fecha}`,
+    `${t.motivoLabel}: ${motivo}`,
+    `${t.periodoLabel}: ${periodo}`,
     '',
     t.accion,
     '',
@@ -60,8 +61,12 @@ export function buildAusenciaApprovalEmail(
         <p style="margin:0 0 16px;font-size:15px;">${escapeHtml(t.intro)}</p>
         <table style="width:100%;border-collapse:collapse;margin:0 0 16px;font-size:15px;">
           <tr>
-            <td style="padding:6px 0;color:#6b7280;width:180px;">${escapeHtml(t.fechaLabel)}</td>
-            <td style="padding:6px 0;font-weight:bold;">${escapeHtml(fecha)}</td>
+            <td style="padding:6px 0;color:#6b7280;width:180px;">${escapeHtml(t.motivoLabel)}</td>
+            <td style="padding:6px 0;font-weight:bold;">${escapeHtml(motivo)}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;width:180px;">${escapeHtml(t.periodoLabel)}</td>
+            <td style="padding:6px 0;font-weight:bold;">${escapeHtml(periodo)}</td>
           </tr>
         </table>
         <p style="margin:0 0 24px;font-size:15px;">${escapeHtml(t.accion)}</p>
@@ -85,7 +90,12 @@ export interface AusenciaRejectionEmailInput {
   to: string;
   fullName?: string | null;
   fechaInicio: string;
-  motivo: string;
+  fechaFin: string;
+  motivoAusencia: MotivoAusencia;
+  motivoOtrosTexto?: string | null;
+  // Texto libre que el admin escribe al rechazar — distinto de motivoAusencia
+  // (el motivo de la ausencia en sí, ej. 'vacaciones').
+  motivoRechazo: string;
 }
 
 export function buildAusenciaRejectionEmail(
@@ -94,15 +104,17 @@ export function buildAusenciaRejectionEmail(
   const t = copy.emails.ausenciaRechazada;
   const nombre = input.fullName?.trim();
   const saludo = nombre ? `${t.saludo} ${nombre},` : `${t.saludo},`;
-  const fecha = formatFecha(input.fechaInicio);
+  const periodo = formatRangoAusencia(input.fechaInicio, input.fechaFin);
+  const motivo = motivoAusenciaLabel(input.motivoAusencia, input.motivoOtrosTexto);
 
   const text = [
     saludo,
     '',
     t.intro,
     '',
-    `${t.fechaLabel}: ${fecha}`,
-    `${t.motivoLabel}: ${input.motivo}`,
+    `${t.motivoLabel}: ${motivo}`,
+    `${t.periodoLabel}: ${periodo}`,
+    `${t.motivoRechazoLabel}: ${input.motivoRechazo}`,
     '',
     t.accion,
     '',
@@ -119,12 +131,16 @@ export function buildAusenciaRejectionEmail(
         <p style="margin:0 0 16px;font-size:15px;">${escapeHtml(t.intro)}</p>
         <table style="width:100%;border-collapse:collapse;margin:0 0 16px;font-size:15px;">
           <tr>
-            <td style="padding:6px 0;color:#6b7280;width:180px;">${escapeHtml(t.fechaLabel)}</td>
-            <td style="padding:6px 0;font-weight:bold;">${escapeHtml(fecha)}</td>
+            <td style="padding:6px 0;color:#6b7280;width:180px;">${escapeHtml(t.motivoLabel)}</td>
+            <td style="padding:6px 0;font-weight:bold;">${escapeHtml(motivo)}</td>
           </tr>
           <tr>
-            <td style="padding:6px 0;color:#6b7280;vertical-align:top;">${escapeHtml(t.motivoLabel)}</td>
-            <td style="padding:6px 0;">${escapeHtml(input.motivo)}</td>
+            <td style="padding:6px 0;color:#6b7280;width:180px;">${escapeHtml(t.periodoLabel)}</td>
+            <td style="padding:6px 0;font-weight:bold;">${escapeHtml(periodo)}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;vertical-align:top;">${escapeHtml(t.motivoRechazoLabel)}</td>
+            <td style="padding:6px 0;">${escapeHtml(input.motivoRechazo)}</td>
           </tr>
         </table>
         <p style="margin:0 0 24px;font-size:15px;">${escapeHtml(t.accion)}</p>

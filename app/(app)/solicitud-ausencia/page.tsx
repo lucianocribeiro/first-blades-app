@@ -6,7 +6,6 @@ import { Card } from '@/components/ui/Card';
 import { InfoBanner } from '@/components/ui/InfoBanner';
 import { SolicitudAusenciaForm } from './SolicitudAusenciaForm';
 import { MisSolicitudesTable } from './MisSolicitudesTable';
-import { SaldoDiasTramiteCard } from './SaldoDiasTramiteCard';
 import {
   computeSaldoDiasTramite,
   getYearRange,
@@ -81,8 +80,7 @@ export default async function SolicitudAusenciaPage() {
 
   return (
     <div className="space-y-6">
-      <SaldoDiasTramiteCard saldo={saldo} />
-      <SolicitudAusenciaForm />
+      <SolicitudAusenciaForm saldo={saldo} />
       <MisSolicitudesTable requests={requests} />
     </div>
   );
