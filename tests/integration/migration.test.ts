@@ -620,4 +620,75 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'user_role',
     ]);
   });
+
+  // ─── FB-F4-03: resolver_ausencia_request propaga motivo_otros_texto (0015) ─
+
+  it('ausencia_requests.motivo_otros_texto existe: character varying(80), nullable, espejo de rotation_assignments (0015)', async () => {
+    const { rows } = await client.query(`
+      SELECT data_type, character_maximum_length, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'ausencia_requests' AND column_name = 'motivo_otros_texto'
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].data_type).toBe('character varying');
+    expect(rows[0].character_maximum_length).toBe(80);
+    expect(rows[0].is_nullable).toBe('YES');
+  });
+
+  it('ausencia_requests: 0015 no agrega ningún CHECK — motivo_otros_texto queda sin CHECK, igual que su espejo en rotation_assignments (inventario EXACTO de CHECKs sigue siendo el de 0012)', async () => {
+    const { rows } = await client.query(`
+      SELECT conname, pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.ausencia_requests'::regclass AND contype = 'c'
+      ORDER BY conname
+    `);
+    expect(rows).toEqual([
+      {
+        conname: 'ausencia_requests_rechazo_requiere_motivo',
+        def: "CHECK (((estado <> 'rechazado'::approval_status) OR ((motivo_rechazo IS NOT NULL) AND (btrim(motivo_rechazo) <> ''::text))))",
+      },
+      {
+        conname: 'ausencia_requests_resolucion_completa',
+        def: "CHECK (((estado = 'pendiente'::approval_status) OR ((reviewed_by IS NOT NULL) AND (reviewed_at IS NOT NULL))))",
+      },
+    ]);
+  });
+
+  it('resolver_ausencia_request: firma y atributos de seguridad de §6.1 intactos tras el CREATE OR REPLACE de 0015 (mismo prosecdef/search_path/owner/grants que 0013)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        p.pronargs,
+        p.pronargdefaults,
+        pg_get_function_result(p.oid) AS ret,
+        p.prosecdef,
+        p.proconfig,
+        r.rolname AS owner,
+        (
+          SELECT array_agg(t.typname::text ORDER BY u.ord)
+          FROM unnest(p.proargtypes) WITH ORDINALITY AS u(oid, ord)
+          JOIN pg_type t ON t.oid = u.oid
+        ) AS arg_types
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname = 'resolver_ausencia_request' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].arg_types).toEqual(['uuid', 'text', 'text']);
+    expect(rows[0].pronargs).toBe(3);
+    expect(rows[0].pronargdefaults).toBe(1);
+    expect(rows[0].ret).toBe('void');
+    expect(rows[0].prosecdef).toBe(true);
+    expect(rows[0].proconfig).toContain('search_path=public');
+    expect(['authenticated', 'anon', 'public']).not.toContain(rows[0].owner);
+
+    const { rows: grants } = await client.query(`
+      SELECT
+        has_function_privilege('authenticated', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS authenticated_can,
+        has_function_privilege('anon', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS anon_can,
+        has_function_privilege('public', 'public.resolver_ausencia_request(uuid,text,text)', 'EXECUTE') AS public_can
+    `);
+    // CREATE OR REPLACE no reinicia el ACL cuando la firma no cambia; esto
+    // confirma que 0015 no aflojó ninguna guarda de acceso de §6.1.
+    expect(grants[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
+  });
 });

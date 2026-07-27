@@ -1,16 +1,25 @@
 /**
- * Tests de integración — función resolver_ausencia_request (FB-F3-17)
+ * Tests de integración — función resolver_ausencia_request (FB-F3-17, FB-F4-03)
  *
  * Cubre, contra Postgres real:
  *  1. Happy path: aprobar (estado, audit_log, rotation_assignments) y
  *     rechazar (estado + motivo_rechazo, audit_log, sin tocar el calendario).
+ *     El caso de aprobar es también la prueba de "día único sin regresión"
+ *     (FB-F4-03 §5): fecha_inicio = fecha_fin, 1 sola fila esperada.
  *  2. Guardas: no-admin (empleado/supervisor), anon (grant), solicitud ya
  *     resuelta, rechazo sin motivo (o solo blanco), acción inválida,
- *     solicitud inexistente.
+ *     solicitud inexistente. Sin cambios en FB-F4-03 — 0015 no toca ninguna
+ *     guarda; siguen corriendo tal cual contra la función reescrita.
  *  3. Colisión de calendario: aprobar pisa una celda con otro estado_dia ya
  *     cargado, y la queda auditada en el mismo audit_log.
  *  4. Atomicidad: si falla el upsert de rotation_assignments o el INSERT de
  *     audit_log, ausencia_requests NO queda actualizada — todo o nada.
+ *  5. FB-F4-03: expansión de rango per-día (N días, no solo 1) para
+ *     cualquier motivo — vacaciones, licencia_medica, otros (con
+ *     motivo_otros_texto) — con sobrescritura auditada y atomicidad sobre
+ *     un rango multi-día (ninguna fila del rango persiste si falla a mitad
+ *     de camino, ni siquiera los días que el loop ya había insertado antes
+ *     del que falla).
  *
  * No re-testea las policies de RLS de ausencia_requests/rotation_assignments/
  * audit_log en sí (ver rls.test.ts) ni los CHECK/índice de 0012 (ver
@@ -34,6 +43,12 @@ const REQ_PARA_RECHAZAR        = 'd1000000-0000-0000-0001-000000000003'; // empl
 const REQ_COLISION             = 'd1000000-0000-0000-0001-000000000004'; // employee2, 2027-02-04 — celda de calendario ya cargada
 const REQ_ATOMICIDAD_CALENDARIO = 'd1000000-0000-0000-0001-000000000005'; // employee3, 2027-02-05
 const REQ_ATOMICIDAD_AUDIT      = 'd1000000-0000-0000-0001-000000000006'; // employee3, 2027-02-06
+
+// FB-F4-03: expansión de rango + todos los motivos
+const REQ_RANGO_VACACIONES      = 'd1000000-0000-0000-0001-000000000007'; // employee1, 2027-03-01..05 (5 días), vacaciones
+const REQ_RANGO_SOBRESCRITURA   = 'd1000000-0000-0000-0001-000000000008'; // employee2, 2027-03-10..12 (3 días), licencia_medica
+const REQ_OTROS                 = 'd1000000-0000-0000-0001-000000000009'; // employee1, 2027-03-15..16 (2 días), otros + motivo_otros_texto
+const REQ_ATOMICIDAD_RANGO      = 'd1000000-0000-0000-0001-00000000000a'; // employee3, 2027-03-20..24 (5 días), vacaciones
 
 /** Conexión con privilegios de postgres (DDL) + JWT del admin (auth.uid() resuelve). */
 async function asAdminSuperuser<T>(callback: (client: Client) => Promise<T>): Promise<T> {
@@ -117,6 +132,35 @@ beforeAll(async () => {
     INSERT INTO ausencia_requests (id, user_id, motivo_ausencia, fecha_inicio, fecha_fin, estado)
     VALUES ($1, $2, 'dia_tramite', '2027-02-06', '2027-02-06', 'pendiente')
   `, [REQ_ATOMICIDAD_AUDIT, IDS.employee3]);
+
+  // FB-F4-03: rango de 5 días, motivo vacaciones (no dia_tramite).
+  await db.query(`
+    INSERT INTO ausencia_requests (id, user_id, motivo_ausencia, fecha_inicio, fecha_fin, estado)
+    VALUES ($1, $2, 'vacaciones', '2027-03-01', '2027-03-05', 'pendiente')
+  `, [REQ_RANGO_VACACIONES, IDS.employee1]);
+
+  // FB-F4-03: rango de 3 días, motivo licencia_medica, con un día del medio
+  // (03-11) ya cargado con otro estado_dia, para el test de sobrescritura.
+  await db.query(`
+    INSERT INTO ausencia_requests (id, user_id, motivo_ausencia, fecha_inicio, fecha_fin, estado)
+    VALUES ($1, $2, 'licencia_medica', '2027-03-10', '2027-03-12', 'pendiente')
+  `, [REQ_RANGO_SOBRESCRITURA, IDS.employee2]);
+  await db.query(`
+    INSERT INTO rotation_assignments (user_id, fecha, estado_dia, es_estimado)
+    VALUES ($1, '2027-03-11', 'trabajando', true)
+  `, [IDS.employee2]);
+
+  // FB-F4-03: motivo 'otros' con motivo_otros_texto, rango de 2 días.
+  await db.query(`
+    INSERT INTO ausencia_requests (id, user_id, motivo_ausencia, motivo_otros_texto, fecha_inicio, fecha_fin, estado)
+    VALUES ($1, $2, 'otros', 'Trámite médico personal', '2027-03-15', '2027-03-16', 'pendiente')
+  `, [REQ_OTROS, IDS.employee1]);
+
+  // FB-F4-03: rango de 5 días para el test de atomicidad de rango.
+  await db.query(`
+    INSERT INTO ausencia_requests (id, user_id, motivo_ausencia, fecha_inicio, fecha_fin, estado)
+    VALUES ($1, $2, 'vacaciones', '2027-03-20', '2027-03-24', 'pendiente')
+  `, [REQ_ATOMICIDAD_RANGO, IDS.employee3]);
 }, 30_000);
 
 afterAll(async () => {
@@ -340,5 +384,129 @@ describe.skipIf(!dbAvailable)('resolver_ausencia_request: atomicidad', () => {
       );
       expect(calRows).toHaveLength(0);
     });
+  });
+});
+
+// ─── FB-F4-03: expansión de rango per-día + todos los motivos ────
+
+describe.skipIf(!dbAvailable)('resolver_ausencia_request: expansión de rango per-día (FB-F4-03)', () => {
+  it('aprobar un rango de 5 días (vacaciones): escribe 5 filas periodo_fuera_trabajo/vacaciones, es_estimado=false, una por día', async () => {
+    await asUser(IDS.admin, async (c) => {
+      await c.query(`SELECT public.resolver_ausencia_request($1, 'aprobar', NULL)`, [REQ_RANGO_VACACIONES]);
+
+      const { rows: reqRows } = await c.query(`SELECT estado FROM ausencia_requests WHERE id = $1`, [REQ_RANGO_VACACIONES]);
+      expect(reqRows[0].estado).toBe('aprobado');
+
+      const { rows: calRows } = await c.query(
+        `SELECT fecha::text AS fecha, estado_dia, motivo_ausencia, es_estimado FROM rotation_assignments
+         WHERE user_id = $1 AND fecha BETWEEN '2027-03-01' AND '2027-03-05' ORDER BY fecha`,
+        [IDS.employee1]
+      );
+      expect(calRows).toHaveLength(5);
+      // fecha::text evita que el driver de pg parsee `date` a un JS Date
+      // (que interpreta a medianoche LOCAL) y corra el string por timezone.
+      const fechas = calRows.map((r) => r.fecha);
+      expect(fechas).toEqual(['2027-03-01', '2027-03-02', '2027-03-03', '2027-03-04', '2027-03-05']);
+      for (const row of calRows) {
+        expect(row.estado_dia).toBe('periodo_fuera_trabajo');
+        expect(row.motivo_ausencia).toBe('vacaciones');
+        expect(row.es_estimado).toBe(false);
+      }
+
+      const { rows: auditRows } = await c.query(`SELECT action FROM audit_log WHERE record_id = $1`, [REQ_RANGO_VACACIONES]);
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0].action).toBe('ausencia_approved');
+    });
+  });
+
+  it('sobrescritura dentro de un rango: un día del medio con fila previa (trabajando) queda periodo_fuera_trabajo, y el old_data queda en audit_log', async () => {
+    await asUser(IDS.admin, async (c) => {
+      await c.query(`SELECT public.resolver_ausencia_request($1, 'aprobar', NULL)`, [REQ_RANGO_SOBRESCRITURA]);
+
+      const { rows: calRows } = await c.query(
+        `SELECT fecha, estado_dia, motivo_ausencia FROM rotation_assignments
+         WHERE user_id = $1 AND fecha BETWEEN '2027-03-10' AND '2027-03-12' ORDER BY fecha`,
+        [IDS.employee2]
+      );
+      expect(calRows).toHaveLength(3);
+      for (const row of calRows) {
+        expect(row.estado_dia).toBe('periodo_fuera_trabajo');
+        expect(row.motivo_ausencia).toBe('licencia_medica');
+      }
+
+      const { rows: auditRows } = await c.query(`SELECT new_data FROM audit_log WHERE record_id = $1`, [REQ_RANGO_SOBRESCRITURA]);
+      expect(auditRows).toHaveLength(1);
+      const calendarioPisado = auditRows[0].new_data.calendario_pisado;
+      // Solo el día 03-11 tenía fila previa (trabajando); 03-10 y 03-12 no
+      // tenían nada, así que no hay nada que reportar como pisado para esos.
+      expect(calendarioPisado).toHaveLength(1);
+      expect(calendarioPisado[0]).toMatchObject({ fecha: '2027-03-11', estado_dia_previo: 'trabajando' });
+    });
+  });
+
+  it("motivo 'otros': aprobar propaga motivo_otros_texto a cada fila del calendario del rango", async () => {
+    await asUser(IDS.admin, async (c) => {
+      await c.query(`SELECT public.resolver_ausencia_request($1, 'aprobar', NULL)`, [REQ_OTROS]);
+
+      const { rows: calRows } = await c.query(
+        `SELECT fecha, estado_dia, motivo_ausencia, motivo_otros_texto FROM rotation_assignments
+         WHERE user_id = $1 AND fecha BETWEEN '2027-03-15' AND '2027-03-16' ORDER BY fecha`,
+        [IDS.employee1]
+      );
+      expect(calRows).toHaveLength(2);
+      for (const row of calRows) {
+        expect(row.estado_dia).toBe('periodo_fuera_trabajo');
+        expect(row.motivo_ausencia).toBe('otros');
+        expect(row.motivo_otros_texto).toBe('Trámite médico personal');
+      }
+    });
+  });
+
+  it('atomicidad de rango: un fallo a mitad del rango revierte TODAS las filas del rango, incluidas las que el loop ya había insertado antes de la que falla', async () => {
+    // Setup DDL privilegiado (fixture): agrega temporalmente un CHECK que
+    // fuerza el fallo a mitad de rango. ALTER TABLE requiere el rol
+    // propietario de la tabla (no authenticated), así que corre en una
+    // conexión aparte y se COMMITea de una — fuera de la invocación
+    // afirmada de abajo — para que sea visible en la conexión separada de
+    // asUser(). Como queda committeado (no dentro de una transacción que
+    // se revierte), se limpia explícitamente en el finally.
+    const setupClient = new Client({ connectionString: DB_URL });
+    await setupClient.connect();
+    try {
+      // El rango es 2027-03-20..24; el loop inserta en orden ascendente, así
+      // que al forzar el fallo en el día del medio (03-22), 03-20 y 03-21 ya
+      // se habrían insertado en la MISMA transacción antes de llegar al
+      // error — la prueba real de atomicidad es que ESOS también desaparecen.
+      await setupClient.query(`
+        ALTER TABLE rotation_assignments
+        ADD CONSTRAINT test_force_fail_rango CHECK (fecha <> '2027-03-22')
+      `);
+
+      // Paso afirmado: corre bajo asUser(IDS.admin) — rol authenticated +
+      // claims de admin, el camino de ejecución real del RPC — no como
+      // postgres/superusuario (FB-F4-AUD-02).
+      await asUser(IDS.admin, async (c) => {
+        await callExpectingThrow(
+          c,
+          `SELECT public.resolver_ausencia_request($1, 'aprobar', NULL)`,
+          [REQ_ATOMICIDAD_RANGO]
+        );
+
+        const { rows: reqRows } = await c.query(`SELECT estado FROM ausencia_requests WHERE id = $1`, [REQ_ATOMICIDAD_RANGO]);
+        expect(reqRows[0].estado).toBe('pendiente');
+
+        const { rows: auditRows } = await c.query(`SELECT * FROM audit_log WHERE record_id = $1`, [REQ_ATOMICIDAD_RANGO]);
+        expect(auditRows).toHaveLength(0);
+
+        const { rows: calRows } = await c.query(
+          `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha BETWEEN '2027-03-20' AND '2027-03-24'`,
+          [IDS.employee3]
+        );
+        expect(calRows).toHaveLength(0);
+      });
+    } finally {
+      await setupClient.query(`ALTER TABLE rotation_assignments DROP CONSTRAINT IF EXISTS test_force_fail_rango`);
+      await setupClient.end();
+    }
   });
 });
