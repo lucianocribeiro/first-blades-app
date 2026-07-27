@@ -1,29 +1,41 @@
 /**
- * Tests de integración — función resolver_pasaje_request (FB-F4-07)
+ * Tests de integración — función resolver_pasaje_request (FB-F4-07, FB-F4-08)
  *
  * Cubre, contra Postgres real:
  *  1. Happy path: aprobar días sueltos (no un rango contiguo) → N filas
  *     'en_viaje' en el calendario del empleado_id, es_estimado=false,
- *     motivo_ausencia=NULL; estado→aprobado; audit_log registra la
- *     transición. Rechazar: estado→rechazado + motivo, audit_log, sin tocar
- *     el calendario.
+ *     motivo_ausencia=NULL; estado→aprobado con SU PROPIA fila de audit_log
+ *     (transición), MÁS una fila de audit_log por cada día sobrescrito
+ *     (FB-F4-08 — table_name='rotation_assignments', record_id=id real de
+ *     la fila de calendario, old_data=NULL si el día estaba libre). Total
+ *     esperado = 1 (transición) + N (días). Rechazar: estado→rechazado +
+ *     motivo, sólo la fila de transición, sin tocar el calendario ni
+ *     agregar audit por día.
  *  2. Destino correcto: cuando solicitante_id ≠ empleado_id (supervisor pide
  *     para su equipo), las filas se escriben en el calendario del
  *     empleado_id, no del solicitante.
  *  3. Sobrescritura: un día con 'trabajando' y otro con 'periodo_fuera_trabajo'
- *     + motivo quedan 'en_viaje' con motivo_ausencia limpiado; old_data en
- *     audit_log; el CHECK rotation_assignments_motivo_requerido no se viola
- *     (en_viaje no exige motivo).
- *  4. Atomicidad: fallo forzado a mitad de un array de días sueltos revierte
- *     TODAS las filas de esa invocación (incluidas las que el loop ya había
- *     insertado antes de la que falla) y la request no cambia de estado.
- *     Mismo patrón simétrico para un fallo en el INSERT de audit_log.
+ *     + motivo quedan 'en_viaje' con motivo_ausencia limpiado; el old_data
+ *     de CADA día pisado queda en SU PROPIA fila de audit_log (no agrupado
+ *     en new_data.calendario_pisado de la transición, a diferencia del
+ *     molde de ausencia — divergencia intencional, ver FB-F4-08); el CHECK
+ *     rotation_assignments_motivo_requerido no se viola (en_viaje no exige
+ *     motivo).
+ *  4. Atomicidad — LOS TRES CASOS bajo asUser(IDS.admin) (rol authenticated
+ *     + claims de admin, el camino de ejecución real del RPC, no
+ *     postgres/superusuario — FB-F4-08 Hallazgo Bajo): fallo forzado en el
+ *     upsert de rotation_assignments, fallo forzado en el INSERT de
+ *     audit_log, y fallo forzado a mitad de un array de días sueltos.
+ *     Los tres revierten TODO (calendario, audit_log, estado de la
+ *     request) — incluidas las filas que el loop ya había insertado antes
+ *     de la que falla, en el tercer caso.
  *  5. Guardas de §6.1: no-admin (empleado/supervisor), anon (GRANT), ya
  *     resuelta, rechazo sin motivo / motivo en blanco, acción inválida,
  *     solicitud inexistente.
  *  6. Guarda propia (no en el molde de ausencia): aprobar una fila con
- *     dias_viaje NULL (legacy, previa a FB-F4-08) da un error amigable en
- *     vez del error crudo de "FOREACH expression must not be null".
+ *     dias_viaje NULL (legacy, previa a FB-F4-08 formulario) da un error
+ *     amigable en vez del error crudo de "FOREACH expression must not be
+ *     null".
  *  7. CHECK de columna pasaje_requests_dias_viaje_no_vacio: dias_viaje='{}'
  *     rechazado, NULL permitido (fila legacy) — probado directo por INSERT,
  *     sin pasar por la RPC.
@@ -52,20 +64,6 @@ const REQ_ATOMICIDAD_CAL     = 'e2000000-0000-0000-0002-000000000006'; // employ
 const REQ_ATOMICIDAD_AUDIT   = 'e2000000-0000-0000-0002-000000000007'; // employee3 — falla el INSERT de audit_log
 const REQ_ATOMICIDAD_MULTI   = 'e2000000-0000-0000-0002-000000000008'; // employee3, 3 días sueltos, falla el del medio
 const REQ_SIN_DIAS            = 'e2000000-0000-0000-0002-000000000009'; // employee1, dias_viaje NULL (fila legacy)
-
-/** Conexión con privilegios de postgres (DDL) + JWT del admin (auth.uid() resuelve). */
-async function asAdminSuperuser<T>(callback: (client: Client) => Promise<T>): Promise<T> {
-  const client = new Client({ connectionString: DB_URL });
-  await client.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query(`SELECT set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: IDS.admin })]);
-    return await callback(client);
-  } finally {
-    await client.query('ROLLBACK');
-    await client.end();
-  }
-}
 
 /** Conexión como anon (sin sesión): para probar que el GRANT bloquea antes de la guarda interna. */
 async function asAnon<T>(callback: (client: Client) => Promise<T>): Promise<T> {
@@ -270,6 +268,31 @@ describe.skipIf(!dbAvailable)('resolver_pasaje_request: happy path', () => {
         [IDS.employee1]
       );
       expect(gapRow).toHaveLength(0);
+
+      // FB-F4-08: además de la fila de transición (arriba), cada día
+      // sobrescrito deja SU PROPIA fila de audit_log — acá, sin
+      // sobrescritura real (los 3 días estaban libres), así que
+      // old_data=NULL en las 3. record_id ya no es la request: es el id
+      // real de la fila de rotation_assignments upserteada.
+      const { rows: calAuditRows } = await c.query(
+        `SELECT action, table_name, old_data, new_data FROM audit_log
+         WHERE action = 'pasaje_calendario_sobrescrito'
+           AND record_id IN (SELECT id FROM rotation_assignments WHERE user_id = $1 AND fecha = ANY ($2::date[]))
+         ORDER BY (new_data->>'fecha')`,
+        [IDS.employee1, ['2027-04-01', '2027-04-03', '2027-04-05']]
+      );
+      expect(calAuditRows).toHaveLength(3);
+      expect(calAuditRows.map((r) => r.new_data.fecha)).toEqual(['2027-04-01', '2027-04-03', '2027-04-05']);
+      for (const row of calAuditRows) {
+        expect(row.table_name).toBe('rotation_assignments');
+        expect(row.old_data).toBeNull();
+        expect(row.new_data).toMatchObject({
+          estado_dia: 'en_viaje',
+          motivo_ausencia: null,
+          motivo_otros_texto: null,
+          es_estimado: false,
+        });
+      }
     });
   });
 
@@ -297,6 +320,13 @@ describe.skipIf(!dbAvailable)('resolver_pasaje_request: happy path', () => {
         [IDS.employee1]
       );
       expect(calRows).toHaveLength(0);
+
+      // Rechazar no genera audit por-día (FB-F4-08) — no hay calendario que
+      // pisar, así que no hay nada que auditar más allá de la transición.
+      const { rows: calAuditRows } = await c.query(
+        `SELECT * FROM audit_log WHERE action = 'pasaje_calendario_sobrescrito'`
+      );
+      expect(calAuditRows).toHaveLength(0);
     });
   });
 });
@@ -349,14 +379,34 @@ describe.skipIf(!dbAvailable)('resolver_pasaje_request: sobrescritura (FB-F4-07)
         expect(row.motivo_otros_texto).toBeNull();
       }
 
-      const { rows: auditRows } = await c.query(`SELECT new_data FROM audit_log WHERE record_id = $1`, [REQ_SOBRESCRITURA]);
-      expect(auditRows).toHaveLength(1);
-      const calendarioPisado = auditRows[0].new_data.calendario_pisado;
-      // Solo 04-20 y 04-21 tenían fila previa; 04-22 estaba libre.
-      expect(calendarioPisado).toHaveLength(2);
-      const porFecha = Object.fromEntries(calendarioPisado.map((d: { fecha: string }) => [d.fecha, d]));
-      expect(porFecha['2027-04-20']).toMatchObject({ estado_dia_previo: 'trabajando', motivo_ausencia_previo: null });
-      expect(porFecha['2027-04-21']).toMatchObject({ estado_dia_previo: 'periodo_fuera_trabajo', motivo_ausencia_previo: 'vacaciones' });
+      // La transición de la request sigue siendo una única fila (FB-F4-08:
+      // ya no lleva calendario_pisado embutido — el detalle vive en las
+      // filas por-día de abajo).
+      const { rows: transitionRows } = await c.query(
+        `SELECT action, new_data FROM audit_log WHERE record_id = $1`,
+        [REQ_SOBRESCRITURA]
+      );
+      expect(transitionRows).toHaveLength(1);
+      expect(transitionRows[0].action).toBe('pasaje_approved');
+      expect(transitionRows[0].new_data).toEqual({ estado: 'aprobado' });
+
+      // FB-F4-08: una fila de audit_log POR DÍA (table_name='rotation_assignments'),
+      // no agrupada. old_data refleja la celda previa exacta cuando existía
+      // (04-20, 04-21) y NULL cuando el día estaba libre (04-22) — distinto
+      // de "había una fila pero estaba vacía".
+      const { rows: calAuditRows } = await c.query(
+        `SELECT table_name, old_data, new_data FROM audit_log
+         WHERE action = 'pasaje_calendario_sobrescrito'
+           AND record_id IN (SELECT id FROM rotation_assignments WHERE user_id = $1 AND fecha = ANY ($2::date[]))`,
+        [IDS.employee2, ['2027-04-20', '2027-04-21', '2027-04-22']]
+      );
+      expect(calAuditRows).toHaveLength(3);
+      for (const row of calAuditRows) expect(row.table_name).toBe('rotation_assignments');
+
+      const porFecha = Object.fromEntries(calAuditRows.map((r) => [r.new_data.fecha, r]));
+      expect(porFecha['2027-04-20'].old_data).toMatchObject({ estado_dia: 'trabajando', motivo_ausencia: null });
+      expect(porFecha['2027-04-21'].old_data).toMatchObject({ estado_dia: 'periodo_fuera_trabajo', motivo_ausencia: 'vacaciones' });
+      expect(porFecha['2027-04-22'].old_data).toBeNull();
     });
   });
 });
@@ -365,55 +415,74 @@ describe.skipIf(!dbAvailable)('resolver_pasaje_request: sobrescritura (FB-F4-07)
 
 describe.skipIf(!dbAvailable)('resolver_pasaje_request: atomicidad', () => {
   it('si falla el upsert de rotation_assignments, no persiste ni el UPDATE de estado ni el INSERT de audit_log', async () => {
-    await asAdminSuperuser(async (c) => {
-      await c.query(`
+    // FB-F4-08 (Hallazgo Bajo): el setup DDL privilegiado corre en una
+    // conexión aparte (ALTER TABLE requiere el rol propietario de la
+    // tabla, no authenticated), committeada de una y limpiada en el
+    // finally — pero la INVOCACIÓN AFIRMADA de la RPC corre bajo
+    // asUser(IDS.admin), el camino de ejecución real (rol authenticated +
+    // claims de admin), no como postgres/superusuario.
+    const setupClient = new Client({ connectionString: DB_URL });
+    await setupClient.connect();
+    try {
+      await setupClient.query(`
         ALTER TABLE rotation_assignments
         ADD CONSTRAINT test_force_fail_pasaje_cal CHECK (fecha <> '2027-04-25')
       `);
 
-      await callExpectingThrow(
-        c,
-        `SELECT public.resolver_pasaje_request($1, 'aprobar', NULL)`,
-        [REQ_ATOMICIDAD_CAL]
-      );
+      await asUser(IDS.admin, async (c) => {
+        await callExpectingThrow(
+          c,
+          `SELECT public.resolver_pasaje_request($1, 'aprobar', NULL)`,
+          [REQ_ATOMICIDAD_CAL]
+        );
 
-      const { rows: reqRows } = await c.query(`SELECT estado FROM pasaje_requests WHERE id = $1`, [REQ_ATOMICIDAD_CAL]);
-      expect(reqRows[0].estado).toBe('pendiente');
+        const { rows: reqRows } = await c.query(`SELECT estado FROM pasaje_requests WHERE id = $1`, [REQ_ATOMICIDAD_CAL]);
+        expect(reqRows[0].estado).toBe('pendiente');
 
-      const { rows: auditRows } = await c.query(`SELECT * FROM audit_log WHERE record_id = $1`, [REQ_ATOMICIDAD_CAL]);
-      expect(auditRows).toHaveLength(0);
+        const { rows: auditRows } = await c.query(`SELECT * FROM audit_log WHERE record_id = $1`, [REQ_ATOMICIDAD_CAL]);
+        expect(auditRows).toHaveLength(0);
 
-      const { rows: calRows } = await c.query(
-        `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-04-25'`,
-        [IDS.employee3]
-      );
-      expect(calRows).toHaveLength(0);
-      // El ROLLBACK final de asAdminSuperuser descarta también el ALTER TABLE (DDL transaccional).
-    });
+        const { rows: calRows } = await c.query(
+          `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-04-25'`,
+          [IDS.employee3]
+        );
+        expect(calRows).toHaveLength(0);
+      });
+    } finally {
+      await setupClient.query(`ALTER TABLE rotation_assignments DROP CONSTRAINT IF EXISTS test_force_fail_pasaje_cal`);
+      await setupClient.end();
+    }
   });
 
   it('simétrico: si falla el INSERT a audit_log, tampoco persiste el UPDATE de pasaje_requests ni el upsert de rotation_assignments', async () => {
-    await asAdminSuperuser(async (c) => {
-      await c.query(`
+    const setupClient = new Client({ connectionString: DB_URL });
+    await setupClient.connect();
+    try {
+      await setupClient.query(`
         ALTER TABLE audit_log
         ADD CONSTRAINT test_force_fail_pasaje_audit CHECK (action <> 'pasaje_approved')
       `);
 
-      await callExpectingThrow(
-        c,
-        `SELECT public.resolver_pasaje_request($1, 'aprobar', NULL)`,
-        [REQ_ATOMICIDAD_AUDIT]
-      );
+      await asUser(IDS.admin, async (c) => {
+        await callExpectingThrow(
+          c,
+          `SELECT public.resolver_pasaje_request($1, 'aprobar', NULL)`,
+          [REQ_ATOMICIDAD_AUDIT]
+        );
 
-      const { rows: reqRows } = await c.query(`SELECT estado FROM pasaje_requests WHERE id = $1`, [REQ_ATOMICIDAD_AUDIT]);
-      expect(reqRows[0].estado).toBe('pendiente');
+        const { rows: reqRows } = await c.query(`SELECT estado FROM pasaje_requests WHERE id = $1`, [REQ_ATOMICIDAD_AUDIT]);
+        expect(reqRows[0].estado).toBe('pendiente');
 
-      const { rows: calRows } = await c.query(
-        `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-04-26'`,
-        [IDS.employee3]
-      );
-      expect(calRows).toHaveLength(0);
-    });
+        const { rows: calRows } = await c.query(
+          `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-04-26'`,
+          [IDS.employee3]
+        );
+        expect(calRows).toHaveLength(0);
+      });
+    } finally {
+      await setupClient.query(`ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS test_force_fail_pasaje_audit`);
+      await setupClient.end();
+    }
   });
 
   it('fallo a mitad de un array de días sueltos revierte TODAS las filas de la invocación, incluidas las ya insertadas antes de la que falla', async () => {

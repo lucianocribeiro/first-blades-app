@@ -1,4 +1,9 @@
 -- FB-F4-07: capa de datos para resolver Solicitud de Pasaje
+-- (editada in-place por FB-F4-08 — este archivo aún no está en prod, así
+-- que el fix de FB-F4-AUD-05 se aplica sobre el mismo 0016 en vez de sumar
+-- una migración 0017 para un cambio que todavía no se pusheó: FB-F4-AUD-05
+-- Hallazgo Medio — audit_log por día en vez de agrupado; ver el bloque
+-- FOREACH del aprobar, más abajo, para el detalle.)
 --
 -- (a) pasaje_requests.dias_viaje: fechas discretas del viaje (no un rango —
 -- a diferencia de ausencia_requests, un viaje puede ser días sueltos, ej.
@@ -57,11 +62,12 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_request           public.pasaje_requests%ROWTYPE;
-  v_old_data          JSONB;
-  v_new_data          JSONB;
-  v_calendario_previo JSONB;
-  v_dia               DATE;
+  v_request      public.pasaje_requests%ROWTYPE;
+  v_old_data     JSONB;
+  v_new_data     JSONB;
+  v_cal_old_data JSONB;
+  v_dia          DATE;
+  v_cal_id       UUID;
 BEGIN
   -- Guarda de admin — mismo razonamiento que resolver_ausencia_request:
   -- auth.uid() IS NULL se chequea explícito porque is_admin() devuelve NULL
@@ -111,22 +117,10 @@ BEGIN
         updated_at  = now()
     WHERE id = p_request_id;
 
-    -- Captura el estado previo de las celdas del calendario que la
-    -- aprobación va a pisar, para dejar la colisión auditada.
-    SELECT COALESCE(jsonb_agg(jsonb_build_object(
-             'fecha', fecha,
-             'estado_dia_previo', estado_dia,
-             'motivo_ausencia_previo', motivo_ausencia
-           ) ORDER BY fecha), '[]'::jsonb)
-    INTO v_calendario_previo
-    FROM public.rotation_assignments
-    WHERE user_id = v_request.empleado_id
-      AND fecha = ANY (v_request.dias_viaje);
-
-    v_new_data := jsonb_build_object(
-      'estado', 'aprobado',
-      'calendario_pisado', v_calendario_previo
-    );
+    -- Fila de transición de la request (igual que el molde de ausencia).
+    -- El detalle de qué días se pisaron ya NO va embutido acá (FB-F4-08,
+    -- ver más abajo): vive en una fila de audit_log propia por cada día.
+    v_new_data := jsonb_build_object('estado', 'aprobado');
 
     INSERT INTO public.audit_log (actor_id, action, table_name, record_id, old_data, new_data)
     VALUES (auth.uid(), 'pasaje_approved', 'pasaje_requests', p_request_id, v_old_data, v_new_data);
@@ -135,7 +129,31 @@ BEGIN
     -- en el calendario de empleado_id (quien viaja). en_viaje no lleva
     -- motivo_ausencia: se limpia explícito por si el día pisado era
     -- periodo_fuera_trabajo con un motivo cargado.
+    --
+    -- FB-F4-08: a diferencia del molde de ausencia (que agrupa todos los
+    -- días pisados en un solo audit_log.new_data.calendario_pisado), acá
+    -- cada día pisado deja SU PROPIA fila de audit_log
+    -- (table_name='rotation_assignments', record_id=id real de la fila
+    -- upserteada) — más granular y más fácil de correlacionar con la fila
+    -- de calendario concreta. Divergencia intencional respecto al molde;
+    -- ver FB-F4-08 §2 para el veredicto de alineación (ausencia sigue
+    -- agrupada, no se toca acá).
     FOREACH v_dia IN ARRAY v_request.dias_viaje LOOP
+      -- Estado previo de ESTE día puntual (NULL si el día estaba libre —
+      -- no hay fila que capturar, y old_data queda NULL, no un objeto
+      -- vacío: la ausencia de fila previa es un dato distinto de "había
+      -- una fila pero estaba vacía").
+      SELECT jsonb_build_object(
+               'fecha', fecha,
+               'estado_dia', estado_dia,
+               'motivo_ausencia', motivo_ausencia,
+               'motivo_otros_texto', motivo_otros_texto,
+               'es_estimado', es_estimado
+             )
+      INTO v_cal_old_data
+      FROM public.rotation_assignments
+      WHERE user_id = v_request.empleado_id AND fecha = v_dia;
+
       INSERT INTO public.rotation_assignments
         (user_id, fecha, estado_dia, motivo_ausencia, motivo_otros_texto, es_estimado)
       VALUES
@@ -145,7 +163,24 @@ BEGIN
             motivo_ausencia    = NULL,
             motivo_otros_texto = NULL,
             es_estimado        = EXCLUDED.es_estimado,
-            updated_at         = now();
+            updated_at         = now()
+      RETURNING id INTO v_cal_id;
+
+      INSERT INTO public.audit_log (actor_id, action, table_name, record_id, old_data, new_data)
+      VALUES (
+        auth.uid(),
+        'pasaje_calendario_sobrescrito',
+        'rotation_assignments',
+        v_cal_id,
+        v_cal_old_data,
+        jsonb_build_object(
+          'fecha',              v_dia,
+          'estado_dia',         'en_viaje',
+          'motivo_ausencia',    NULL,
+          'motivo_otros_texto', NULL,
+          'es_estimado',        false
+        )
+      );
     END LOOP;
 
   ELSE -- rechazar
