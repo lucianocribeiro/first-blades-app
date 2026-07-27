@@ -46,6 +46,8 @@ type RequestData = {
   estado: string;
   motivo_ausencia: string;
   fecha_inicio: string;
+  fecha_fin: string;
+  motivo_otros_texto?: string | null;
   user_profile: { full_name: string | null; email: string | null } | null;
 } | null;
 
@@ -71,6 +73,8 @@ function makeServerClient(opts: ServerClientOptions = {}) {
       estado: 'pendiente',
       motivo_ausencia: 'dia_tramite',
       fecha_inicio: '2027-03-15',
+      fecha_fin: '2027-03-15',
+      motivo_otros_texto: null,
       user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
     },
     requestError = null,
@@ -145,6 +149,9 @@ describe('approveAusencia: happy path', () => {
       to: 'owner@test.com',
       fullName: 'Owner Test',
       fechaInicio: '2027-03-15',
+      fechaFin: '2027-03-15',
+      motivoAusencia: 'dia_tramite',
+      motivoOtrosTexto: null,
     });
     expect(result).toEqual({ emailSent: true });
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
@@ -158,6 +165,8 @@ describe('approveAusencia: happy path', () => {
         estado: 'pendiente',
         motivo_ausencia: 'dia_tramite',
         fecha_inicio: '2027-03-15',
+        fecha_fin: '2027-03-15',
+        motivo_otros_texto: null,
         user_profile: { full_name: 'Sin Mail', email: null },
       },
     });
@@ -216,7 +225,10 @@ describe('rejectAusencia: happy path y validación', () => {
       to: 'owner@test.com',
       fullName: 'Owner Test',
       fechaInicio: '2027-03-15',
-      motivo: 'No corresponde',
+      fechaFin: '2027-03-15',
+      motivoAusencia: 'dia_tramite',
+      motivoOtrosTexto: null,
+      motivoRechazo: 'No corresponde',
     });
     expect(result).toEqual({ emailSent: true });
   });
@@ -255,12 +267,14 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
     vi.clearAllMocks();
   });
 
-  it('approveAusencia: otro motivo (vacaciones) pendiente → se resuelve normal, sin outOfScope (generalizado en FB-F4-05)', async () => {
+  it('approveAusencia: otro motivo (vacaciones, rango de varios días) → mail generalizado con fechaFin y motivoAusencia re-leídos', async () => {
     const client = mockClient({
       requestData: {
         estado: 'pendiente',
         motivo_ausencia: 'vacaciones',
         fecha_inicio: '2027-03-15',
+        fecha_fin: '2027-03-20',
+        motivo_otros_texto: null,
         user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
       },
     });
@@ -271,16 +285,24 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
       'resolver_ausencia_request',
       expect.objectContaining({ p_request_id: 'req-1', p_accion: 'aprobar' })
     );
-    expect(sendAusenciaApprovalEmail).toHaveBeenCalledTimes(1);
+    expect(sendAusenciaApprovalEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fechaInicio: '2027-03-15',
+        fechaFin: '2027-03-20',
+        motivoAusencia: 'vacaciones',
+      })
+    );
     expect(result).toEqual({ emailSent: true });
   });
 
-  it('rejectAusencia: otro motivo (licencia_medica) pendiente → se resuelve normal, sin outOfScope (generalizado en FB-F4-05)', async () => {
+  it('rejectAusencia: motivo "otros" → mail generalizado re-lee motivo_otros_texto', async () => {
     const client = mockClient({
       requestData: {
         estado: 'pendiente',
-        motivo_ausencia: 'licencia_medica',
+        motivo_ausencia: 'otros',
         fecha_inicio: '2027-03-15',
+        fecha_fin: '2027-03-15',
+        motivo_otros_texto: 'Mudanza',
         user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
       },
     });
@@ -291,7 +313,13 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
       'resolver_ausencia_request',
       expect.objectContaining({ p_request_id: 'req-1', p_accion: 'rechazar' })
     );
-    expect(sendAusenciaRejectionEmail).toHaveBeenCalledTimes(1);
+    expect(sendAusenciaRejectionEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        motivoAusencia: 'otros',
+        motivoOtrosTexto: 'Mudanza',
+        motivoRechazo: 'motivo',
+      })
+    );
     expect(result).toEqual({ emailSent: true });
   });
 
@@ -301,6 +329,8 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
         estado: 'aprobado',
         motivo_ausencia: 'dia_tramite',
         fecha_inicio: '2027-03-15',
+        fecha_fin: '2027-03-15',
+        motivo_otros_texto: null,
         user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
       },
     });
@@ -334,7 +364,7 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
 
     expect(client.rpc).toHaveBeenCalledTimes(1);
     expect(sendAusenciaRejectionEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ motivo: 'motivo real' })
+      expect.objectContaining({ motivoRechazo: 'motivo real' })
     );
     expect(result).toEqual({ emailSent: true });
   });

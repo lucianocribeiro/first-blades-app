@@ -9,6 +9,7 @@ import {
   sendAusenciaRejectionEmail,
 } from '@/lib/email/ausencia-resolution-email';
 import { translateResolverAusenciaError } from './ausencia-logic';
+import type { MotivoAusencia } from '@/lib/db-types';
 
 // resolver_ausencia_request (0013) es SECURITY DEFINER y valida admin por
 // dentro leyendo auth.uid(): necesita la sesión real del admin (JWT con
@@ -53,10 +54,16 @@ async function assertPendiente(supabase: ServerSupabase, requestId: string): Pro
 // Vuelve a leer la solicitud + el perfil del dueño DESPUÉS de resolverla, para
 // no confiar en datos que el cliente pudo haber tenido desactualizados o
 // manipulados — mismo criterio que rejectDocument en aprobaciones/actions.ts.
+//
+// FB-F4-06: re-lee fecha_fin + motivo_ausencia + motivo_otros_texto además de
+// fecha_inicio — el mail de resolución generalizado (cualquier motivo, no
+// solo día de trámite) los necesita para armar el rango y el motivo amigable.
 async function fetchRequestForNotification(supabase: ServerSupabase, requestId: string) {
   const { data, error } = await supabase
     .from('ausencia_requests')
-    .select('fecha_inicio, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)')
+    .select(
+      'fecha_inicio, fecha_fin, motivo_ausencia, motivo_otros_texto, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)'
+    )
     .eq('id', requestId)
     .single();
 
@@ -66,6 +73,9 @@ async function fetchRequestForNotification(supabase: ServerSupabase, requestId: 
 
   return data as unknown as {
     fecha_inicio: string;
+    fecha_fin: string;
+    motivo_ausencia: MotivoAusencia;
+    motivo_otros_texto: string | null;
     user_profile: { full_name: string | null; email: string | null } | null;
   };
 }
@@ -112,9 +122,12 @@ export async function approveAusencia(requestId: string): Promise<ResolveAusenci
       );
     } else {
       await sendAusenciaApprovalEmail({
-        to:          owner.email,
-        fullName:    owner.full_name,
-        fechaInicio: req.fecha_inicio,
+        to:                owner.email,
+        fullName:          owner.full_name,
+        fechaInicio:       req.fecha_inicio,
+        fechaFin:          req.fecha_fin,
+        motivoAusencia:    req.motivo_ausencia,
+        motivoOtrosTexto:  req.motivo_otros_texto,
       });
       emailSent = true;
     }
@@ -163,10 +176,13 @@ export async function rejectAusencia(requestId: string, motivo: string): Promise
       );
     } else {
       await sendAusenciaRejectionEmail({
-        to:          owner.email,
-        fullName:    owner.full_name,
-        fechaInicio: req.fecha_inicio,
-        motivo:      trimmed,
+        to:                owner.email,
+        fullName:          owner.full_name,
+        fechaInicio:       req.fecha_inicio,
+        fechaFin:          req.fecha_fin,
+        motivoAusencia:    req.motivo_ausencia,
+        motivoOtrosTexto:  req.motivo_otros_texto,
+        motivoRechazo:     trimmed,
       });
       emailSent = true;
     }

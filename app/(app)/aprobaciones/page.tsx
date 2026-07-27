@@ -20,6 +20,11 @@ type RawAusencia = AusenciaRequest & { user_profile?: UserProfilePick | null };
 // solicitud que ya tienen fila en rotation_assignments.
 export type OverwriteDay = { fecha: string; estado_dia: EstadoDia; es_estimado: boolean };
 
+// FB-F4-06: estado por request de la previsualización. "no hay días a
+// sobrescribir" (ok, days=[]) y "no se pudo calcular" (error) son casos
+// distintos — antes ambos colapsaban a "sin aviso" cuando la query fallaba.
+export type OverwriteStatus = { status: 'ok'; days: OverwriteDay[] } | { status: 'error' };
+
 export default async function AprobacionesPage() {
   await requireAdmin();
   const supabase = await createServerClient();
@@ -93,10 +98,15 @@ export default async function AprobacionesPage() {
   // aprobar (resolver_ausencia_request), esto solo ayuda al admin a decidir
   // con el estado actual a la vista. Una consulta por ítem (no una sola
   // consulta agregada): el rango difiere por solicitud, y el tamaño esperado
-  // de la cola no justifica una query más compleja. Best-effort: un fallo
-  // puntual solo omite el aviso de ESA solicitud (se loguea), no rompe la
-  // cola ni bloquea la aprobación.
-  const overwritesByRequest = new Map<string, OverwriteDay[]>();
+  // de la cola no justifica una query más compleja.
+  //
+  // FB-F4-06: un fallo de query ya NO se trata como "sin días a
+  // sobrescribir" (dato válido) — eso ocultaba la falla al admin. Cada
+  // request queda con status 'ok' (con sus días, aunque sea []) o 'error',
+  // y la UI distingue ambos casos. Best-effort igual: un fallo puntual solo
+  // afecta el aviso de ESA solicitud (se loguea), no rompe la cola ni
+  // bloquea aprobar/rechazar.
+  const overwriteStatusByRequest = new Map<string, OverwriteStatus>();
   await Promise.all(
     ausenciasRaw.map(async (req) => {
       const { data, error: overwriteError } = await supabase
@@ -111,11 +121,10 @@ export default async function AprobacionesPage() {
           `[AprobacionesPage] error al previsualizar sobrescritura de ${req.id}:`,
           overwriteError.message
         );
+        overwriteStatusByRequest.set(req.id, { status: 'error' });
         return;
       }
-      if (data && data.length > 0) {
-        overwritesByRequest.set(req.id, data as OverwriteDay[]);
-      }
+      overwriteStatusByRequest.set(req.id, { status: 'ok', days: (data ?? []) as OverwriteDay[] });
     })
   );
 
@@ -134,7 +143,7 @@ export default async function AprobacionesPage() {
             items={items}
             saldoByUser={Object.fromEntries(saldoByUser)}
             saldoLoadFailed={saldoLoadFailed}
-            overwritesByRequest={Object.fromEntries(overwritesByRequest)}
+            overwriteStatusByRequest={Object.fromEntries(overwriteStatusByRequest)}
           />
         )}
       </Card>

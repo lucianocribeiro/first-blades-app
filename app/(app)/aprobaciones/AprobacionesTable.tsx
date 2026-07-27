@@ -11,7 +11,7 @@ import { approveDocument, rejectDocument } from './actions';
 import { approveAusencia, rejectAusencia } from './ausencia-actions';
 import { TOPE_DIAS_TRAMITE_ANUAL, type SaldoDiasTramite } from '@/lib/rotation/saldo-dias-tramite';
 import { formatFechaAusencia, formatRangoAusencia, motivoAusenciaLabel } from '@/lib/rotation/ausencia-display';
-import type { OverwriteDay } from './page';
+import type { OverwriteDay, OverwriteStatus } from './page';
 import type { AusenciaRequest, Document, Profile } from '@/lib/db-types';
 
 type UserProfilePick = Pick<Profile, 'full_name' | 'email'>;
@@ -36,10 +36,11 @@ type AprobacionesTableProps = {
   // Con esta señal, la celda muestra un estado de error visible en vez de
   // simplemente omitir el badge.
   saldoLoadFailed?: boolean;
-  // FB-F4-05: días del rango de la solicitud que ya tienen fila en
-  // rotation_assignments, keyeado por request id — solo aplica a
-  // items kind='ausencia'. Aviso no bloqueante: informa, no impide aprobar.
-  overwritesByRequest?: Record<string, OverwriteDay[]>;
+  // FB-F4-06: estado de la previsualización de sobrescritura por request id
+  // — solo aplica a items kind='ausencia'. 'ok' distingue días=[] (nada que
+  // sobrescribir) de 'error' (no se pudo calcular); ambos casos son no
+  // bloqueantes: aprobar/rechazar sigue disponible siempre.
+  overwriteStatusByRequest?: Record<string, OverwriteStatus>;
 };
 
 function documentTypeLabel(type: string): string {
@@ -98,12 +99,12 @@ function DetalleCell({
   item,
   saldoByUser,
   saldoLoadFailed,
-  overwritesByRequest,
+  overwriteStatusByRequest,
 }: {
   item: PendingItem;
   saldoByUser: Record<string, SaldoBadgeInfo>;
   saldoLoadFailed: boolean;
-  overwritesByRequest: Record<string, OverwriteDay[]>;
+  overwriteStatusByRequest: Record<string, OverwriteStatus>;
 }) {
   if (item.kind === 'documento') {
     const doc = item.data;
@@ -127,7 +128,7 @@ function DetalleCell({
   // el badge no debe mostrarse en ese caso.
   const showSaldo = req.motivo_ausencia === 'dia_tramite';
   const saldo = showSaldo ? saldoByUser[req.user_id] : undefined;
-  const overwriteDias = overwritesByRequest[req.id];
+  const overwriteStatus = overwriteStatusByRequest[req.id];
 
   return (
     <>
@@ -144,7 +145,12 @@ function DetalleCell({
             </div>
           )
         ))}
-      {overwriteDias && overwriteDias.length > 0 && <SobrescrituraAviso dias={overwriteDias} />}
+      {overwriteStatus?.status === 'error' && (
+        <div className="text-xs text-error mt-1">{copy.aprobaciones.sobrescritura.error}</div>
+      )}
+      {overwriteStatus?.status === 'ok' && overwriteStatus.days.length > 0 && (
+        <SobrescrituraAviso dias={overwriteStatus.days} />
+      )}
     </>
   );
 }
@@ -213,7 +219,7 @@ export function AprobacionesTable({
   items,
   saldoByUser = {},
   saldoLoadFailed = false,
-  overwritesByRequest = {},
+  overwriteStatusByRequest = {},
 }: AprobacionesTableProps) {
   const [isPending, startTransition] = useTransition();
   const [actionError, setActionError] = useState('');
@@ -308,7 +314,7 @@ export function AprobacionesTable({
                     item={item}
                     saldoByUser={saldoByUser}
                     saldoLoadFailed={saldoLoadFailed}
-                    overwritesByRequest={overwritesByRequest}
+                    overwriteStatusByRequest={overwriteStatusByRequest}
                   />
                 </td>
                 <td className="py-3 px-3 text-neutral text-xs whitespace-nowrap">
