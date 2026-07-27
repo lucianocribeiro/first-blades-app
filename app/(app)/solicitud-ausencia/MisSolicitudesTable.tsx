@@ -2,11 +2,8 @@ import { Card } from '@/components/ui/Card';
 import { Table } from '@/components/ui/Table';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { copy } from '@/lib/copy';
+import { formatRangoAusencia, motivoAusenciaLabel } from '@/lib/rotation/ausencia-display';
 import type { AusenciaRequest } from '@/lib/db-types';
-
-function formatFecha(fecha: string): string {
-  return new Date(`${fecha}T00:00:00`).toLocaleDateString('es-AR');
-}
 
 type Props = {
   requests: AusenciaRequest[];
@@ -21,9 +18,14 @@ export function MisSolicitudesTable({ requests }: Props) {
       <Table
         columns={[
           {
+            key: 'motivo',
+            header: copy.solicitudAusencia.table.motivo,
+            render: (r: AusenciaRequest) => motivoAusenciaLabel(r.motivo_ausencia, r.motivo_otros_texto),
+          },
+          {
             key: 'fecha',
             header: copy.solicitudAusencia.table.fecha,
-            render: (r: AusenciaRequest) => formatFecha(r.fecha_inicio),
+            render: (r: AusenciaRequest) => formatRangoAusencia(r.fecha_inicio, r.fecha_fin),
           },
           {
             key: 'nota',

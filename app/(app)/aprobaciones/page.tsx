@@ -9,19 +9,24 @@ import {
   type DiaTramiteRow,
   type SaldoDiasTramite,
 } from '@/lib/rotation/saldo-dias-tramite';
-import type { AusenciaRequest, Document, Profile } from '@/lib/db-types';
+import type { AusenciaRequest, Document, EstadoDia, Profile } from '@/lib/db-types';
 
 type UserProfilePick = Pick<Profile, 'full_name' | 'email'>;
 
 type RawDocument = Document & { user_profile?: UserProfilePick | null };
 type RawAusencia = AusenciaRequest & { user_profile?: UserProfilePick | null };
 
+// FB-F4-05: previsualización de sobrescritura — días del rango de la
+// solicitud que ya tienen fila en rotation_assignments.
+export type OverwriteDay = { fecha: string; estado_dia: EstadoDia; es_estimado: boolean };
+
 export default async function AprobacionesPage() {
   await requireAdmin();
   const supabase = await createServerClient();
 
-  // Bandeja única: documentos pendientes + días de trámite pendientes, cada
-  // uno con join a profiles para mostrar el nombre del solicitante.
+  // Bandeja única: documentos pendientes + ausencias pendientes de
+  // CUALQUIER motivo (FB-F4-05 — antes acotada a día de trámite), cada uno
+  // con join a profiles para mostrar el nombre del solicitante.
   const [docsResult, ausenciasResult] = await Promise.all([
     supabase
       .from('documents')
@@ -32,7 +37,6 @@ export default async function AprobacionesPage() {
       .from('ausencia_requests')
       .select('*, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)')
       .eq('estado', 'pendiente')
-      .eq('motivo_ausencia', 'dia_tramite')
       .order('created_at', { ascending: true }),
   ]);
 
@@ -41,9 +45,8 @@ export default async function AprobacionesPage() {
   const documents = ((docsResult.data as RawDocument[] | null) ?? []).map(
     (doc): PendingItem => ({ kind: 'documento', data: doc })
   );
-  const ausencias = ((ausenciasResult.data as RawAusencia[] | null) ?? []).map(
-    (req): PendingItem => ({ kind: 'ausencia', data: req })
-  );
+  const ausenciasRaw = (ausenciasResult.data as RawAusencia[] | null) ?? [];
+  const ausencias = ausenciasRaw.map((req): PendingItem => ({ kind: 'ausencia', data: req }));
 
   const items = [...documents, ...ausencias].sort((a, b) =>
     a.data.created_at.localeCompare(b.data.created_at)
@@ -83,6 +86,39 @@ export default async function AprobacionesPage() {
     }
   }
 
+  // FB-F4-05: previsualización de sobrescritura, no bloqueante — para cada
+  // ausencia pendiente, qué días de su rango ya tienen fila en
+  // rotation_assignments (incluidos es_estimado=true). Es informativa: la
+  // escritura real y el registro de old_data los hace la RPC atómica al
+  // aprobar (resolver_ausencia_request), esto solo ayuda al admin a decidir
+  // con el estado actual a la vista. Una consulta por ítem (no una sola
+  // consulta agregada): el rango difiere por solicitud, y el tamaño esperado
+  // de la cola no justifica una query más compleja. Best-effort: un fallo
+  // puntual solo omite el aviso de ESA solicitud (se loguea), no rompe la
+  // cola ni bloquea la aprobación.
+  const overwritesByRequest = new Map<string, OverwriteDay[]>();
+  await Promise.all(
+    ausenciasRaw.map(async (req) => {
+      const { data, error: overwriteError } = await supabase
+        .from('rotation_assignments')
+        .select('fecha, estado_dia, es_estimado')
+        .eq('user_id', req.user_id)
+        .gte('fecha', req.fecha_inicio)
+        .lte('fecha', req.fecha_fin);
+
+      if (overwriteError) {
+        console.error(
+          `[AprobacionesPage] error al previsualizar sobrescritura de ${req.id}:`,
+          overwriteError.message
+        );
+        return;
+      }
+      if (data && data.length > 0) {
+        overwritesByRequest.set(req.id, data as OverwriteDay[]);
+      }
+    })
+  );
+
   return (
     <div className="space-y-4">
       <div>
@@ -98,6 +134,7 @@ export default async function AprobacionesPage() {
             items={items}
             saldoByUser={Object.fromEntries(saldoByUser)}
             saldoLoadFailed={saldoLoadFailed}
+            overwritesByRequest={Object.fromEntries(overwritesByRequest)}
           />
         )}
       </Card>

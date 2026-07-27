@@ -251,26 +251,37 @@ export const copy = {
   },
 
   solicitudAusencia: {
-    formTitle:    'Solicitar día de trámite',
-    submitButton: 'Solicitar día de trámite',
+    formTitle:    'Solicitud de Ausencia',
+    submitButton: 'Enviar solicitud',
     fields: {
-      fecha: 'Fecha',
-      nota:  'Nota',
+      motivo:      'Motivo',
+      fechaInicio: 'Fecha de inicio',
+      fechaFin:    'Fecha de fin',
+      motivoOtros: 'Detalle del motivo',
+      nota:        'Nota',
     },
     placeholders: {
-      nota: 'Agregá una aclaración (opcional).',
+      motivo:      'Seleccioná el motivo',
+      motivoOtros: 'Describí el motivo (máx. 80 caracteres)',
+      nota:        'Agregá una aclaración (opcional).',
     },
     messages: {
       success:  'Solicitud enviada. Quedará Pendiente hasta que Administración la apruebe.',
       enviando: 'Enviando...',
     },
     errors: {
-      fechaRequerida:     'Seleccioná una fecha.',
-      pendienteDuplicada: 'Ya tenés una solicitud pendiente para ese día.',
+      motivoRequerido:          'Seleccioná un motivo.',
+      fechaRequerida:           'Seleccioná las fechas de inicio y fin.',
+      fechaFinAnteriorAInicio:  'La fecha de fin no puede ser anterior a la fecha de inicio.',
+      fechaRetroactiva:         'No podés solicitar una ausencia que empiece antes de hoy.',
+      motivoOtrosRequerido:     'Describí el motivo.',
+      motivoOtrosMaximo:        'El detalle no puede superar los 80 caracteres.',
+      pendienteDuplicada:       'Ya tenés una solicitud pendiente que se superpone con estas fechas. Resolvela antes de pedir otra.',
     },
     listTitle:     'Mis solicitudes',
     noSolicitudes: 'No hay solicitudes registradas aún.',
     table: {
+      motivo:        'Motivo',
       fecha:         'Fecha',
       nota:          'Nota',
       estado:        'Estado',
@@ -342,13 +353,15 @@ export const copy = {
       rejectError:        'Error al rechazar la solicitud.',
       alreadyResolved:    'Esta solicitud ya fue resuelta.',
       resolvedEmailFailed: 'Resuelto; no se pudo enviar el mail.',
-      outOfScope:         'No se puede procesar esta solicitud desde esta bandeja.',
     },
     badgeSaldo: {
       usado:   'Usó',
       de:      'de',
       excede:  'excede',
       error:   'No se pudo calcular el saldo.',
+    },
+    sobrescritura: {
+      aviso: 'Al aprobar, estos días se sobrescriben a período fuera de trabajo.',
     },
   },
 

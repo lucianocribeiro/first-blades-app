@@ -1,5 +1,6 @@
 /**
- * Tests unitarios — Solicitud de día de trámite (FB-F3-16)
+ * Solicitud de Ausencia — formulario unificado multi-motivo (FB-F4-05,
+ * generaliza FB-F3-16 día de trámite).
  *
  * Mockea @/lib/auth (requireAuth) y @/lib/supabase/server (createServerClient)
  * para ejercitar la server action y la page real sin tocar la base, siguiendo
@@ -7,12 +8,14 @@
  *
  * Las invariantes de RLS (INSERT propio forzado a pendiente, scope de "mis
  * solicitudes" por rol, rechazo de la exclusion constraint
- * ausencia_requests_no_solapamiento_pendiente) ya están cubiertas a nivel de
- * base en tests/integration/rls.test.ts (RLS: ausencia_requests) y
- * tests/integration/ausencia-no-solapamiento.test.ts (FB-F4-01); acá se
- * testea que el código de la app arma el payload correcto, nunca deja pasar
- * un estado/user_id distinto, y traduce el choque de la exclusion constraint
- * a copy amigable en vez de propagar el error crudo o tragarlo silenciosamente.
+ * ausencia_requests_no_solapamiento_pendiente para cualquier motivo) ya están
+ * cubiertas a nivel de base en tests/integration/rls.test.ts y
+ * tests/integration/ausencia-no-solapamiento.test.ts (FB-F4-01/02, genérico
+ * por diseño); acá se testea que el código de la app arma el payload
+ * correcto para cualquier motivo, valida el rango y la no-retroactiva
+ * server-side, nunca deja pasar un estado/user_id distinto, y traduce el
+ * choque de la exclusion constraint a copy amigable en vez de propagar el
+ * error crudo o tragarlo silenciosamente.
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -24,12 +27,14 @@ vi.mock('@/lib/supabase/server', () => ({ createServerClient: vi.fn() }));
 import { revalidatePath } from 'next/cache';
 import { requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
-import { createDiaTramiteRequest } from '@/app/(app)/solicitud-ausencia/actions';
-import { translateAusenciaInsertError } from '@/app/(app)/solicitud-ausencia/logic';
+import { createAusenciaRequest } from '@/app/(app)/solicitud-ausencia/actions';
+import {
+  translateAusenciaInsertError,
+  validateAusenciaRequestInput,
+} from '@/app/(app)/solicitud-ausencia/logic';
 import SolicitudAusenciaPage from '@/app/(app)/solicitud-ausencia/page';
 import { SolicitudAusenciaForm } from '@/app/(app)/solicitud-ausencia/SolicitudAusenciaForm';
 import { MisSolicitudesTable } from '@/app/(app)/solicitud-ausencia/MisSolicitudesTable';
-import { SaldoDiasTramiteCard } from '@/app/(app)/solicitud-ausencia/SaldoDiasTramiteCard';
 import { Card } from '@/components/ui/Card';
 import { copy } from '@/lib/copy';
 
@@ -77,9 +82,15 @@ function mockSupabaseSelect(
   return { orderMock, eqMock, selectMock, fromMock, saldoEqUserMock, saldoEqMotivoMock, saldoGteMock, saldoLteMock };
 }
 
-// ─── createDiaTramiteRequest: gating e integridad del purgatorio ───────────
+// Fecha fija "hoy" usada en todo el archivo para que las aserciones de
+// no-retroactiva no dependan de cuándo corre el test.
+const HOY = '2027-06-15';
+const AYER = '2027-06-14';
+const MANANA = '2027-06-16';
 
-describe('createDiaTramiteRequest: gating e integridad del purgatorio (FB-F3-16)', () => {
+// ─── createAusenciaRequest: gating, validación y payload (FB-F4-05) ───────
+
+describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -88,45 +99,155 @@ describe('createDiaTramiteRequest: gating e integridad del purgatorio (FB-F3-16)
     mockProfile('admin');
     const { insertMock } = mockSupabaseInsert();
 
-    await expect(createDiaTramiteRequest({ fecha: '2026-09-05' })).rejects.toThrow(
-      copy.errors.unauthorized
-    );
+    await expect(
+      createAusenciaRequest({ motivo: 'dia_tramite', fechaInicio: MANANA, fechaFin: MANANA })
+    ).rejects.toThrow(copy.errors.unauthorized);
     expect(insertMock).not.toHaveBeenCalled();
   });
 
-  it('empleado: sin fecha rechaza antes de llamar insert', async () => {
+  it('empleado: sin motivo rechaza antes de llamar insert', async () => {
     mockProfile('empleado');
     const { insertMock } = mockSupabaseInsert();
 
-    await expect(createDiaTramiteRequest({ fecha: '' })).rejects.toThrow(
-      copy.solicitudAusencia.errors.fechaRequerida
-    );
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createAusenciaRequest({ motivo: '' as any, fechaInicio: MANANA, fechaFin: MANANA })
+    ).rejects.toThrow(copy.solicitudAusencia.errors.motivoRequerido);
     expect(insertMock).not.toHaveBeenCalled();
   });
 
-  it('empleado: inserta con user_id propio, motivo dia_tramite y estado pendiente forzados', async () => {
+  it('empleado: sin fechas rechaza antes de llamar insert', async () => {
+    mockProfile('empleado');
+    const { insertMock } = mockSupabaseInsert();
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: '', fechaFin: '' })
+    ).rejects.toThrow(copy.solicitudAusencia.errors.fechaRequerida);
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('empleado: fecha_fin anterior a fecha_inicio rechaza antes de llamar insert', async () => {
+    mockProfile('empleado');
+    const { insertMock } = mockSupabaseInsert();
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: '2027-07-10', fechaFin: '2027-07-05' })
+    ).rejects.toThrow(copy.solicitudAusencia.errors.fechaFinAnteriorAInicio);
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('empleado: fecha_inicio retroactiva (antes de hoy) rechaza antes de llamar insert', async () => {
+    mockProfile('empleado');
+    const { insertMock } = mockSupabaseInsert();
+    const ayer = new Date();
+    ayer.setDate(ayer.getDate() - 1);
+    const ayerIso = ayer.toISOString().slice(0, 10);
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: ayerIso, fechaFin: ayerIso })
+    ).rejects.toThrow(copy.solicitudAusencia.errors.fechaRetroactiva);
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it("empleado: motivo 'otros' sin motivo_otros_texto rechaza antes de llamar insert", async () => {
+    mockProfile('empleado');
+    const { insertMock } = mockSupabaseInsert();
+
+    await expect(
+      createAusenciaRequest({ motivo: 'otros', fechaInicio: MANANA, fechaFin: MANANA })
+    ).rejects.toThrow(copy.solicitudAusencia.errors.motivoOtrosRequerido);
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it("empleado: motivo 'otros' con motivo_otros_texto de más de 80 caracteres rechaza antes de llamar insert", async () => {
+    mockProfile('empleado');
+    const { insertMock } = mockSupabaseInsert();
+
+    await expect(
+      createAusenciaRequest({
+        motivo: 'otros',
+        fechaInicio: MANANA,
+        fechaFin: MANANA,
+        motivoOtrosTexto: 'x'.repeat(81),
+      })
+    ).rejects.toThrow(copy.solicitudAusencia.errors.motivoOtrosMaximo);
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('empleado: inserta con user_id propio, motivo dia_tramite y fecha_inicio=fecha_fin (regresión FB-F3-16)', async () => {
     mockProfile('empleado', 'emp-1');
     const { insertMock, fromMock } = mockSupabaseInsert();
 
-    await createDiaTramiteRequest({ fecha: '2026-09-05', nota: '  Trámite en el banco  ' });
+    await createAusenciaRequest({
+      motivo: 'dia_tramite',
+      fechaInicio: MANANA,
+      fechaFin: MANANA,
+      nota: '  Trámite en el banco  ',
+    });
 
     expect(fromMock).toHaveBeenCalledWith('ausencia_requests');
     expect(insertMock).toHaveBeenCalledWith([{
       user_id: 'emp-1',
       motivo_ausencia: 'dia_tramite',
-      fecha_inicio: '2026-09-05',
-      fecha_fin: '2026-09-05',
+      motivo_otros_texto: null,
+      fecha_inicio: MANANA,
+      fecha_fin: MANANA,
       notas: 'Trámite en el banco',
       estado: 'pendiente',
     }]);
     expect(revalidatePath).toHaveBeenCalledWith('/solicitud-ausencia');
   });
 
+  it('empleado: inserta un rango multi-día (vacaciones) con fecha_inicio distinta de fecha_fin', async () => {
+    mockProfile('empleado', 'emp-1');
+    const { insertMock } = mockSupabaseInsert();
+
+    await createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: '2027-07-01', fechaFin: '2027-07-05' });
+
+    expect(insertMock).toHaveBeenCalledWith([expect.objectContaining({
+      motivo_ausencia: 'vacaciones',
+      motivo_otros_texto: null,
+      fecha_inicio: '2027-07-01',
+      fecha_fin: '2027-07-05',
+    })]);
+  });
+
+  it("empleado: motivo 'otros' persiste motivo_otros_texto trimeado", async () => {
+    mockProfile('empleado', 'emp-1');
+    const { insertMock } = mockSupabaseInsert();
+
+    await createAusenciaRequest({
+      motivo: 'otros',
+      fechaInicio: MANANA,
+      fechaFin: MANANA,
+      motivoOtrosTexto: '  Trámite médico personal  ',
+    });
+
+    expect(insertMock).toHaveBeenCalledWith([expect.objectContaining({
+      motivo_ausencia: 'otros',
+      motivo_otros_texto: 'Trámite médico personal',
+    })]);
+  });
+
+  it("un motivo distinto de 'otros' nunca persiste motivo_otros_texto, aunque el input lo traiga", async () => {
+    mockProfile('empleado', 'emp-1');
+    const { insertMock } = mockSupabaseInsert();
+
+    await createAusenciaRequest({
+      motivo: 'vacaciones',
+      fechaInicio: MANANA,
+      fechaFin: MANANA,
+      motivoOtrosTexto: 'no debería guardarse',
+    });
+
+    expect(insertMock).toHaveBeenCalledWith([expect.objectContaining({ motivo_otros_texto: null })]);
+  });
+
   it('empleado: nota vacía o solo espacios se guarda como null, no como string vacío', async () => {
     mockProfile('empleado', 'emp-1');
     const { insertMock } = mockSupabaseInsert();
 
-    await createDiaTramiteRequest({ fecha: '2026-09-05', nota: '   ' });
+    await createAusenciaRequest({ motivo: 'dia_tramite', fechaInicio: MANANA, fechaFin: MANANA, nota: '   ' });
 
     expect(insertMock).toHaveBeenCalledWith([expect.objectContaining({ notas: null })]);
   });
@@ -135,30 +256,116 @@ describe('createDiaTramiteRequest: gating e integridad del purgatorio (FB-F3-16)
     mockProfile('supervisor', 'sup-1');
     const { insertMock } = mockSupabaseInsert();
 
-    await createDiaTramiteRequest({ fecha: '2026-09-06' });
+    await createAusenciaRequest({ motivo: 'dia_tramite', fechaInicio: MANANA, fechaFin: MANANA });
 
     expect(insertMock).toHaveBeenCalledWith([
       expect.objectContaining({ user_id: 'sup-1', estado: 'pendiente', motivo_ausencia: 'dia_tramite' }),
     ]);
   });
 
-  it('choque con la exclusion constraint de no-solapamiento (23P01) se traduce a copy amigable, no al error crudo', async () => {
+  it('choque con la exclusion constraint de no-solapamiento (23P01) se traduce a copy amigable, no al error crudo — cualquier motivo', async () => {
     mockProfile('empleado', 'emp-1');
     mockSupabaseInsert({
       code: '23P01',
       message: 'conflicting key value violates exclusion constraint "ausencia_requests_no_solapamiento_pendiente"',
     });
 
-    await expect(createDiaTramiteRequest({ fecha: '2026-09-05' })).rejects.toThrow(
-      copy.solicitudAusencia.errors.pendienteDuplicada
-    );
+    await expect(
+      createAusenciaRequest({ motivo: 'licencia_medica', fechaInicio: MANANA, fechaFin: MANANA })
+    ).rejects.toThrow(copy.solicitudAusencia.errors.pendienteDuplicada);
   });
 
   it('otros errores de Supabase se traducen al genérico es-AR, nunca se tragan ni muestran crudos', async () => {
     mockProfile('empleado', 'emp-1');
     mockSupabaseInsert({ message: 'internal db error xyz' });
 
-    await expect(createDiaTramiteRequest({ fecha: '2026-09-05' })).rejects.toThrow(copy.errors.generic);
+    await expect(
+      createAusenciaRequest({ motivo: 'dia_tramite', fechaInicio: MANANA, fechaFin: MANANA })
+    ).rejects.toThrow(copy.errors.generic);
+  });
+});
+
+// ─── validateAusenciaRequestInput (unidad pura) ────────────────────────────
+
+describe('validateAusenciaRequestInput: no-retroactiva, rango y motivo otros', () => {
+  it('motivo vacío → error', () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: '', fechaInicio: MANANA, fechaFin: MANANA },
+      HOY
+    );
+    expect(result).toEqual({ valid: false, error: copy.solicitudAusencia.errors.motivoRequerido });
+  });
+
+  it('fechaInicio o fechaFin vacías → error', () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'vacaciones', fechaInicio: '', fechaFin: MANANA },
+      HOY
+    );
+    expect(result).toEqual({ valid: false, error: copy.solicitudAusencia.errors.fechaRequerida });
+  });
+
+  it('fechaFin anterior a fechaInicio → error', () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'vacaciones', fechaInicio: '2027-07-10', fechaFin: '2027-07-05' },
+      HOY
+    );
+    expect(result).toEqual({ valid: false, error: copy.solicitudAusencia.errors.fechaFinAnteriorAInicio });
+  });
+
+  it('fechaInicio = hoy → válida (hoy permitido, no es retroactiva)', () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'vacaciones', fechaInicio: HOY, fechaFin: HOY },
+      HOY
+    );
+    expect(result).toEqual({ valid: true });
+  });
+
+  it('fechaInicio anterior a hoy → error de retroactiva', () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'vacaciones', fechaInicio: AYER, fechaFin: AYER },
+      HOY
+    );
+    expect(result).toEqual({ valid: false, error: copy.solicitudAusencia.errors.fechaRetroactiva });
+  });
+
+  it("motivo 'otros' sin motivo_otros_texto → error", () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'otros', fechaInicio: MANANA, fechaFin: MANANA },
+      HOY
+    );
+    expect(result).toEqual({ valid: false, error: copy.solicitudAusencia.errors.motivoOtrosRequerido });
+  });
+
+  it("motivo 'otros' con solo espacios en motivo_otros_texto → error (no cuenta como completado)", () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'otros', fechaInicio: MANANA, fechaFin: MANANA, motivoOtrosTexto: '   ' },
+      HOY
+    );
+    expect(result).toEqual({ valid: false, error: copy.solicitudAusencia.errors.motivoOtrosRequerido });
+  });
+
+  it("motivo 'otros' con motivo_otros_texto de 81 caracteres → error de máximo", () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'otros', fechaInicio: MANANA, fechaFin: MANANA, motivoOtrosTexto: 'x'.repeat(81) },
+      HOY
+    );
+    expect(result).toEqual({ valid: false, error: copy.solicitudAusencia.errors.motivoOtrosMaximo });
+  });
+
+  it("motivo 'otros' con motivo_otros_texto válido (≤80) → válida", () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'otros', fechaInicio: MANANA, fechaFin: MANANA, motivoOtrosTexto: 'Trámite médico' },
+      HOY
+    );
+    expect(result).toEqual({ valid: true });
+  });
+
+  it('un motivo distinto de otros no exige motivo_otros_texto', () => {
+    const result = validateAusenciaRequestInput(
+      { motivo: 'matrimonio', fechaInicio: MANANA, fechaFin: MANANA },
+      HOY
+    );
+    expect(result).toEqual({ valid: true });
   });
 });
 
@@ -174,7 +381,7 @@ describe('translateAusenciaInsertError', () => {
 
 // ─── SolicitudAusenciaPage: branch por rol ──────────────────────────────────
 
-describe('SolicitudAusenciaPage: branch por rol (FB-F3-16)', () => {
+describe('SolicitudAusenciaPage: branch por rol', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -188,7 +395,7 @@ describe('SolicitudAusenciaPage: branch por rol (FB-F3-16)', () => {
     expect((result as any).type).toBe(Card);
   });
 
-  it('empleado: recibe el formulario, su lista propia (filtrada por user_id explícito) y su saldo de días de trámite', async () => {
+  it('empleado: recibe el formulario (con su saldo de días de trámite ya calculado) y su lista propia filtrada por user_id explícito', async () => {
     mockProfile('empleado', 'emp-1');
     const rows = [{ id: 'a1', user_id: 'emp-1', estado: 'pendiente' }];
     const diasTramite = [{ user_id: 'emp-1', fecha: '2027-03-01', es_estimado: false }];
@@ -205,14 +412,20 @@ describe('SolicitudAusenciaPage: branch por rol (FB-F3-16)', () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const children = (result as any).props.children as any[];
-    const saldoCard = children.find((c) => c?.type === SaldoDiasTramiteCard);
     const form = children.find((c) => c?.type === SolicitudAusenciaForm);
     const table = children.find((c) => c?.type === MisSolicitudesTable);
     expect(form).toBeTruthy();
     expect(table).toBeTruthy();
     expect(table.props.requests).toEqual(rows);
-    expect(saldoCard).toBeTruthy();
-    expect(saldoCard.props.saldo).toMatchObject({ employeeId: 'emp-1', consumidos: 1, restantes: 2, excedido: false, fechas: [{ fecha: '2027-03-01', esEstimado: false }] });
+    // El saldo ya no se renderiza como card aparte: se lo pasa al formulario,
+    // que decide mostrarlo o no según el motivo elegido (FB-F4-05).
+    expect(form.props.saldo).toMatchObject({
+      employeeId: 'emp-1',
+      consumidos: 1,
+      restantes: 2,
+      excedido: false,
+      fechas: [{ fecha: '2027-03-01', esEstimado: false }],
+    });
   });
 
   it('supervisor: también recibe el formulario + lista propia + saldo propio (no modo consulta)', async () => {
@@ -243,7 +456,7 @@ function collectStrings(value: unknown, acc: string[] = []): string[] {
   return acc;
 }
 
-describe('copy.solicitudAusencia — sin terminología técnica visible (FB-F3-16)', () => {
+describe('copy.solicitudAusencia — sin terminología técnica visible', () => {
   const strings = collectStrings(copy.solicitudAusencia);
 
   it.each(TERMINOS_PROHIBIDOS)('ningún string visible contiene "%s"', (termino) => {
@@ -252,7 +465,7 @@ describe('copy.solicitudAusencia — sin terminología técnica visible (FB-F3-1
   });
 
   it('usa la terminología amigable exacta pedida por el PRD', () => {
-    expect(copy.solicitudAusencia.formTitle).toBe('Solicitar día de trámite');
+    expect(copy.solicitudAusencia.formTitle).toBe('Solicitud de Ausencia');
     expect(copy.solicitudAusencia.listTitle).toBe('Mis solicitudes');
     expect(copy.solicitudAusencia.estados.pendiente).toBe('Pendiente');
     expect(copy.solicitudAusencia.estados.aprobado).toBe('Aprobada');

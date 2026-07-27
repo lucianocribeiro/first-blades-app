@@ -17,6 +17,9 @@
  *    revierte (no throw), se loguea, y la action devuelve emailSent:false
  *    para que la UI muestre un aviso suave.
  *  - Límite de rol (admin / supervisor / empleado) sobre ambas actions.
+ *  - FB-F4-05: el pre-check server-side (assertPendiente) ya no restringe
+ *    motivo_ausencia — la bandeja resuelve ausencias de cualquier motivo,
+ *    no solo día de trámite. Solo revalida estado='pendiente'.
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -245,14 +248,14 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
   });
 });
 
-// ─── FB-F3-20: revalidación de scope server-side antes de la RPC ─────────
+// ─── FB-F4-05: scope de la cola generalizado a cualquier motivo ──────────
 
-describe('scope de la cola (FB-F3-20): la RPC no limita motivo, la action sí', () => {
+describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquier motivo', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('approveAusencia: otro motivo (vacaciones) pendiente → outOfScope, NO llama la RPC ni manda mail', async () => {
+  it('approveAusencia: otro motivo (vacaciones) pendiente → se resuelve normal, sin outOfScope (generalizado en FB-F4-05)', async () => {
     const client = mockClient({
       requestData: {
         estado: 'pendiente',
@@ -262,24 +265,34 @@ describe('scope de la cola (FB-F3-20): la RPC no limita motivo, la action sí', 
       },
     });
 
-    await expect(approveAusencia('req-1')).rejects.toThrow(copy.aprobaciones.messages.outOfScope);
-    expect(client.rpc).not.toHaveBeenCalled();
-    expect(sendAusenciaApprovalEmail).not.toHaveBeenCalled();
+    const result = await approveAusencia('req-1');
+
+    expect(client.rpc).toHaveBeenCalledWith(
+      'resolver_ausencia_request',
+      expect.objectContaining({ p_request_id: 'req-1', p_accion: 'aprobar' })
+    );
+    expect(sendAusenciaApprovalEmail).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ emailSent: true });
   });
 
-  it('rejectAusencia: otro motivo (vacaciones) pendiente → outOfScope, NO llama la RPC ni manda mail', async () => {
+  it('rejectAusencia: otro motivo (licencia_medica) pendiente → se resuelve normal, sin outOfScope (generalizado en FB-F4-05)', async () => {
     const client = mockClient({
       requestData: {
         estado: 'pendiente',
-        motivo_ausencia: 'vacaciones',
+        motivo_ausencia: 'licencia_medica',
         fecha_inicio: '2027-03-15',
         user_profile: { full_name: 'Owner Test', email: 'owner@test.com' },
       },
     });
 
-    await expect(rejectAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobaciones.messages.outOfScope);
-    expect(client.rpc).not.toHaveBeenCalled();
-    expect(sendAusenciaRejectionEmail).not.toHaveBeenCalled();
+    const result = await rejectAusencia('req-1', 'motivo');
+
+    expect(client.rpc).toHaveBeenCalledWith(
+      'resolver_ausencia_request',
+      expect.objectContaining({ p_request_id: 'req-1', p_accion: 'rechazar' })
+    );
+    expect(sendAusenciaRejectionEmail).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ emailSent: true });
   });
 
   it('approveAusencia: ya resuelta (estado aprobado) detectada en el pre-check → alreadyResolved, NO llega a invocar la RPC', async () => {

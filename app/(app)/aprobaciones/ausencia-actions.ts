@@ -21,29 +21,32 @@ type ServerSupabase = Awaited<ReturnType<typeof createServerClient>>;
 
 export type ResolveAusenciaResult = { emailSent: boolean };
 
-// Revalida el scope de esta bandeja ANTES de invocar la RPC: la RPC valida
-// admin + estado pendiente, pero no limita el motivo (es genérica, pensada
-// también para otros tipos de ausencia en Fase 4). Sin este chequeo, un
-// requestId manipulado o desactualizado podría colar una solicitud de otro
-// motivo (ej. 'vacaciones') a través de esta action de días de trámite y
-// disparar el mail equivocado. Capa de scope de app superpuesta a la RPC —
-// no la reemplaza, la RPC sigue siendo la autoridad de admin/estado/atomicidad.
-async function assertInQueueScope(supabase: ServerSupabase, requestId: string): Promise<void> {
+// Re-lee la solicitud ANTES de invocar la RPC: la RPC valida admin + estado
+// pendiente por dentro, pero esta re-lectura server-side es la que da un
+// error amigable de "ya fue resuelta" sin depender del texto crudo de
+// Postgres, y evita invocar la RPC (y el mail) para un requestId ya resuelto
+// o inexistente. Capa de app superpuesta a la RPC — no la reemplaza, la RPC
+// sigue siendo la autoridad de admin/estado/atomicidad.
+//
+// FB-F4-05: hasta acá esta bandeja también revalidaba motivo_ausencia ===
+// 'dia_tramite' (scope acotado a un solo motivo, Fase 3). La bandeja de
+// Aprobaciones ahora resuelve ausencias de cualquier motivo, así que ese
+// chequeo se retira — el único scope que queda es "pendiente". La RLS y la
+// guarda de la RPC nunca limitaron el motivo por diseño; ese límite siempre
+// vivió acá, y ahora el límite correcto es "cualquier ausencia pendiente".
+async function assertPendiente(supabase: ServerSupabase, requestId: string): Promise<void> {
   const { data, error } = await supabase
     .from('ausencia_requests')
-    .select('estado, motivo_ausencia')
+    .select('estado')
     .eq('id', requestId)
     .single();
 
   if (error || !data) {
     throw new Error(copy.aprobaciones.messages.alreadyResolved);
   }
-  const row = data as { estado: string; motivo_ausencia: string };
+  const row = data as { estado: string };
   if (row.estado !== 'pendiente') {
     throw new Error(copy.aprobaciones.messages.alreadyResolved);
-  }
-  if (row.motivo_ausencia !== 'dia_tramite') {
-    throw new Error(copy.aprobaciones.messages.outOfScope);
   }
 }
 
@@ -71,7 +74,7 @@ export async function approveAusencia(requestId: string): Promise<ResolveAusenci
   await requireAdmin();
   const supabase = await createServerClient();
 
-  await assertInQueueScope(supabase, requestId);
+  await assertPendiente(supabase, requestId);
 
   // El cliente de createServerClient() (@supabase/ssr) colapsa el genérico de
   // postgrest-js a `never`/`undefined` en .rpc() (mismo bug ya documentado
@@ -129,7 +132,7 @@ export async function rejectAusencia(requestId: string, motivo: string): Promise
   await requireAdmin();
   const supabase = await createServerClient();
 
-  await assertInQueueScope(supabase, requestId);
+  await assertPendiente(supabase, requestId);
 
   const { error } = await supabase.rpc('resolver_ausencia_request', {
     p_request_id:     requestId,
