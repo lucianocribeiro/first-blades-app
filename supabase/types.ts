@@ -88,6 +88,7 @@ export type Database = {
           fecha_inicio: string
           id: string
           motivo_ausencia: Database["public"]["Enums"]["motivo_ausencia"]
+          motivo_otros_texto: string | null
           motivo_rechazo: string | null
           notas: string | null
           reviewed_at: string | null
@@ -102,6 +103,7 @@ export type Database = {
           fecha_inicio: string
           id?: string
           motivo_ausencia: Database["public"]["Enums"]["motivo_ausencia"]
+          motivo_otros_texto?: string | null
           motivo_rechazo?: string | null
           notas?: string | null
           reviewed_at?: string | null
@@ -116,6 +118,7 @@ export type Database = {
           fecha_inicio?: string
           id?: string
           motivo_ausencia?: Database["public"]["Enums"]["motivo_ausencia"]
+          motivo_otros_texto?: string | null
           motivo_rechazo?: string | null
           notas?: string | null
           reviewed_at?: string | null
