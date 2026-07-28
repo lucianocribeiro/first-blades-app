@@ -31,18 +31,29 @@ export function credentialsFor(role: Role): { email: string; password: string } 
   };
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Matchea el accessible name EXACTO de un <label>, tolerando el "*" que
+// Input/Select/Textarea/DatePicker le agregan cuando el campo es required
+// (label + '*' en el mismo elemento — ver components/ui/Input.tsx). Sin
+// esto: {exact:true} nunca matchea un campo required (el accessible name
+// real es "Contraseña*", no "Contraseña"), y sin exact a secas, "Contraseña"
+// matchea también "Mostrar/Ocultar contraseña" (aria-label del botón de
+// ojito) por substring — ambos rompieron en corridas reales de CI.
+export function exactLabel(text: string): RegExp {
+  return new RegExp(`^${escapeRegExp(text)}\\*?$`);
+}
+
 // Login real vía el form nativo (no bypass de sesión) — ejercita el mismo
 // camino que un usuario real: signInWithPassword() del lado del cliente +
 // el middleware refrescando la sesión antes de redirigir a /dashboard.
 export async function login(page: Page, role: Role): Promise<void> {
   const { email, password } = credentialsFor(role);
   await page.goto('/login');
-  // exact: true — copy.auth.login.password ("Contraseña") es substring de
-  // "Mostrar contraseña"/"Ocultar contraseña" (aria-label del botón de ojito),
-  // que sin exact matchea por default (case-insensitive, substring) y rompe
-  // en strict mode con 2 elementos.
-  await page.getByLabel(copy.auth.login.email, { exact: true }).fill(email);
-  await page.getByLabel(copy.auth.login.password, { exact: true }).fill(password);
+  await page.getByLabel(exactLabel(copy.auth.login.email)).fill(email);
+  await page.getByLabel(exactLabel(copy.auth.login.password)).fill(password);
   await page.getByRole('button', { name: copy.auth.login.submit, exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard/);
 }

@@ -15,6 +15,7 @@ import {
   seedRotationAssignment,
   seedPendingAusencia,
   seedPendingPasaje,
+  exactLabel,
 } from './helpers';
 import { copy } from '../../lib/copy';
 
@@ -81,7 +82,7 @@ test.describe('Admin: Aprobaciones', () => {
     await dialog.getByRole('button', { name: copy.aprobaciones.rejectModal.confirm, exact: true }).click();
     await expect(dialog.getByText(copy.aprobaciones.rejectModal.motivoRequired)).toBeVisible();
 
-    await dialog.getByLabel(copy.aprobaciones.rejectModal.motivoLabel, { exact: true }).fill('No corresponde para este ciclo (e2e).');
+    await dialog.getByLabel(exactLabel(copy.aprobaciones.rejectModal.motivoLabel)).fill('No corresponde para este ciclo (e2e).');
     await dialog.getByRole('button', { name: copy.aprobaciones.rejectModal.confirm, exact: true }).click();
 
     await expect(pasajeRow).toHaveCount(0);
