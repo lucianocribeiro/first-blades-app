@@ -14,10 +14,18 @@ export default defineConfig({
   retries: isCI ? 1 : 0,
   workers: isCI ? 1 : undefined,
   reporter: 'html',
+  // El runner de CI corre Postgres + 7 servicios de Supabase + la app Next +
+  // Chromium en 2 vCPUs compartidas — más lento que un dev local. Timeouts
+  // más generosos que el default (30s/5s) para no confundir contención de
+  // CPU con un fallo real.
+  timeout: isCI ? 60_000 : 30_000,
+  expect: { timeout: isCI ? 10_000 : 5_000 },
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    actionTimeout: isCI ? 15_000 : 0,
+    navigationTimeout: isCI ? 30_000 : 0,
   },
   projects: [
     {

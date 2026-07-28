@@ -147,6 +147,23 @@ jobs:
             echo "E2E_EMPLEADO_PASSWORD=$(openssl rand -base64 24)"
           } >> "$GITHUB_ENV"
 
+      # `supabase start` puede reportar éxito con GoTrue/PostgREST todavía
+      # terminando de arrancar bajo la CPU compartida del runner — sin esto,
+      # el seed/build/e2e puede pegarle a una API que todavía no responde y
+      # colgarse hasta el timeout (visto en una corrida real de este job).
+      - name: Esperar a que la API de Supabase local responda de verdad
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl -sf "${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/health" > /dev/null; then
+              echo "Auth (GoTrue) responde."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::La API de Supabase local no respondió a tiempo."
+          exit 1
+
       - name: Seed determinístico (admin + supervisor + empleado a cargo)
         run: npm run seed:e2e
 
