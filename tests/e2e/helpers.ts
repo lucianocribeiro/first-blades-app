@@ -103,6 +103,11 @@ export async function seedRotationAssignment(opts: {
   if (error) throw new Error(`[e2e] no se pudo sembrar rotation_assignments: ${error.message}`);
 }
 
+// Postgres SQLSTATE de exclusion_violation — dispara con
+// ausencia_requests_no_solapamiento_pendiente (mismo código que
+// solicitud-ausencia/logic.ts::translateAusenciaInsertError).
+const EXCLUSION_VIOLATION = '23P01';
+
 export async function seedPendingAusencia(opts: {
   userId: string;
   fechaInicio: string;
@@ -125,6 +130,23 @@ export async function seedPendingAusencia(opts: {
     })
     .select('id')
     .single();
+
+  if (error?.code === EXCLUSION_VIOLATION) {
+    // beforeAll puede re-ejecutarse en un retry de Playwright (si el único
+    // test del describe falla, el próximo intento vuelve a correr los
+    // hooks) — el intento anterior ya sembró esta misma fila; no es un
+    // fallo real, se reusa en vez de duplicar.
+    const { data: existing, error: selError } = await admin
+      .from('ausencia_requests')
+      .select('id')
+      .eq('user_id', opts.userId)
+      .eq('estado', 'pendiente')
+      .eq('fecha_inicio', opts.fechaInicio)
+      .limit(1)
+      .single();
+    if (!selError && existing) return existing.id;
+  }
+
   if (error || !data) throw new Error(`[e2e] no se pudo sembrar la ausencia pendiente: ${error?.message}`);
   return data.id;
 }
@@ -140,6 +162,22 @@ export async function seedPendingPasaje(opts: {
 }): Promise<string> {
   const admin = createAdminClient();
   const diasOrdenados = [...opts.diasViaje].sort();
+  const destino = opts.destino ?? 'Sitio remoto';
+
+  // pasaje_requests no tiene exclusion constraint (a diferencia de ausencia)
+  // — un beforeAll re-ejecutado en un retry duplicaría la fila en silencio
+  // (misma marca de destino, dos <tr> en la tabla). Se busca primero por el
+  // marcador único para que reintentos reusen la fila ya sembrada.
+  const { data: existing } = await admin
+    .from('pasaje_requests')
+    .select('id')
+    .eq('empleado_id', opts.empleadoId)
+    .eq('estado', 'pendiente')
+    .eq('destino', destino)
+    .limit(1)
+    .single();
+  if (existing) return existing.id;
+
   const { data, error } = await admin
     .from('pasaje_requests')
     .insert({
@@ -148,7 +186,7 @@ export async function seedPendingPasaje(opts: {
       motivo_viaje: opts.motivoViaje ?? 'traslado_proyectos',
       fecha_viaje: diasOrdenados[0],
       origen: 'Base',
-      destino: opts.destino ?? 'Sitio remoto',
+      destino,
       dias_viaje: diasOrdenados,
       estado: 'pendiente',
     })

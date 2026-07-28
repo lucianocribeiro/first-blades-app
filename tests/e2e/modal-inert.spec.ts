@@ -8,7 +8,7 @@
 // self-contenido: siembra su propio pendiente, independiente de
 // aprobaciones.spec.ts.
 import { test, expect } from '@playwright/test';
-import { login, futureDate, credentialsFor, resolveUserId, seedPendingAusencia } from './helpers';
+import { login, futureDate, credentialsFor, resolveUserId, seedPendingAusencia, exactLabel } from './helpers';
 import { copy } from '../../lib/copy';
 
 const NOTA_AUSENCIA = 'E2E-MODAL-INERT-AUSENCIA';
@@ -45,14 +45,24 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
     ).rejects.toThrow();
     await expect(page).toHaveURL(/\/aprobaciones/); // no navegó
 
-    // ─── Foco atrapado: Tab repetido nunca saca el foco del <dialog>.
+    // ─── Foco atrapado: arranca en un elemento CONOCIDO del modal (en vez de
+    // asumir cuál autoenfoca showModal() por default) y confirma que Tab
+    // repetido — dando la vuelta completa a los focusables del diálogo más
+    // de una vez — nunca saca el foco del <dialog> nativo.
+    await dialog.getByLabel(exactLabel(copy.aprobaciones.rejectModal.motivoLabel)).click();
+
+    async function activeElementLocation(): Promise<string> {
+      return page.evaluate(() => {
+        const dialogEl = document.querySelector('dialog[open]');
+        const active = document.activeElement;
+        if (dialogEl && active && dialogEl.contains(active)) return 'inside-dialog';
+        return `outside-dialog:${active?.tagName ?? 'null'}${active?.className ? `.${active.className}` : ''}`;
+      });
+    }
+
     for (let i = 0; i < 8; i++) {
       await page.keyboard.press('Tab');
-      const focusedInsideDialog = await page.evaluate(() => {
-        const dialogEl = document.querySelector('dialog[open]');
-        return !!dialogEl && !!document.activeElement && dialogEl.contains(document.activeElement);
-      });
-      expect(focusedInsideDialog).toBe(true);
+      expect(await activeElementLocation()).toBe('inside-dialog');
     }
 
     // ─── Cerrar (Escape → 'close' nativo → onClose de la app) y confirmar
