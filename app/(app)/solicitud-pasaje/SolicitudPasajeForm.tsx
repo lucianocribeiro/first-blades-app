@@ -154,7 +154,11 @@ export function SolicitudPasajeForm({ team, showEmpleadoSelector }: Props) {
           {diasViaje.map((dia, index) => (
             <div key={index} className="flex items-center gap-2">
               <div className="flex-1">
-                <DatePicker value={dia} onChange={(e) => handleDiaChange(index, e.target.value)} />
+                <DatePicker
+                  aria-label={`${copy.solicitudPasaje.fields.diasViaje} ${index + 1}`}
+                  value={dia}
+                  onChange={(e) => handleDiaChange(index, e.target.value)}
+                />
               </div>
               {diasViaje.length > 1 && (
                 <Button

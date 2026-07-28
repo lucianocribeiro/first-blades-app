@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
-    "seed": "tsx supabase/seed.ts"
+    "seed": "tsx supabase/seed.ts",
+    "seed:e2e": "tsx supabase/seed-e2e.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
