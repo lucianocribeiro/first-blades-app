@@ -9,19 +9,26 @@ import { Textarea } from '@/components/ui/Textarea';
 import { InfoBanner } from '@/components/ui/InfoBanner';
 import { approveDocument, rejectDocument } from './actions';
 import { approveAusencia, rejectAusencia } from './ausencia-actions';
+import { approvePasaje, rejectPasaje } from './pasaje-actions';
 import { TOPE_DIAS_TRAMITE_ANUAL, type SaldoDiasTramite } from '@/lib/rotation/saldo-dias-tramite';
 import { formatFechaAusencia, formatRangoAusencia, motivoAusenciaLabel } from '@/lib/rotation/ausencia-display';
+import { formatDiasViaje, motivoViajeLabel } from '@/lib/rotation/pasaje-display';
 import type { OverwriteDay, OverwriteStatus } from './page';
-import type { AusenciaRequest, Document, Profile } from '@/lib/db-types';
+import type { AusenciaRequest, Document, PasajeRequest, Profile } from '@/lib/db-types';
 
 type UserProfilePick = Pick<Profile, 'full_name' | 'email'>;
 
 type DocumentWithUser = Document & { user_profile?: UserProfilePick | null };
 type AusenciaWithUser = AusenciaRequest & { user_profile?: UserProfilePick | null };
+type PasajeWithUser = PasajeRequest & {
+  solicitante_profile?: UserProfilePick | null;
+  empleado_profile?: UserProfilePick | null;
+};
 
 export type PendingItem =
   | { kind: 'documento'; data: DocumentWithUser }
-  | { kind: 'ausencia'; data: AusenciaWithUser };
+  | { kind: 'ausencia'; data: AusenciaWithUser }
+  | { kind: 'pasaje'; data: PasajeWithUser };
 
 type SaldoBadgeInfo = Pick<SaldoDiasTramite, 'consumidos' | 'excedido'>;
 
@@ -36,10 +43,11 @@ type AprobacionesTableProps = {
   // Con esta señal, la celda muestra un estado de error visible en vez de
   // simplemente omitir el badge.
   saldoLoadFailed?: boolean;
-  // FB-F4-06: estado de la previsualización de sobrescritura por request id
-  // — solo aplica a items kind='ausencia'. 'ok' distingue días=[] (nada que
-  // sobrescribir) de 'error' (no se pudo calcular); ambos casos son no
-  // bloqueantes: aprobar/rechazar sigue disponible siempre.
+  // FB-F4-06 (ausencia) / FB-F4-10 (pasaje): estado de la previsualización de
+  // sobrescritura por request id — aplica a items kind='ausencia' y
+  // kind='pasaje'. 'ok' distingue días=[] (nada que sobrescribir) de 'error'
+  // (no se pudo calcular); ambos casos son no bloqueantes: aprobar/rechazar
+  // sigue disponible siempre.
   overwriteStatusByRequest?: Record<string, OverwriteStatus>;
 };
 
@@ -54,8 +62,11 @@ function certTipoLabel(tipo: string | null | undefined): string {
   return labels[tipo] ?? tipo;
 }
 
+// El pasaje no tiene user_profile (dos partes: solicitante y empleado) — la
+// columna "usuario" muestra a quien ACTÚA (el solicitante), igual que
+// documento/ausencia muestran al dueño del registro.
 function userName(item: PendingItem): string {
-  const p = item.data.user_profile;
+  const p = item.kind === 'pasaje' ? item.data.solicitante_profile : item.data.user_profile;
   if (!p) return '—';
   return p.full_name || p.email || '—';
 }
@@ -79,10 +90,10 @@ function SaldoBadge({ saldo }: { saldo: SaldoBadgeInfo }) {
   );
 }
 
-function SobrescrituraAviso({ dias }: { dias: OverwriteDay[] }) {
+function SobrescrituraAviso({ dias, aviso }: { dias: OverwriteDay[]; aviso: string }) {
   return (
     <div className="text-xs text-amber-700 mt-1">
-      <p>{copy.aprobaciones.sobrescritura.aviso}</p>
+      <p>{aviso}</p>
       <ul className="list-disc pl-4">
         {dias.map((d) => (
           <li key={d.fecha}>
@@ -121,6 +132,38 @@ function DetalleCell({
     );
   }
 
+  if (item.kind === 'pasaje') {
+    const req = item.data;
+    const overwriteStatus = overwriteStatusByRequest[req.id];
+    // "Para" solo se muestra cuando el empleado que viaja difiere de quien
+    // solicitó (un supervisor pidiendo para sí mismo no necesita ver su
+    // propio nombre repetido acá).
+    const paraNombre =
+      req.solicitante_id !== req.empleado_id
+        ? req.empleado_profile?.full_name || req.empleado_profile?.email
+        : null;
+
+    return (
+      <>
+        <div>{motivoViajeLabel(req.motivo_viaje)}</div>
+        <div className="text-xs mt-0.5">{req.origen} → {req.destino}</div>
+        <div className="text-xs mt-0.5">{formatDiasViaje(req.dias_viaje ?? [])}</div>
+        {paraNombre && (
+          <div className="text-xs mt-0.5">
+            {copy.aprobaciones.detallePasaje.paraLabel}: {paraNombre}
+          </div>
+        )}
+        {req.notas && <div className="text-xs mt-0.5">{req.notas}</div>}
+        {overwriteStatus?.status === 'error' && (
+          <div className="text-xs text-error mt-1">{copy.aprobaciones.sobrescritura.error}</div>
+        )}
+        {overwriteStatus?.status === 'ok' && overwriteStatus.days.length > 0 && (
+          <SobrescrituraAviso dias={overwriteStatus.days} aviso={copy.aprobaciones.sobrescritura.avisoPasaje} />
+        )}
+      </>
+    );
+  }
+
   const req = item.data;
   // El badge de saldo solo tiene sentido para día de trámite: es el único
   // motivo con tope anual (FB-F3-21). Un solicitante puede tener consumo de
@@ -149,7 +192,7 @@ function DetalleCell({
         <div className="text-xs text-error mt-1">{copy.aprobaciones.sobrescritura.error}</div>
       )}
       {overwriteStatus?.status === 'ok' && overwriteStatus.days.length > 0 && (
-        <SobrescrituraAviso dias={overwriteStatus.days} />
+        <SobrescrituraAviso dias={overwriteStatus.days} aviso={copy.aprobaciones.sobrescritura.aviso} />
       )}
     </>
   );
@@ -233,6 +276,9 @@ export function AprobacionesTable({
       try {
         if (item.kind === 'documento') {
           await approveDocument(item.data.id);
+        } else if (item.kind === 'pasaje') {
+          const result = await approvePasaje(item.data.id);
+          if (!result.emailSent) setActionNotice(copy.aprobaciones.messages.resolvedEmailFailed);
         } else {
           const result = await approveAusencia(item.data.id);
           if (!result.emailSent) setActionNotice(copy.aprobaciones.messages.resolvedEmailFailed);
@@ -253,6 +299,9 @@ export function AprobacionesTable({
       try {
         if (item.kind === 'documento') {
           await rejectDocument(item.data.id, motivo);
+        } else if (item.kind === 'pasaje') {
+          const result = await rejectPasaje(item.data.id, motivo);
+          if (!result.emailSent) setActionNotice(copy.aprobaciones.messages.resolvedEmailFailed);
         } else {
           const result = await rejectAusencia(item.data.id, motivo);
           if (!result.emailSent) setActionNotice(copy.aprobaciones.messages.resolvedEmailFailed);
@@ -304,7 +353,7 @@ export function AprobacionesTable({
             {items.map((item) => (
               <tr key={`${item.kind}-${item.data.id}`} className="hover:bg-surface/50 transition-colors">
                 <td className="py-3 px-3 font-medium text-secondary whitespace-nowrap">
-                  {item.kind === 'documento' ? copy.aprobaciones.tipos.documento : copy.aprobaciones.tipos.ausencia}
+                  {copy.aprobaciones.tipos[item.kind === 'documento' ? 'documento' : item.kind === 'pasaje' ? 'pasaje' : 'ausencia']}
                 </td>
                 <td className="py-3 px-3 text-neutral whitespace-nowrap">
                   {userName(item)}

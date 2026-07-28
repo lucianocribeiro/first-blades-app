@@ -54,22 +54,25 @@ function makeBuilder(methods: string[], finalMethod: string, result: { data: unk
 function mockQueries(opts: {
   documents?: unknown[];
   ausencias?: unknown[];
+  pasajes?: unknown[];
   diasTramite?: unknown[];
 }) {
-  const { documents = [], ausencias = [], diasTramite = [] } = opts;
+  const { documents = [], ausencias = [], pasajes = [], diasTramite = [] } = opts;
 
   const docsBuilder = makeBuilder(['select', 'eq'], 'order', { data: documents, error: null });
   const ausenciasBuilder = makeBuilder(['select', 'eq'], 'order', { data: ausencias, error: null });
+  const pasajesBuilder = makeBuilder(['select', 'eq'], 'order', { data: pasajes, error: null });
   const saldoBuilder = makeBuilder(['select', 'in', 'eq', 'gte'], 'lte', { data: diasTramite, error: null });
 
   const from = vi.fn((table: string) => {
     if (table === 'documents') return docsBuilder;
     if (table === 'ausencia_requests') return ausenciasBuilder;
+    if (table === 'pasaje_requests') return pasajesBuilder;
     return saldoBuilder;
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from } as any);
-  return { docsBuilder, ausenciasBuilder, saldoBuilder, from };
+  return { docsBuilder, ausenciasBuilder, pasajesBuilder, saldoBuilder, from };
 }
 
 describe('AprobacionesPage: saldoByUser', () => {

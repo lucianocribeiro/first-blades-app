@@ -9,12 +9,16 @@ import {
   type DiaTramiteRow,
   type SaldoDiasTramite,
 } from '@/lib/rotation/saldo-dias-tramite';
-import type { AusenciaRequest, Document, EstadoDia, Profile } from '@/lib/db-types';
+import type { AusenciaRequest, Document, EstadoDia, PasajeRequest, Profile } from '@/lib/db-types';
 
 type UserProfilePick = Pick<Profile, 'full_name' | 'email'>;
 
 type RawDocument = Document & { user_profile?: UserProfilePick | null };
 type RawAusencia = AusenciaRequest & { user_profile?: UserProfilePick | null };
+type RawPasaje = PasajeRequest & {
+  solicitante_profile?: UserProfilePick | null;
+  empleado_profile?: UserProfilePick | null;
+};
 
 // FB-F4-05: previsualización de sobrescritura — días del rango de la
 // solicitud que ya tienen fila en rotation_assignments.
@@ -29,10 +33,11 @@ export default async function AprobacionesPage() {
   await requireAdmin();
   const supabase = await createServerClient();
 
-  // Bandeja única: documentos pendientes + ausencias pendientes de
-  // CUALQUIER motivo (FB-F4-05 — antes acotada a día de trámite), cada uno
-  // con join a profiles para mostrar el nombre del solicitante.
-  const [docsResult, ausenciasResult] = await Promise.all([
+  // Bandeja única: documentos pendientes + ausencias pendientes de CUALQUIER
+  // motivo (FB-F4-05) + pasajes pendientes (FB-F4-10), cada uno con join a
+  // profiles para mostrar el nombre del solicitante (y, en pasaje, también
+  // del empleado que viaja, cuando difiere del solicitante).
+  const [docsResult, ausenciasResult, pasajesResult] = await Promise.all([
     supabase
       .from('documents')
       .select('*, user_profile:profiles!documents_user_id_fkey(full_name, email)')
@@ -43,17 +48,26 @@ export default async function AprobacionesPage() {
       .select('*, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)')
       .eq('estado', 'pendiente')
       .order('created_at', { ascending: true }),
+    supabase
+      .from('pasaje_requests')
+      .select(
+        '*, solicitante_profile:profiles!pasaje_requests_solicitante_id_fkey(full_name, email), empleado_profile:profiles!pasaje_requests_empleado_id_fkey(full_name, email)'
+      )
+      .eq('estado', 'pendiente')
+      .order('created_at', { ascending: true }),
   ]);
 
-  const error = docsResult.error || ausenciasResult.error;
+  const error = docsResult.error || ausenciasResult.error || pasajesResult.error;
 
   const documents = ((docsResult.data as RawDocument[] | null) ?? []).map(
     (doc): PendingItem => ({ kind: 'documento', data: doc })
   );
   const ausenciasRaw = (ausenciasResult.data as RawAusencia[] | null) ?? [];
   const ausencias = ausenciasRaw.map((req): PendingItem => ({ kind: 'ausencia', data: req }));
+  const pasajesRaw = (pasajesResult.data as RawPasaje[] | null) ?? [];
+  const pasajes = pasajesRaw.map((req): PendingItem => ({ kind: 'pasaje', data: req }));
 
-  const items = [...documents, ...ausencias].sort((a, b) =>
+  const items = [...documents, ...ausencias, ...pasajes].sort((a, b) =>
     a.data.created_at.localeCompare(b.data.created_at)
   );
 
@@ -62,7 +76,7 @@ export default async function AprobacionesPage() {
   // admin decida con el consumo real del año a la vista. Se deriva del
   // calendario (rotation_assignments), no de las solicitudes pendientes en
   // sí (una solicitud pendiente todavía no consumió nada).
-  const solicitanteIds = [...new Set(ausencias.map((item) => item.data.user_id))];
+  const solicitanteIds = [...new Set(ausenciasRaw.map((req) => req.user_id))];
   let saldoByUser = new Map<string, SaldoDiasTramite>();
   // FB-F3-22: si falla la query, la ausencia de badge NO puede leerse como
   // "sin días consumidos" (dato válido) — eso ocultaría la falla y podría
@@ -106,9 +120,14 @@ export default async function AprobacionesPage() {
   // y la UI distingue ambos casos. Best-effort igual: un fallo puntual solo
   // afecta el aviso de ESA solicitud (se loguea), no rompe la cola ni
   // bloquea aprobar/rechazar.
+  // FB-F4-10: mismo criterio para pasaje, pero sobre dias_viaje (fechas
+  // discretas, no un rango) — el filtro es `fecha = ANY(...)` (.in()) en vez
+  // de BETWEEN, y el calendario a mirar es el del empleado_id (quien viaja),
+  // no el solicitante. dias_viaje vacío/NULL (fila legacy previa a FB-F4-08)
+  // no dispara query: no hay nada que previsualizar.
   const overwriteStatusByRequest = new Map<string, OverwriteStatus>();
-  await Promise.all(
-    ausenciasRaw.map(async (req) => {
+  await Promise.all([
+    ...ausenciasRaw.map(async (req) => {
       const { data, error: overwriteError } = await supabase
         .from('rotation_assignments')
         .select('fecha, estado_dia, es_estimado')
@@ -125,8 +144,31 @@ export default async function AprobacionesPage() {
         return;
       }
       overwriteStatusByRequest.set(req.id, { status: 'ok', days: (data ?? []) as OverwriteDay[] });
-    })
-  );
+    }),
+    ...pasajesRaw.map(async (req) => {
+      const dias = req.dias_viaje ?? [];
+      if (dias.length === 0) {
+        overwriteStatusByRequest.set(req.id, { status: 'ok', days: [] });
+        return;
+      }
+
+      const { data, error: overwriteError } = await supabase
+        .from('rotation_assignments')
+        .select('fecha, estado_dia, es_estimado')
+        .eq('user_id', req.empleado_id)
+        .in('fecha', dias);
+
+      if (overwriteError) {
+        console.error(
+          `[AprobacionesPage] error al previsualizar sobrescritura de ${req.id}:`,
+          overwriteError.message
+        );
+        overwriteStatusByRequest.set(req.id, { status: 'error' });
+        return;
+      }
+      overwriteStatusByRequest.set(req.id, { status: 'ok', days: (data ?? []) as OverwriteDay[] });
+    }),
+  ]);
 
   return (
     <div className="space-y-4">

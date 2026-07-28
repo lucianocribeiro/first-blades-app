@@ -76,18 +76,21 @@ function ausenciaRow(id: string, userId: string) {
 function mockQueries(opts: {
   documents?: unknown[];
   ausencias?: Array<{ id: string; user_id: string }>;
+  pasajes?: unknown[];
   saldoResult?: { data: unknown[] | null; error: unknown };
   overwriteResults?: Array<{ data: unknown[] | null; error: unknown }>;
 }) {
   const {
     documents = [],
     ausencias = [],
+    pasajes = [],
     saldoResult = { data: [], error: null },
     overwriteResults = [],
   } = opts;
 
   const docsBuilder = makeBuilder(['select', 'eq'], 'order', { data: documents, error: null });
   const ausenciasBuilder = makeBuilder(['select', 'eq'], 'order', { data: ausencias, error: null });
+  const pasajesBuilder = makeBuilder(['select', 'eq'], 'order', { data: pasajes, error: null });
   const saldoBuilder = makeBuilder(['select', 'in', 'eq', 'gte'], 'lte', saldoResult);
 
   const solicitanteIds = [...new Set(ausencias.map((a) => a.user_id))];
@@ -97,6 +100,7 @@ function mockQueries(opts: {
   const from = vi.fn((table: string) => {
     if (table === 'documents') return docsBuilder;
     if (table === 'ausencia_requests') return ausenciasBuilder;
+    if (table === 'pasaje_requests') return pasajesBuilder;
     rotationCallIndex++;
     if (rotationCallIndex === 1 && solicitanteIds.length > 0) return saldoBuilder;
     const result = overwriteResults[overwriteCallIndex] ?? { data: [], error: null };
@@ -106,7 +110,7 @@ function mockQueries(opts: {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from } as any);
-  return { docsBuilder, ausenciasBuilder, saldoBuilder, from };
+  return { docsBuilder, ausenciasBuilder, pasajesBuilder, saldoBuilder, from };
 }
 
 describe('AprobacionesPage: previsualización de sobrescritura (FB-F4-06)', () => {
