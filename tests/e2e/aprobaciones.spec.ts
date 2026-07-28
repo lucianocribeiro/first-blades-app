@@ -52,37 +52,37 @@ test.describe('Admin: Aprobaciones', () => {
   });
 
   test('ve la previsualización de sobrescritura y aprueba la ausencia pendiente', async ({ page }) => {
-    await page.getByRole('link', { name: copy.nav.aprobaciones }).click();
+    await page.getByRole('link', { name: copy.nav.aprobaciones, exact: true }).click();
     await expect(page).toHaveURL(/\/aprobaciones/);
 
     const ausenciaRow = page.locator('tr', { hasText: NOTA_AUSENCIA });
     await expect(ausenciaRow).toBeVisible();
     await expect(ausenciaRow.getByText(copy.aprobaciones.sobrescritura.aviso)).toBeVisible();
 
-    await ausenciaRow.getByRole('button', { name: copy.aprobaciones.actions.aprobar }).click();
+    await ausenciaRow.getByRole('button', { name: copy.aprobaciones.actions.aprobar, exact: true }).click();
 
     // La bandeja sólo lista pendientes: al aprobar, la fila desaparece.
     await expect(ausenciaRow).toHaveCount(0);
   });
 
   test('rechaza el pasaje pendiente exigiendo motivo', async ({ page }) => {
-    await page.getByRole('link', { name: copy.nav.aprobaciones }).click();
+    await page.getByRole('link', { name: copy.nav.aprobaciones, exact: true }).click();
     await expect(page).toHaveURL(/\/aprobaciones/);
 
     const pasajeRow = page.locator('tr', { hasText: DESTINO_PASAJE });
     await expect(pasajeRow).toBeVisible();
 
-    await pasajeRow.getByRole('button', { name: copy.aprobaciones.actions.rechazar }).click();
+    await pasajeRow.getByRole('button', { name: copy.aprobaciones.actions.rechazar, exact: true }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
     // Confirmar sin motivo → error amigable, el modal sigue abierto.
-    await dialog.getByRole('button', { name: copy.aprobaciones.rejectModal.confirm }).click();
+    await dialog.getByRole('button', { name: copy.aprobaciones.rejectModal.confirm, exact: true }).click();
     await expect(dialog.getByText(copy.aprobaciones.rejectModal.motivoRequired)).toBeVisible();
 
-    await dialog.getByLabel(copy.aprobaciones.rejectModal.motivoLabel).fill('No corresponde para este ciclo (e2e).');
-    await dialog.getByRole('button', { name: copy.aprobaciones.rejectModal.confirm }).click();
+    await dialog.getByLabel(copy.aprobaciones.rejectModal.motivoLabel, { exact: true }).fill('No corresponde para este ciclo (e2e).');
+    await dialog.getByRole('button', { name: copy.aprobaciones.rejectModal.confirm, exact: true }).click();
 
     await expect(pasajeRow).toHaveCount(0);
   });

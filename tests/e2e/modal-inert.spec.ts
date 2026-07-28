@@ -27,11 +27,11 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
 
   test('con el modal abierto, el fondo no es clickeable y el foco no se escapa; al cerrar, vuelve a serlo', async ({ page }) => {
     await login(page, 'admin');
-    await page.getByRole('link', { name: copy.nav.aprobaciones }).click();
+    await page.getByRole('link', { name: copy.nav.aprobaciones, exact: true }).click();
     await expect(page).toHaveURL(/\/aprobaciones/);
 
     const row = page.locator('tr', { hasText: NOTA_AUSENCIA });
-    await row.getByRole('button', { name: copy.aprobaciones.actions.rechazar }).click();
+    await row.getByRole('button', { name: copy.aprobaciones.actions.rechazar, exact: true }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
@@ -41,7 +41,7 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
     // elemento sea "actionable" (visible, no cubierto) y tira timeout si
     // nunca lo es, que es exactamente la garantía que se quiere probar.
     await expect(
-      page.getByRole('link', { name: copy.nav.miPerfil }).click({ timeout: 2000 })
+      page.getByRole('link', { name: copy.nav.miPerfil, exact: true }).click({ timeout: 2000 })
     ).rejects.toThrow();
     await expect(page).toHaveURL(/\/aprobaciones/); // no navegó
 
@@ -60,7 +60,7 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
 
-    await page.getByRole('link', { name: copy.nav.miPerfil }).click();
+    await page.getByRole('link', { name: copy.nav.miPerfil, exact: true }).click();
     await expect(page).toHaveURL(/\/mi-perfil/);
   });
 });

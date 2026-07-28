@@ -22,9 +22,9 @@ test.describe('Login por rol', () => {
 
   test('credenciales inválidas muestran el error amigable, sin redirigir', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel(copy.auth.login.email).fill('no-existe@firstblades.test');
-    await page.getByLabel(copy.auth.login.password).fill('contraseña-incorrecta');
-    await page.getByRole('button', { name: copy.auth.login.submit }).click();
+    await page.getByLabel(copy.auth.login.email, { exact: true }).fill('no-existe@firstblades.test');
+    await page.getByLabel(copy.auth.login.password, { exact: true }).fill('contraseña-incorrecta');
+    await page.getByRole('button', { name: copy.auth.login.submit, exact: true }).click();
 
     await expect(page.getByText(copy.auth.login.invalidCredentials)).toBeVisible();
     await expect(page).toHaveURL(/\/login/);

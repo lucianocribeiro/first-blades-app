@@ -37,9 +37,13 @@ export function credentialsFor(role: Role): { email: string; password: string } 
 export async function login(page: Page, role: Role): Promise<void> {
   const { email, password } = credentialsFor(role);
   await page.goto('/login');
-  await page.getByLabel(copy.auth.login.email).fill(email);
-  await page.getByLabel(copy.auth.login.password).fill(password);
-  await page.getByRole('button', { name: copy.auth.login.submit }).click();
+  // exact: true — copy.auth.login.password ("Contraseña") es substring de
+  // "Mostrar contraseña"/"Ocultar contraseña" (aria-label del botón de ojito),
+  // que sin exact matchea por default (case-insensitive, substring) y rompe
+  // en strict mode con 2 elementos.
+  await page.getByLabel(copy.auth.login.email, { exact: true }).fill(email);
+  await page.getByLabel(copy.auth.login.password, { exact: true }).fill(password);
+  await page.getByRole('button', { name: copy.auth.login.submit, exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard/);
 }
 
