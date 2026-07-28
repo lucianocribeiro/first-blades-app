@@ -293,6 +293,7 @@ export type Database = {
         Row: {
           created_at: string
           destino: string
+          dias_viaje: string[] | null
           empleado_id: string
           estado: Database["public"]["Enums"]["approval_status"]
           fecha_viaje: string
@@ -309,6 +310,7 @@ export type Database = {
         Insert: {
           created_at?: string
           destino: string
+          dias_viaje?: string[] | null
           empleado_id: string
           estado?: Database["public"]["Enums"]["approval_status"]
           fecha_viaje: string
@@ -325,6 +327,7 @@ export type Database = {
         Update: {
           created_at?: string
           destino?: string
+          dias_viaje?: string[] | null
           empleado_id?: string
           estado?: Database["public"]["Enums"]["approval_status"]
           fecha_viaje?: string
@@ -575,6 +578,14 @@ export type Database = {
         Returns: undefined
       }
       resolver_ausencia_request: {
+        Args: {
+          p_accion: string
+          p_motivo_rechazo?: string
+          p_request_id: string
+        }
+        Returns: undefined
+      }
+      resolver_pasaje_request: {
         Args: {
           p_accion: string
           p_motivo_rechazo?: string
