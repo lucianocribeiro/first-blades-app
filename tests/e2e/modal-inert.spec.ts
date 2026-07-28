@@ -45,12 +45,6 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
     ).rejects.toThrow();
     await expect(page).toHaveURL(/\/aprobaciones/); // no navegó
 
-    // ─── Foco atrapado: arranca en un elemento CONOCIDO del modal (en vez de
-    // asumir cuál autoenfoca showModal() por default) y confirma que Tab
-    // repetido — dando la vuelta completa a los focusables del diálogo más
-    // de una vez — nunca saca el foco del <dialog> nativo.
-    await dialog.getByLabel(exactLabel(copy.aprobaciones.rejectModal.motivoLabel)).click();
-
     async function activeElementLocation(): Promise<string> {
       return page.evaluate(() => {
         const dialogEl = document.querySelector('dialog[open]');
@@ -60,7 +54,30 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
       });
     }
 
-    for (let i = 0; i < 8; i++) {
+    // ─── Foco: hace foco explícito en un campo conocido del modal (el
+    // textarea de motivo) y confirma que el click realmente lo enfocó, antes
+    // de afirmar nada sobre el trap — sin este chequeo intermedio, un fallo
+    // más adelante no distingue "el click no enfocó" de "el foco se escapó".
+    await dialog.getByLabel(exactLabel(copy.aprobaciones.rejectModal.motivoLabel)).click();
+    expect(await activeElementLocation()).toBe('inside-dialog');
+
+    // ─── Foco atrapado (inertización, vía foco programático): un elemento
+    // del fondo es INERTE mientras el modal está abierto — inerte no sólo
+    // bloquea clicks (ya afirmado arriba), también rechaza foco programático
+    // (.focus() en JS es un no-op sobre un elemento inerte, por spec). Esto
+    // prueba la MISMA garantía de inertización que el Tab, pero sin depender
+    // de que el ciclo nativo de Tab-navigation de Chromium responda igual
+    // ante eventos de teclado sintéticos (CDP) que ante un Tab real — ver
+    // docs/prompts/FB-F4-11.md para el detalle de por qué se cambió el enfoque.
+    await page.evaluate(() => {
+      const link = document.querySelector('a[href="/mi-perfil"]') as HTMLElement | null;
+      link?.focus();
+    });
+    expect(await activeElementLocation()).toBe('inside-dialog');
+
+    // ─── Tab real: además del chequeo programático de arriba, confirma que
+    // al menos un par de Tabs reales tampoco sacan el foco del diálogo.
+    for (let i = 0; i < 4; i++) {
       await page.keyboard.press('Tab');
       expect(await activeElementLocation()).toBe('inside-dialog');
     }
