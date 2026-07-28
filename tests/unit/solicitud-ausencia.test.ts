@@ -37,6 +37,7 @@ import { SolicitudAusenciaForm } from '@/app/(app)/solicitud-ausencia/SolicitudA
 import { MisSolicitudesTable } from '@/app/(app)/solicitud-ausencia/MisSolicitudesTable';
 import { Card } from '@/components/ui/Card';
 import { copy } from '@/lib/copy';
+import { getBusinessToday } from '@/lib/business-date';
 
 function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,9 +140,14 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
   it('empleado: fecha_inicio retroactiva (antes de hoy) rechaza antes de llamar insert', async () => {
     mockProfile('empleado');
     const { insertMock } = mockSupabaseInsert();
-    const ayer = new Date();
-    ayer.setDate(ayer.getDate() - 1);
-    const ayerIso = ayer.toISOString().slice(0, 10);
+    // "Ayer" tiene que calcularse en la misma zona horaria de negocio
+    // (Argentina) que usa la validación real (getBusinessToday(), ver
+    // solicitud-ausencia/logic.ts) — no con Date/toISOString() crudo (UTC).
+    // Entre ~21:00 y 00:00 ART, el "ayer" en UTC ya coincide con el "hoy"
+    // real en Argentina, y el test dejaba de probar lo que dice probar.
+    // Restar 24h en tiempo absoluto y formatear en huso Argentina (sin DST)
+    // da el día calendario anterior de forma robusta a esa hora del día.
+    const ayerIso = getBusinessToday(new Date(Date.now() - 24 * 60 * 60 * 1000));
 
     await expect(
       createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: ayerIso, fechaFin: ayerIso })
