@@ -7,7 +7,9 @@ import { copy } from '../../lib/copy';
 test.describe('Login por rol', () => {
   test('admin inicia sesión y llega al dashboard', async ({ page }) => {
     await login(page, 'admin');
-    await expect(page.getByText(copy.pages.dashboard.welcome)).toBeVisible();
+    // FB-F4-11-GATE-CHECK: assert invertido a propósito para demostrar que
+    // la compuerta e2e realmente bloquea — se revierte en el próximo commit.
+    await expect(page.getByText(copy.pages.dashboard.welcome)).not.toBeVisible();
   });
 
   test('supervisor inicia sesión y llega al dashboard', async ({ page }) => {
