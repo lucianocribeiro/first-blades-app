@@ -27,8 +27,13 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
 
   test('con el modal abierto, el fondo no es clickeable y el foco no se escapa; al cerrar, vuelve a serlo', async ({ page }) => {
     await login(page, 'admin');
-    await page.getByRole('link', { name: copy.nav.aprobaciones, exact: true }).click();
-    await expect(page).toHaveURL(/\/aprobaciones/);
+    // page.goto() en vez de clickear el link del sidebar: ESE link, en
+    // Sidebar.tsx, dispara onClick={onClose} (colapsa el sidebar a w-0 —
+    // pensado para cerrar el drawer mobile tras navegar). Clickearlo acá
+    // colapsaría el sidebar ANTES de que el test llegue a usarlo, confundiendo
+    // "el fondo está inerte por el modal" con "el sidebar está colapsado por
+    // su propio click" — nada que ver con la garantía que se quiere probar.
+    await page.goto('/aprobaciones');
 
     const row = page.locator('tr', { hasText: NOTA_AUSENCIA });
     await row.getByRole('button', { name: copy.aprobaciones.actions.rechazar, exact: true }).click();
@@ -37,11 +42,12 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
     await expect(dialog).toBeVisible();
 
     // ─── Fondo inertizado: un click a un link del sidebar (detrás del
-    // backdrop) no debe poder ejecutarse — Playwright espera a que el
-    // elemento sea "actionable" (visible, no cubierto) y tira timeout si
-    // nunca lo es, que es exactamente la garantía que se quiere probar.
+    // backdrop) no debe poder ejecutarse. trial:true corre sólo los chequeos
+    // de "actionable" (visible, no cubierto) sin llegar a clickear de
+    // verdad — evita que, si por algún motivo SÍ fuera clickeable, dispare
+    // la navegación real y su propio onClose (ver comentario arriba).
     await expect(
-      page.getByRole('link', { name: copy.nav.miPerfil, exact: true }).click({ timeout: 2000 })
+      page.getByRole('link', { name: copy.nav.miPerfil, exact: true }).click({ timeout: 2000, trial: true })
     ).rejects.toThrow();
     await expect(page).toHaveURL(/\/aprobaciones/); // no navegó
 
@@ -79,11 +85,12 @@ test.describe('Modal nativo (<dialog>.showModal()): inertización del fondo y fo
     expect(await activeElementLocation()).toBe('inside-dialog');
 
     // ─── Cerrar (Escape → 'close' nativo → onClose de la app) y confirmar
-    // que el fondo vuelve a ser interactivo.
+    // que el fondo vuelve a ser interactivo — trial:true de nuevo, por la
+    // misma razón: probar "es clickeable" sin disparar el onClose propio
+    // del link y su efecto colateral de colapsar el sidebar.
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
 
-    await page.getByRole('link', { name: copy.nav.miPerfil, exact: true }).click();
-    await expect(page).toHaveURL(/\/mi-perfil/);
+    await page.getByRole('link', { name: copy.nav.miPerfil, exact: true }).click({ trial: true, timeout: 5000 });
   });
 });
