@@ -102,6 +102,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_ausencia',
       'motivo_viaje',
       'notification_type',
+      'post_aprobacion_tipo',
       'user_role',
     ]);
   });
@@ -453,6 +454,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_ausencia',
       'motivo_viaje',
       'notification_type',
+      'post_aprobacion_tipo',
       'user_role',
     ]);
   });
@@ -617,6 +619,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_ausencia',
       'motivo_viaje',
       'notification_type',
+      'post_aprobacion_tipo',
       'user_role',
     ]);
   });
@@ -756,6 +759,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_ausencia',
       'motivo_viaje',
       'notification_type',
+      'post_aprobacion_tipo',
       'user_role',
     ]);
   });

@@ -290,13 +290,16 @@ beforeAll(async () => {
   }
 
   // ─── Editar fechas: atomicidad pasaje ─────────────────────────────────────
+  // Fechas distintas de las de EDIT_AUSENCIA_ATOMIC (mismo employee3, rango
+  // nuevo 09-25..27): si coincidieran, el upsert de una pisaría la fixture
+  // de la otra y el test de "no quedó nada nuevo" daría un falso positivo.
   await insertPasaje(db, {
     id: 'f4000000-0000-0000-0004-000000000004', // EDIT_PASAJE_ATOMIC
     empleadoId: IDS.employee3,
-    diasViaje: ['2027-09-25'],
+    diasViaje: ['2027-09-28'],
     reviewedAt: '2027-01-01T00:00:00Z',
   });
-  await insertCalendarDay(db, { userId: IDS.employee3, fecha: '2027-09-25', estadoDia: 'en_viaje' });
+  await insertCalendarDay(db, { userId: IDS.employee3, fecha: '2027-09-28', estadoDia: 'en_viaje' });
 
   // ─── Cancelar: guardas ────────────────────────────────────────────────────
   await insertAusencia(db, {
@@ -710,7 +713,7 @@ describe.skipIf(!dbAvailable)('cancelar_editar_ausencia_aprobada / cancelar_edit
       expect(newDays[0].es_estimado).toBe(false);
 
       const { rows: reqRows } = await c.query(
-        `SELECT dias_viaje, post_aprobacion_tipo, comentario_post_aprobacion FROM pasaje_requests WHERE id = $1`,
+        `SELECT dias_viaje::text[] AS dias_viaje, post_aprobacion_tipo, comentario_post_aprobacion FROM pasaje_requests WHERE id = $1`,
         [id]
       );
       expect(reqRows[0].dias_viaje).toEqual(['2027-09-15']);
@@ -795,32 +798,32 @@ describe.skipIf(!dbAvailable)('cancelar_editar_ausencia_aprobada / cancelar_edit
     try {
       await setupClient.query(`
         ALTER TABLE rotation_assignments
-        ADD CONSTRAINT test_force_fail_editar_pasaje CHECK (fecha <> '2027-09-30')
+        ADD CONSTRAINT test_force_fail_editar_pasaje CHECK (fecha <> '2027-09-29')
       `);
 
       await asUser(IDS.admin, async (c) => {
         const id = 'f4000000-0000-0000-0004-000000000004';
         await callExpectingThrow(
           c,
-          `SELECT public.cancelar_editar_pasaje_aprobado($1, 'editar_fechas', 'x', ARRAY['2027-09-30']::date[])`,
+          `SELECT public.cancelar_editar_pasaje_aprobado($1, 'editar_fechas', 'x', ARRAY['2027-09-29']::date[])`,
           [id]
         );
 
         const { rows: reqRows } = await c.query(
-          `SELECT dias_viaje, post_aprobacion_tipo FROM pasaje_requests WHERE id = $1`,
+          `SELECT dias_viaje::text[] AS dias_viaje, post_aprobacion_tipo FROM pasaje_requests WHERE id = $1`,
           [id]
         );
-        expect(reqRows[0].dias_viaje).toEqual(['2027-09-25']);
+        expect(reqRows[0].dias_viaje).toEqual(['2027-09-28']);
         expect(reqRows[0].post_aprobacion_tipo).toBeNull();
 
         const { rows: oldDays } = await c.query(
-          `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-09-25'`,
+          `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-09-28'`,
           [IDS.employee3]
         );
         expect(oldDays).toHaveLength(1);
 
         const { rows: newDays } = await c.query(
-          `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-09-30'`,
+          `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-09-29'`,
           [IDS.employee3]
         );
         expect(newDays).toHaveLength(0);
