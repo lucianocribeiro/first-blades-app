@@ -82,6 +82,7 @@ export type Database = {
       }
       ausencia_requests: {
         Row: {
+          comentario_post_aprobacion: string | null
           created_at: string
           estado: Database["public"]["Enums"]["approval_status"]
           fecha_fin: string
@@ -91,12 +92,17 @@ export type Database = {
           motivo_otros_texto: string | null
           motivo_rechazo: string | null
           notas: string | null
+          post_aprobacion_at: string | null
+          post_aprobacion_tipo:
+            | Database["public"]["Enums"]["post_aprobacion_tipo"]
+            | null
           reviewed_at: string | null
           reviewed_by: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          comentario_post_aprobacion?: string | null
           created_at?: string
           estado?: Database["public"]["Enums"]["approval_status"]
           fecha_fin: string
@@ -106,12 +112,17 @@ export type Database = {
           motivo_otros_texto?: string | null
           motivo_rechazo?: string | null
           notas?: string | null
+          post_aprobacion_at?: string | null
+          post_aprobacion_tipo?:
+            | Database["public"]["Enums"]["post_aprobacion_tipo"]
+            | null
           reviewed_at?: string | null
           reviewed_by?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          comentario_post_aprobacion?: string | null
           created_at?: string
           estado?: Database["public"]["Enums"]["approval_status"]
           fecha_fin?: string
@@ -121,6 +132,10 @@ export type Database = {
           motivo_otros_texto?: string | null
           motivo_rechazo?: string | null
           notas?: string | null
+          post_aprobacion_at?: string | null
+          post_aprobacion_tipo?:
+            | Database["public"]["Enums"]["post_aprobacion_tipo"]
+            | null
           reviewed_at?: string | null
           reviewed_by?: string | null
           updated_at?: string
@@ -291,6 +306,7 @@ export type Database = {
       }
       pasaje_requests: {
         Row: {
+          comentario_post_aprobacion: string | null
           created_at: string
           destino: string
           dias_viaje: string[] | null
@@ -302,12 +318,17 @@ export type Database = {
           motivo_viaje: Database["public"]["Enums"]["motivo_viaje"]
           notas: string | null
           origen: string
+          post_aprobacion_at: string | null
+          post_aprobacion_tipo:
+            | Database["public"]["Enums"]["post_aprobacion_tipo"]
+            | null
           reviewed_at: string | null
           reviewed_by: string | null
           solicitante_id: string
           updated_at: string
         }
         Insert: {
+          comentario_post_aprobacion?: string | null
           created_at?: string
           destino: string
           dias_viaje?: string[] | null
@@ -319,12 +340,17 @@ export type Database = {
           motivo_viaje: Database["public"]["Enums"]["motivo_viaje"]
           notas?: string | null
           origen: string
+          post_aprobacion_at?: string | null
+          post_aprobacion_tipo?:
+            | Database["public"]["Enums"]["post_aprobacion_tipo"]
+            | null
           reviewed_at?: string | null
           reviewed_by?: string | null
           solicitante_id: string
           updated_at?: string
         }
         Update: {
+          comentario_post_aprobacion?: string | null
           created_at?: string
           destino?: string
           dias_viaje?: string[] | null
@@ -336,6 +362,10 @@ export type Database = {
           motivo_viaje?: Database["public"]["Enums"]["motivo_viaje"]
           notas?: string | null
           origen?: string
+          post_aprobacion_at?: string | null
+          post_aprobacion_tipo?:
+            | Database["public"]["Enums"]["post_aprobacion_tipo"]
+            | null
           reviewed_at?: string | null
           reviewed_by?: string | null
           solicitante_id?: string
@@ -566,6 +596,25 @@ export type Database = {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
       }
+      cancelar_editar_ausencia_aprobada: {
+        Args: {
+          p_accion: string
+          p_comentario: string
+          p_nueva_fecha_fin?: string
+          p_nueva_fecha_inicio?: string
+          p_request_id: string
+        }
+        Returns: undefined
+      }
+      cancelar_editar_pasaje_aprobado: {
+        Args: {
+          p_accion: string
+          p_comentario: string
+          p_nuevos_dias?: string[]
+          p_request_id: string
+        }
+        Returns: undefined
+      }
       is_admin: { Args: never; Returns: boolean }
       log_audit: {
         Args: {
@@ -621,6 +670,7 @@ export type Database = {
         | "vencimiento_documento"
         | "sin_franco"
         | "franco_excedido"
+      post_aprobacion_tipo: "editada" | "cancelada"
       user_role: "admin" | "supervisor" | "empleado"
     }
     CompositeTypes: {
@@ -782,6 +832,7 @@ export const Constants = {
         "sin_franco",
         "franco_excedido",
       ],
+      post_aprobacion_tipo: ["editada", "cancelada"],
       user_role: ["admin", "supervisor", "empleado"],
     },
   },
