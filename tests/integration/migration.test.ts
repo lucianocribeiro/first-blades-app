@@ -102,6 +102,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_ausencia',
       'motivo_viaje',
       'notification_type',
+      'post_aprobacion_tipo',
       'user_role',
     ]);
   });
@@ -453,6 +454,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_ausencia',
       'motivo_viaje',
       'notification_type',
+      'post_aprobacion_tipo',
       'user_role',
     ]);
   });
@@ -617,6 +619,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_ausencia',
       'motivo_viaje',
       'notification_type',
+      'post_aprobacion_tipo',
       'user_role',
     ]);
   });
@@ -756,6 +759,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_ausencia',
       'motivo_viaje',
       'notification_type',
+      'post_aprobacion_tipo',
       'user_role',
     ]);
   });
@@ -841,5 +845,156 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     `);
     expect(unique).toHaveLength(1);
     expect(unique[0].def).toBe('UNIQUE (user_id, fecha)');
+  });
+
+  // ─── FB-F4-12: cambio post-aprobación (0017) ─────────────────────────
+
+  it('enum post_aprobacion_tipo existe con EXACTAMENTE 2 valores: editada, cancelada (0017)', async () => {
+    const { rows } = await client.query(`
+      SELECT enumlabel FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'post_aprobacion_tipo'
+      ORDER BY enumsortorder
+    `);
+    const values = rows.map((r: { enumlabel: string }) => r.enumlabel);
+    expect(values).toEqual(['editada', 'cancelada']);
+  });
+
+  it('enums de dominio: post_aprobacion_tipo se sumó al inventario, el resto no cambió (0017)', async () => {
+    const { rows } = await client.query(`
+      SELECT typname FROM pg_type
+      WHERE typtype = 'e' AND typnamespace = 'public'::regnamespace
+      ORDER BY typname
+    `);
+    expect(rows.map((r: { typname: string }) => r.typname)).toEqual([
+      'approval_status',
+      'certificado_tipo',
+      'employee_status',
+      'estado_dia',
+      'motivo_ausencia',
+      'motivo_viaje',
+      'notification_type',
+      'post_aprobacion_tipo',
+      'user_role',
+    ]);
+  });
+
+  for (const table of ['ausencia_requests', 'pasaje_requests']) {
+    it(`${table} tiene las 3 columnas de cambio post-aprobación: post_aprobacion_tipo (enum, nullable), comentario_post_aprobacion (text, nullable), post_aprobacion_at (timestamptz, nullable) (0017)`, async () => {
+      const { rows } = await client.query(`
+        SELECT column_name, data_type, udt_name, is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1
+          AND column_name IN ('post_aprobacion_tipo', 'comentario_post_aprobacion', 'post_aprobacion_at')
+      `, [table]);
+      const byName = Object.fromEntries(rows.map((r) => [r.column_name, r]));
+
+      expect(byName.post_aprobacion_tipo.udt_name).toBe('post_aprobacion_tipo');
+      expect(byName.post_aprobacion_tipo.is_nullable).toBe('YES');
+
+      expect(byName.comentario_post_aprobacion.data_type).toBe('text');
+      expect(byName.comentario_post_aprobacion.is_nullable).toBe('YES');
+
+      expect(byName.post_aprobacion_at.data_type).toBe('timestamp with time zone');
+      expect(byName.post_aprobacion_at.is_nullable).toBe('YES');
+    });
+  }
+
+  it('ausencia_requests y pasaje_requests: RLS no cambió en 0017 — el delta es solo columnas + funciones nuevas', async () => {
+    const { rows: ausenciaPolicies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'ausencia_requests'
+    `);
+    expect(ausenciaPolicies.map((r) => r.policyname).sort()).toEqual([
+      'ausencias_delete_admin',
+      'ausencias_insert_admin',
+      'ausencias_insert_non_admin',
+      'ausencias_select',
+      'ausencias_update_admin',
+    ]);
+
+    const { rows: pasajePolicies } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'pasaje_requests'
+    `);
+    expect(pasajePolicies.map((r) => r.policyname).sort()).toEqual([
+      'pasajes_delete_admin',
+      'pasajes_insert_admin',
+      'pasajes_insert_empleado',
+      'pasajes_insert_supervisor',
+      'pasajes_select',
+      'pasajes_update_admin',
+    ]);
+  });
+
+  for (const [fn, args] of [
+    ['cancelar_editar_ausencia_aprobada', ['uuid', 'text', 'text', 'date', 'date']],
+    ['cancelar_editar_pasaje_aprobado', ['uuid', 'text', 'text', '_date']],
+  ] as const) {
+    it(`función ${fn}() existe con la firma esperada, 2 defaults, retorna void (0017)`, async () => {
+      const { rows } = await client.query(`
+        SELECT
+          p.pronargs,
+          p.pronargdefaults,
+          pg_get_function_result(p.oid) AS ret,
+          (
+            SELECT array_agg(t.typname::text ORDER BY u.ord)
+            FROM unnest(p.proargtypes) WITH ORDINALITY AS u(oid, ord)
+            JOIN pg_type t ON t.oid = u.oid
+          ) AS arg_types
+        FROM pg_proc p
+        WHERE p.proname = $1 AND p.pronamespace = 'public'::regnamespace
+      `, [fn]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].arg_types).toEqual([...args]);
+      expect(rows[0].pronargs).toBe(args.length);
+      expect(rows[0].pronargdefaults).toBe(fn === 'cancelar_editar_ausencia_aprobada' ? 2 : 1);
+      expect(rows[0].ret).toBe('void');
+    });
+
+    it(`${fn}: SECURITY DEFINER con search_path fijo y owner consistente con is_admin()/auth_role() (0017, §6.1)`, async () => {
+      const { rows } = await client.query(`
+        SELECT p.prosecdef, p.proconfig, r.rolname AS owner
+        FROM pg_proc p
+        JOIN pg_roles r ON r.oid = p.proowner
+        WHERE p.proname = $1 AND p.pronamespace = 'public'::regnamespace
+      `, [fn]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].prosecdef).toBe(true);
+      expect(rows[0].proconfig).toContain('search_path=public');
+      expect(['authenticated', 'anon', 'public']).not.toContain(rows[0].owner);
+
+      const { rows: helperOwners } = await client.query(`
+        SELECT p.proname, r.rolname AS owner
+        FROM pg_proc p
+        JOIN pg_roles r ON r.oid = p.proowner
+        WHERE p.proname IN ('is_admin', 'auth_role') AND p.pronamespace = 'public'::regnamespace
+        ORDER BY p.proname
+      `);
+      expect(helperOwners).toHaveLength(2);
+      for (const helper of helperOwners) {
+        expect(helper.owner).toBe(rows[0].owner);
+      }
+    });
+  }
+
+  it('cancelar_editar_ausencia_aprobada: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0017)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        has_function_privilege('authenticated', 'public.cancelar_editar_ausencia_aprobada(uuid,text,text,date,date)', 'EXECUTE') AS authenticated_can,
+        has_function_privilege('anon', 'public.cancelar_editar_ausencia_aprobada(uuid,text,text,date,date)', 'EXECUTE') AS anon_can,
+        has_function_privilege('public', 'public.cancelar_editar_ausencia_aprobada(uuid,text,text,date,date)', 'EXECUTE') AS public_can
+    `);
+    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
+  });
+
+  it('cancelar_editar_pasaje_aprobado: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0017)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        has_function_privilege('authenticated', 'public.cancelar_editar_pasaje_aprobado(uuid,text,text,date[])', 'EXECUTE') AS authenticated_can,
+        has_function_privilege('anon', 'public.cancelar_editar_pasaje_aprobado(uuid,text,text,date[])', 'EXECUTE') AS anon_can,
+        has_function_privilege('public', 'public.cancelar_editar_pasaje_aprobado(uuid,text,text,date[])', 'EXECUTE') AS public_can
+    `);
+    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
   });
 });
