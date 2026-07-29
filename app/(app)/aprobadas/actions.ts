@@ -118,7 +118,9 @@ export async function cancelarAusencia(requestId: string, comentario: string): P
   if (error) {
     const friendly = translateCancelarEditarError(error);
     if (friendly) {
-      revalidatePath('/aprobadas');
+      // Sin revalidatePath: la RPC abortó, nada cambió en la DB — y
+      // llamarlo antes de un throw acá hace que Next.js (build de
+      // producción) redacte el mensaje del error (confirmado por CI real).
       throw new Error(friendly);
     }
     console.error('[cancelarAusencia] error al invocar cancelar_editar_ausencia_aprobada:', error.message);
@@ -188,7 +190,9 @@ export async function editarFechasAusencia(
   if (error) {
     const friendly = translateCancelarEditarError(error);
     if (friendly) {
-      revalidatePath('/aprobadas');
+      // Sin revalidatePath: la RPC abortó, nada cambió en la DB — y
+      // llamarlo antes de un throw acá hace que Next.js (build de
+      // producción) redacte el mensaje del error (confirmado por CI real).
       throw new Error(friendly);
     }
     console.error('[editarFechasAusencia] error al invocar cancelar_editar_ausencia_aprobada:', error.message);
@@ -248,7 +252,9 @@ export async function cancelarPasaje(requestId: string, comentario: string): Pro
   if (error) {
     const friendly = translateCancelarEditarError(error);
     if (friendly) {
-      revalidatePath('/aprobadas');
+      // Sin revalidatePath: la RPC abortó, nada cambió en la DB — y
+      // llamarlo antes de un throw acá hace que Next.js (build de
+      // producción) redacte el mensaje del error (confirmado por CI real).
       throw new Error(friendly);
     }
     console.error('[cancelarPasaje] error al invocar cancelar_editar_pasaje_aprobado:', error.message);
@@ -316,7 +322,9 @@ export async function editarFechasPasaje(
   if (error) {
     const friendly = translateCancelarEditarError(error);
     if (friendly) {
-      revalidatePath('/aprobadas');
+      // Sin revalidatePath: la RPC abortó, nada cambió en la DB — y
+      // llamarlo antes de un throw acá hace que Next.js (build de
+      // producción) redacte el mensaje del error (confirmado por CI real).
       throw new Error(friendly);
     }
     console.error('[editarFechasPasaje] error al invocar cancelar_editar_pasaje_aprobado:', error.message);
