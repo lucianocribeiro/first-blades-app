@@ -63,6 +63,27 @@ export function MisSolicitudesPasajeTable({ requests }: Props) {
             render: (r: PasajeRequestWithEmpleado) =>
               r.estado === 'rechazado' ? (r.motivo_rechazo ?? '—') : '—',
           },
+          {
+            key: 'postAprobacion',
+            header: copy.solicitudPasaje.table.postAprobacion,
+            // FB-F4-14 §3.7 — mismo criterio que MisSolicitudesTable.tsx (ausencia).
+            render: (r: PasajeRequestWithEmpleado) =>
+              r.post_aprobacion_tipo ? (
+                <div>
+                  <StatusBadge status={r.post_aprobacion_tipo} />
+                  {r.comentario_post_aprobacion && (
+                    <div className="text-xs mt-1">{r.comentario_post_aprobacion}</div>
+                  )}
+                  {r.post_aprobacion_at && (
+                    <div className="text-xs text-neutral mt-0.5">
+                      {new Date(r.post_aprobacion_at).toLocaleString('es-AR')}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                '—'
+              ),
+          },
         ]}
         rows={requests}
         keyExtractor={(r) => r.id}
