@@ -116,8 +116,28 @@ BEGIN
     RAISE EXCEPTION 'La solicitud % ya fue cancelada', p_request_id USING ERRCODE = '22023';
   END IF;
 
-  IF p_accion = 'editar_fechas' AND (p_nueva_fecha_inicio IS NULL OR p_nueva_fecha_fin IS NULL) THEN
-    RAISE EXCEPTION 'Las fechas nuevas son obligatorias para editar_fechas' USING ERRCODE = '22023';
+  -- Blindaje (FB-F4-13, FB-F4-AUD-08 Hallazgo Medio): la guarda LIFO ordena
+  -- por reviewed_at — un objetivo aprobado sin ese dato (legacy/drift) no
+  -- puede evaluarse de forma segura, así que se rechaza acá en vez de dejar
+  -- que la comparación NULL del LIFO silenciosamente no bloquee nada.
+  IF v_request.reviewed_at IS NULL THEN
+    RAISE EXCEPTION 'La solicitud % no tiene reviewed_at: no se puede evaluar el orden LIFO', p_request_id
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF p_accion = 'editar_fechas' THEN
+    IF p_nueva_fecha_inicio IS NULL OR p_nueva_fecha_fin IS NULL THEN
+      RAISE EXCEPTION 'Las fechas nuevas son obligatorias para editar_fechas' USING ERRCODE = '22023';
+    END IF;
+
+    -- FB-F4-13, FB-F4-AUD-08 Hallazgo Alto: sin esta guarda, un rango
+    -- invertido borra los días viejos, el WHILE de abajo no escribe ninguno
+    -- (v_dia > p_nueva_fecha_fin desde el arranque) y la solicitud queda con
+    -- fecha_inicio > fecha_fin — inválido y sin días asignados en ningún lado.
+    IF p_nueva_fecha_fin < p_nueva_fecha_inicio THEN
+      RAISE EXCEPTION 'El rango de fechas nuevo es inválido: % es anterior a %', p_nueva_fecha_fin, p_nueva_fecha_inicio
+        USING ERRCODE = '22023';
+    END IF;
   END IF;
 
   -- ─── Guarda LIFO ───────────────────────────────────────────────────────
@@ -314,6 +334,23 @@ BEGIN
 
   IF v_request.post_aprobacion_tipo = 'cancelada' THEN
     RAISE EXCEPTION 'La solicitud % ya fue cancelada', p_request_id USING ERRCODE = '22023';
+  END IF;
+
+  -- FB-F4-13, FB-F4-AUD-08 Hallazgo Medio: un objetivo aprobado con
+  -- dias_viaje NULL/vacío (fila legacy previa a FB-F4-08) no tiene un
+  -- conjunto de días real — el LIFO no computaría intersecciones válidas y
+  -- el borrado de abajo no liberaría nada, pero la solicitud igual quedaría
+  -- marcada cancelada/editada. Se rechaza acá, antes de cualquier efecto.
+  IF v_request.dias_viaje IS NULL OR cardinality(v_request.dias_viaje) = 0 THEN
+    RAISE EXCEPTION 'La solicitud % no tiene días de viaje válidos: no se puede cancelar/editar', p_request_id
+      USING ERRCODE = '22023';
+  END IF;
+
+  -- Blindaje (mismo motivo que en cancelar_editar_ausencia_aprobada): el
+  -- LIFO ordena por reviewed_at.
+  IF v_request.reviewed_at IS NULL THEN
+    RAISE EXCEPTION 'La solicitud % no tiene reviewed_at: no se puede evaluar el orden LIFO', p_request_id
+      USING ERRCODE = '22023';
   END IF;
 
   IF p_accion = 'editar_fechas' AND (p_nuevos_dias IS NULL OR cardinality(p_nuevos_dias) = 0) THEN

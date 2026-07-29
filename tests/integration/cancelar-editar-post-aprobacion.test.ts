@@ -108,7 +108,7 @@ async function insertPasaje(
   opts: {
     id: string;
     empleadoId: string;
-    diasViaje: string[];
+    diasViaje: string[] | null;
     estado?: string;
     reviewedAt?: string | null;
     postAprobacionTipo?: string | null;
@@ -116,6 +116,10 @@ async function insertPasaje(
 ): Promise<void> {
   const estado = opts.estado ?? 'aprobado';
   const reviewedBy = opts.reviewedAt ? IDS.admin : null;
+  // fecha_viaje (legacy, NOT NULL) toma el primer día de dias_viaje; si es
+  // NULL (fixture de FB-F4-13 para el objetivo malformado), cae a un valor
+  // fijo — la columna legacy no participa de las guardas nuevas.
+  const fechaViaje = opts.diasViaje?.[0] ?? '2027-04-01';
   await client.query(
     `INSERT INTO pasaje_requests
        (id, solicitante_id, empleado_id, motivo_viaje, fecha_viaje, origen, destino, dias_viaje, estado, reviewed_by, reviewed_at, post_aprobacion_tipo)
@@ -123,7 +127,7 @@ async function insertPasaje(
     [
       opts.id,
       opts.empleadoId,
-      opts.diasViaje[0],
+      fechaViaje,
       opts.diasViaje,
       estado,
       reviewedBy,
@@ -344,6 +348,28 @@ beforeAll(async () => {
     diasViaje: ['2027-10-17'],
     reviewedAt: '2027-01-01T00:00:00Z',
     postAprobacionTipo: 'cancelada',
+  });
+
+  // ─── FB-F4-13: guardas de datos malformados / legacy ───────────────────
+  // dias_viaje NULL es una fila legacy previa a FB-F4-08 — el CHECK
+  // pasaje_requests_dias_viaje_no_vacio permite NULL (solo prohíbe vacío),
+  // así que este fixture no necesita bypasear ningún constraint.
+  await insertPasaje(db, {
+    id: 'f3000000-0000-0000-0003-000000000007', // GUARD_PASAJE_DIAS_VIAJE_NULL
+    empleadoId: IDS.employee1,
+    diasViaje: null,
+    reviewedAt: '2027-01-01T00:00:00Z',
+  });
+  // reviewed_at NULL con estado='aprobado': pasaje_requests no tiene un CHECK
+  // equivalente a ausencia_requests_resolucion_completa, así que este drift
+  // hipotético SÍ es insertable directo (a diferencia del caso de ausencia,
+  // que necesita el bypass temporal del CHECK — ver el test correspondiente).
+  await insertPasaje(db, {
+    id: 'f3000000-0000-0000-0003-000000000008', // GUARD_PASAJE_REVIEWED_AT_NULL
+    empleadoId: IDS.employee1,
+    diasViaje: ['2027-10-19'],
+    estado: 'aprobado',
+    reviewedAt: null,
   });
 }, 30_000);
 
@@ -611,6 +637,101 @@ describe.skipIf(!dbAvailable)('cancelar_editar_ausencia_aprobada / cancelar_edit
       ).rejects.toThrow();
     });
   });
+
+  // ─── FB-F4-13: guardas de datos malformados / legacy ──────────────────
+
+  it('pasaje: objetivo con dias_viaje NULL (legacy) → abort en cancelar y en editar_fechas, sin marcar', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const id = 'f3000000-0000-0000-0003-000000000007';
+      await callExpectingThrow(c, `SELECT public.cancelar_editar_pasaje_aprobado($1, 'cancelar', 'x')`, [id]);
+      await callExpectingThrow(
+        c,
+        `SELECT public.cancelar_editar_pasaje_aprobado($1, 'editar_fechas', 'x', ARRAY['2027-10-20']::date[])`,
+        [id]
+      );
+
+      const { rows } = await c.query(`SELECT post_aprobacion_tipo FROM pasaje_requests WHERE id = $1`, [id]);
+      expect(rows[0].post_aprobacion_tipo).toBeNull();
+    });
+  });
+
+  it('pasaje: objetivo con reviewed_at NULL (drift/legacy) → abort, sin marcar', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const id = 'f3000000-0000-0000-0003-000000000008';
+      await callExpectingThrow(c, `SELECT public.cancelar_editar_pasaje_aprobado($1, 'cancelar', 'x')`, [id]);
+
+      const { rows } = await c.query(`SELECT post_aprobacion_tipo FROM pasaje_requests WHERE id = $1`, [id]);
+      expect(rows[0].post_aprobacion_tipo).toBeNull();
+    });
+  });
+
+  it('pasaje: objetivo con dias_viaje vacío (bypass defensivo del CHECK, drift hipotético) → abort, sin marcar', async () => {
+    // pasaje_requests_dias_viaje_no_vacio prohíbe '{}' en cualquier INSERT
+    // normal — este caso solo es alcanzable si el CHECK se pierde (drift de
+    // esquema). Se levanta el CHECK temporalmente en una conexión aparte
+    // (auto-commit, fuera de la transacción rolled-back de asUser) para
+    // poder ejercitar la guarda de la RPC igual, y se restaura en el finally
+    // — mismo patrón que los tests de atomicidad de este archivo.
+    const setupClient = new Client({ connectionString: DB_URL });
+    await setupClient.connect();
+    const id = 'f5000000-0000-0000-0005-000000000002';
+    try {
+      await setupClient.query(`ALTER TABLE pasaje_requests DROP CONSTRAINT pasaje_requests_dias_viaje_no_vacio`);
+      await setupClient.query(
+        `INSERT INTO pasaje_requests
+           (id, solicitante_id, empleado_id, motivo_viaje, fecha_viaje, origen, destino, dias_viaje, estado, reviewed_by, reviewed_at)
+         VALUES ($1, $2, $2, 'traslado_proyectos', '2027-11-05', 'Base', 'Sitio', ARRAY[]::date[], 'aprobado', $3, now())`,
+        [id, IDS.employee2, IDS.admin]
+      );
+
+      await asUser(IDS.admin, async (c) => {
+        await callExpectingThrow(c, `SELECT public.cancelar_editar_pasaje_aprobado($1, 'cancelar', 'x')`, [id]);
+
+        const { rows } = await c.query(`SELECT post_aprobacion_tipo FROM pasaje_requests WHERE id = $1`, [id]);
+        expect(rows[0].post_aprobacion_tipo).toBeNull();
+      });
+    } finally {
+      await setupClient.query(`DELETE FROM pasaje_requests WHERE id = $1`, [id]);
+      await setupClient.query(`
+        ALTER TABLE pasaje_requests
+        ADD CONSTRAINT pasaje_requests_dias_viaje_no_vacio
+        CHECK (dias_viaje IS NULL OR cardinality(dias_viaje) >= 1)
+      `);
+      await setupClient.end();
+    }
+  });
+
+  it('ausencia: objetivo con reviewed_at NULL (bypass defensivo del CHECK, drift hipotético) → abort, sin marcar', async () => {
+    // ausencia_requests_resolucion_completa exige reviewed_by/reviewed_at no
+    // nulos cuando estado='aprobado' — este caso solo es alcanzable si ese
+    // CHECK se pierde. Mismo patrón de bypass temporal que el test anterior.
+    const setupClient = new Client({ connectionString: DB_URL });
+    await setupClient.connect();
+    const id = 'f5000000-0000-0000-0005-000000000001';
+    try {
+      await setupClient.query(`ALTER TABLE ausencia_requests DROP CONSTRAINT ausencia_requests_resolucion_completa`);
+      await setupClient.query(
+        `INSERT INTO ausencia_requests (id, user_id, motivo_ausencia, fecha_inicio, fecha_fin, estado, reviewed_by, reviewed_at)
+         VALUES ($1, $2, 'vacaciones', '2027-11-01', '2027-11-01', 'aprobado', NULL, NULL)`,
+        [id, IDS.employee2]
+      );
+
+      await asUser(IDS.admin, async (c) => {
+        await callExpectingThrow(c, `SELECT public.cancelar_editar_ausencia_aprobada($1, 'cancelar', 'x')`, [id]);
+
+        const { rows } = await c.query(`SELECT post_aprobacion_tipo FROM ausencia_requests WHERE id = $1`, [id]);
+        expect(rows[0].post_aprobacion_tipo).toBeNull();
+      });
+    } finally {
+      await setupClient.query(`DELETE FROM ausencia_requests WHERE id = $1`, [id]);
+      await setupClient.query(`
+        ALTER TABLE ausencia_requests
+        ADD CONSTRAINT ausencia_requests_resolucion_completa
+        CHECK (estado = 'pendiente' OR (reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL))
+      `);
+      await setupClient.end();
+    }
+  });
 });
 
 // ─── Editar fechas ──────────────────────────────────────────────
@@ -633,6 +754,52 @@ describe.skipIf(!dbAvailable)('cancelar_editar_ausencia_aprobada / cancelar_edit
         `SELECT public.cancelar_editar_pasaje_aprobado($1, 'editar_fechas', 'x', NULL)`,
         ['f4000000-0000-0000-0004-000000000002']
       );
+    });
+  });
+
+  // ─── FB-F4-13: rango invertido (FB-F4-AUD-08 Hallazgo Alto) ────────────
+
+  it('ausencia: editar_fechas con rango invertido (fecha_fin < fecha_inicio) → abort, nada persiste', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const id = 'f4000000-0000-0000-0004-000000000001'; // EDIT_AUSENCIA_OK, 2027-09-01..03
+      await callExpectingThrow(
+        c,
+        `SELECT public.cancelar_editar_ausencia_aprobada($1, 'editar_fechas', 'x', '2027-09-10', '2027-09-05')`,
+        [id]
+      );
+
+      const { rows: reqRows } = await c.query(
+        `SELECT fecha_inicio::text AS fecha_inicio, fecha_fin::text AS fecha_fin, post_aprobacion_tipo FROM ausencia_requests WHERE id = $1`,
+        [id]
+      );
+      expect(reqRows[0].fecha_inicio).toBe('2027-09-01');
+      expect(reqRows[0].fecha_fin).toBe('2027-09-03');
+      expect(reqRows[0].post_aprobacion_tipo).toBeNull();
+
+      // Los días viejos siguen intactos: la guarda abortó ANTES del borrado.
+      const { rows: calRows } = await c.query(
+        `SELECT * FROM rotation_assignments WHERE user_id = $1 AND fecha BETWEEN '2027-09-01' AND '2027-09-03'`,
+        [IDS.employee1]
+      );
+      expect(calRows).toHaveLength(3);
+    });
+  });
+
+  it('ausencia: editar_fechas con fecha_inicio = fecha_fin (un solo día) sigue permitido', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const id = 'f4000000-0000-0000-0004-000000000001'; // EDIT_AUSENCIA_OK
+      await c.query(
+        `SELECT public.cancelar_editar_ausencia_aprobada($1, 'editar_fechas', 'un solo día', '2027-09-08', '2027-09-08')`,
+        [id]
+      );
+
+      const { rows: reqRows } = await c.query(
+        `SELECT fecha_inicio::text AS fecha_inicio, fecha_fin::text AS fecha_fin, post_aprobacion_tipo FROM ausencia_requests WHERE id = $1`,
+        [id]
+      );
+      expect(reqRows[0].fecha_inicio).toBe('2027-09-08');
+      expect(reqRows[0].fecha_fin).toBe('2027-09-08');
+      expect(reqRows[0].post_aprobacion_tipo).toBe('editada');
     });
   });
 
