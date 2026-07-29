@@ -91,6 +91,7 @@ function DetalleCell({ item }: { item: AprobadaItem }) {
             {copy.aprobaciones.detallePasaje.paraLabel}: {paraNombre}
           </div>
         )}
+        {req.notas && <div className="text-xs mt-0.5">{req.notas}</div>}
       </>
     );
   }
@@ -100,6 +101,7 @@ function DetalleCell({ item }: { item: AprobadaItem }) {
     <>
       <div>{motivoAusenciaLabel(req.motivo_ausencia, req.motivo_otros_texto)}</div>
       <div className="text-xs mt-0.5">{formatRangoAusencia(req.fecha_inicio, req.fecha_fin)}</div>
+      {req.notas && <div className="text-xs mt-0.5">{req.notas}</div>}
     </>
   );
 }
