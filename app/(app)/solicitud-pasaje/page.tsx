@@ -9,7 +9,10 @@ import { MisSolicitudesPasajeTable } from './MisSolicitudesPasajeTable';
 import type { PasajeRequest, Profile } from '@/lib/db-types';
 
 type EmpleadoPick = Pick<Profile, 'full_name' | 'email'>;
-export type PasajeRequestWithEmpleado = PasajeRequest & { empleado_profile?: EmpleadoPick | null };
+export type PasajeRequestWithEmpleado = PasajeRequest & {
+  empleado_profile?: EmpleadoPick | null;
+  solicitante_profile?: EmpleadoPick | null;
+};
 
 export default async function SolicitudPasajePage() {
   const profile = await requireAuth();
@@ -53,14 +56,23 @@ export default async function SolicitudPasajePage() {
     team = (teamRaw ?? []) as TeamMember[];
   }
 
-  // RLS ya filtra por dueño/equipo; se agrega el filtro de app explícito para
-  // que "Mis solicitudes" muestre únicamente lo que YO envié como solicitante
-  // (un supervisor puede enviar para un integrante de su equipo — la lista
-  // sigue siendo "lo que pedí", no "lo que me pidieron a mí").
+  // RLS ya filtra por dueño/equipo (policy pasajes_select permite
+  // solicitante_id = auth.uid() O empleado_id = auth.uid()); el filtro de app
+  // explícito amplía "Mis solicitudes" a las DOS perspectivas — lo que YO
+  // pedí (solicitante) y lo que ME pidieron a mí (empleado viajero, cuando
+  // un supervisor pide para su equipo). FB-F4-15: antes solo filtraba por
+  // solicitante_id, así que el empleado viajero nunca veía la fila (ni su
+  // marca post-aprobación) cuando otra persona la había solicitado — recibía
+  // el mail pero sin representación in-app (viola §2.4). Un solo .or() sobre
+  // una tabla no duplica filas (no es una UNION de dos queries), así que la
+  // fila donde solicitante_id = empleado_id = profile.id sigue apareciendo
+  // una sola vez — no hace falta dedup explícito en JS.
   const { data, error } = await supabase
     .from('pasaje_requests')
-    .select('*, empleado_profile:profiles!pasaje_requests_empleado_id_fkey(full_name, email)')
-    .eq('solicitante_id', profile.id)
+    .select(
+      '*, empleado_profile:profiles!pasaje_requests_empleado_id_fkey(full_name, email), solicitante_profile:profiles!pasaje_requests_solicitante_id_fkey(full_name, email)'
+    )
+    .or(`solicitante_id.eq.${profile.id},empleado_id.eq.${profile.id}`)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -77,7 +89,7 @@ export default async function SolicitudPasajePage() {
   return (
     <div className="space-y-6">
       <SolicitudPasajeForm team={team} showEmpleadoSelector={profile.role === 'supervisor'} />
-      <MisSolicitudesPasajeTable requests={requests} />
+      <MisSolicitudesPasajeTable requests={requests} viewerId={profile.id} />
     </div>
   );
 }

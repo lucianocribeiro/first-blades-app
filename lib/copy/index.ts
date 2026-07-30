@@ -371,6 +371,13 @@ export const copy = {
       message:   'Como administrador, gestionás estas solicitudes desde Aprobaciones.',
       linkLabel: 'Ir a Aprobaciones',
     },
+    // FB-F4-15: "Mis solicitudes" ahora incluye pasajes donde el usuario es
+    // solicitante O empleado viajero — dos perspectivas posibles sobre la
+    // misma fila, así que el label de "para quién" cambia según quién sea.
+    detalle: {
+      paraLabel:     'Para',
+      pedidoPorLabel:'Pedido por',
+    },
   },
 
   adminEmpleado: {

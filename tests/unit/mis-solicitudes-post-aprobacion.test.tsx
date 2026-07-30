@@ -105,7 +105,7 @@ describe('MisSolicitudesTable: marca post-aprobación (ausencia)', () => {
 
 describe('MisSolicitudesPasajeTable: marca post-aprobación (pasaje)', () => {
   it('sin cambio: la columna existe y no hay badge de post-aprobación', () => {
-    render(<MisSolicitudesPasajeTable requests={[pasajeRequest()]} />);
+    render(<MisSolicitudesPasajeTable requests={[pasajeRequest()]} viewerId="emp-1" />);
     expect(screen.getByText(copy.solicitudPasaje.table.postAprobacion)).toBeInTheDocument();
     expect(screen.queryByText(copy.status.cancelada)).not.toBeInTheDocument();
     expect(screen.queryByText(copy.status.editada)).not.toBeInTheDocument();
@@ -121,9 +121,36 @@ describe('MisSolicitudesPasajeTable: marca post-aprobación (pasaje)', () => {
             post_aprobacion_at: '2027-02-01T10:00:00Z',
           }),
         ]}
+        viewerId="emp-1"
       />
     );
     expect(screen.getByText(copy.status.cancelada)).toBeInTheDocument();
     expect(screen.getByText('Viaje suspendido')).toBeInTheDocument();
+  });
+
+  // FB-F4-15: el mismo caso, pero ahora la solicitud la pidió otra persona
+  // (un supervisor) — el empleado viajero SIGUE viendo la marca, y la
+  // columna "para quién" identifica quién la pidió, no a sí mismo.
+  it('FB-F4-15: pedido por otra persona (supervisor) — el viajero ve la marca y "Pedido por"', () => {
+    render(
+      <MisSolicitudesPasajeTable
+        requests={[
+          pasajeRequest({
+            solicitante_id: 'sup-1',
+            empleado_id: 'emp-1',
+            solicitante_profile: { full_name: 'Supervisor Test', email: 'sup@test.com' },
+            post_aprobacion_tipo: 'cancelada',
+            comentario_post_aprobacion: 'Viaje suspendido',
+            post_aprobacion_at: '2027-02-01T10:00:00Z',
+          }),
+        ]}
+        viewerId="emp-1"
+      />
+    );
+    expect(screen.getByText(copy.status.cancelada)).toBeInTheDocument();
+    expect(screen.getByText('Viaje suspendido')).toBeInTheDocument();
+    expect(
+      screen.getByText(`${copy.solicitudPasaje.detalle.pedidoPorLabel}: Supervisor Test`)
+    ).toBeInTheDocument();
   });
 });

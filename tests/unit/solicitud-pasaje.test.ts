@@ -424,16 +424,19 @@ describe('SolicitudPasajePage: branch por rol', () => {
     const teamEqMock = vi.fn().mockReturnValue({ or: teamOrMock });
     const teamSelectMock = vi.fn().mockReturnValue({ eq: teamEqMock });
 
+    // FB-F4-15: "Mis solicitudes" ahora filtra por solicitante_id OR
+    // empleado_id (un solo .or(), no una eq) — el empleado viajero tiene que
+    // ver la fila aunque otra persona (su supervisor) la haya solicitado.
     const requestsOrderMock = vi.fn().mockResolvedValue({ data: requests, error: requestsError });
-    const requestsEqMock = vi.fn().mockReturnValue({ order: requestsOrderMock });
-    const requestsSelectMock = vi.fn().mockReturnValue({ eq: requestsEqMock });
+    const requestsOrMock = vi.fn().mockReturnValue({ order: requestsOrderMock });
+    const requestsSelectMock = vi.fn().mockReturnValue({ or: requestsOrMock });
 
     const fromMock = vi.fn((table: string) =>
       table === 'profiles' ? { select: teamSelectMock } : { select: requestsSelectMock }
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(createServerClient).mockResolvedValue({ from: fromMock } as any);
-    return { teamEqMock, teamOrMock, requestsEqMock, requestsOrderMock };
+    return { teamEqMock, teamOrMock, requestsOrMock, requestsOrderMock };
   }
 
   it('admin: modo consulta, sin formulario de envío', async () => {
@@ -446,14 +449,14 @@ describe('SolicitudPasajePage: branch por rol', () => {
     expect((result as any).type).toBe(Card);
   });
 
-  it('empleado: recibe el formulario sin selector de equipo y su lista propia filtrada por solicitante_id', async () => {
+  it('empleado: recibe el formulario sin selector de equipo y su lista propia (solicitante O empleado viajero)', async () => {
     mockProfile('empleado', 'emp-1');
     const requests = [{ id: 'p1', solicitante_id: 'emp-1', empleado_id: 'emp-1', estado: 'pendiente' }];
-    const { requestsEqMock } = mockPageQueries({ requests });
+    const { requestsOrMock } = mockPageQueries({ requests });
 
     const result = await SolicitudPasajePage();
 
-    expect(requestsEqMock).toHaveBeenCalledWith('solicitante_id', 'emp-1');
+    expect(requestsOrMock).toHaveBeenCalledWith('solicitante_id.eq.emp-1,empleado_id.eq.emp-1');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const children = (result as any).props.children as any[];
@@ -463,23 +466,50 @@ describe('SolicitudPasajePage: branch por rol', () => {
     expect(form.props.showEmpleadoSelector).toBe(false);
     expect(form.props.team).toEqual([]);
     expect(table.props.requests).toEqual(requests);
+    expect(table.props.viewerId).toBe('emp-1');
   });
 
   it('supervisor: recibe el formulario CON selector de equipo (self + su equipo) y su lista propia', async () => {
     mockProfile('supervisor', 'sup-1');
     const team = [{ id: 'sup-1', full_name: 'Supervisor Test', email: 'sup@test.com' }];
-    const { teamEqMock, teamOrMock, requestsEqMock } = mockPageQueries({ team });
+    const { teamEqMock, teamOrMock, requestsOrMock } = mockPageQueries({ team });
 
     const result = await SolicitudPasajePage();
 
     expect(teamEqMock).toHaveBeenCalledWith('status', 'activo');
     expect(teamOrMock).toHaveBeenCalledWith('id.eq.sup-1,supervisor_id.eq.sup-1');
-    expect(requestsEqMock).toHaveBeenCalledWith('solicitante_id', 'sup-1');
+    expect(requestsOrMock).toHaveBeenCalledWith('solicitante_id.eq.sup-1,empleado_id.eq.sup-1');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const children = (result as any).props.children as any[];
     const form = children.find((c) => c?.type === SolicitudPasajeForm);
     expect(form.props.showEmpleadoSelector).toBe(true);
     expect(form.props.team).toEqual(team);
+  });
+
+  it('FB-F4-15: empleado viajero ve la solicitud aunque el solicitante sea otra persona (supervisor)', async () => {
+    mockProfile('empleado', 'emp-1');
+    const requests = [
+      {
+        id: 'p1',
+        solicitante_id: 'sup-1',
+        empleado_id: 'emp-1',
+        estado: 'aprobado',
+        post_aprobacion_tipo: 'cancelada',
+        comentario_post_aprobacion: 'Se canceló el viaje',
+        post_aprobacion_at: '2027-01-01T00:00:00Z',
+        solicitante_profile: { full_name: 'Supervisor Test', email: 'sup@test.com' },
+        empleado_profile: { full_name: 'Empleado Test', email: 'emp-1@test.com' },
+      },
+    ];
+    mockPageQueries({ requests });
+
+    const result = await SolicitudPasajePage();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const children = (result as any).props.children as any[];
+    const table = children.find((c) => c?.type === MisSolicitudesPasajeTable);
+    expect(table.props.requests).toEqual(requests);
+    expect(table.props.viewerId).toBe('emp-1');
   });
 });
