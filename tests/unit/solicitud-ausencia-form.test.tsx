@@ -10,8 +10,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
+// FB-F4-16: createAusenciaRequest devuelve { ok, error } en vez de tirar.
 vi.mock('@/app/(app)/solicitud-ausencia/actions', () => ({
-  createAusenciaRequest: vi.fn().mockResolvedValue(undefined),
+  createAusenciaRequest: vi.fn().mockResolvedValue({ ok: true }),
 }));
 
 import { SolicitudAusenciaForm } from '@/app/(app)/solicitud-ausencia/SolicitudAusenciaForm';

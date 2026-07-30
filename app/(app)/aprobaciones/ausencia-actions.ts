@@ -20,7 +20,16 @@ import type { MotivoAusencia } from '@/lib/db-types';
 // bypassear RLS con el cliente admin porque ahí no hay RPC que eleve privilegios.
 type ServerSupabase = Awaited<ReturnType<typeof createServerClient>>;
 
-export type ResolveAusenciaResult = { emailSent: boolean };
+// FB-F4-16: contrato return-based — { ok:true, emailSent } | { ok:false, error }.
+// En un build de producción, Next.js redacta el mensaje de CUALQUIER error
+// que cruce el límite de una Server Action (`throw new Error(mensajeAmigable)`
+// llegaba al cliente como "An error occurred in the Server Components
+// render...", nunca el texto en español) — encontrado y confirmado contra CI
+// real en FB-F4-14 §8 para aprobadas/actions.ts; mismo patrón, mismo bug acá.
+// Un valor de retorno normal no pasa por esa redacción.
+export type ResolveAusenciaResult =
+  | { ok: true; emailSent: boolean }
+  | { ok: false; error: string };
 
 // Re-lee la solicitud ANTES de invocar la RPC: la RPC valida admin + estado
 // pendiente por dentro, pero esta re-lectura server-side es la que da un
@@ -35,20 +44,15 @@ export type ResolveAusenciaResult = { emailSent: boolean };
 // chequeo se retira — el único scope que queda es "pendiente". La RLS y la
 // guarda de la RPC nunca limitaron el motivo por diseño; ese límite siempre
 // vivió acá, y ahora el límite correcto es "cualquier ausencia pendiente".
-async function assertPendiente(supabase: ServerSupabase, requestId: string): Promise<void> {
+async function isPendiente(supabase: ServerSupabase, requestId: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('ausencia_requests')
     .select('estado')
     .eq('id', requestId)
     .single();
 
-  if (error || !data) {
-    throw new Error(copy.aprobaciones.messages.alreadyResolved);
-  }
-  const row = data as { estado: string };
-  if (row.estado !== 'pendiente') {
-    throw new Error(copy.aprobaciones.messages.alreadyResolved);
-  }
+  if (error || !data) return false;
+  return (data as { estado: string }).estado === 'pendiente';
 }
 
 // Vuelve a leer la solicitud + el perfil del dueño DESPUÉS de resolverla, para
@@ -84,7 +88,9 @@ export async function approveAusencia(requestId: string): Promise<ResolveAusenci
   await requireAdmin();
   const supabase = await createServerClient();
 
-  await assertPendiente(supabase, requestId);
+  if (!(await isPendiente(supabase, requestId))) {
+    return { ok: false, error: copy.aprobaciones.messages.alreadyResolved };
+  }
 
   // El cliente de createServerClient() (@supabase/ssr) colapsa el genérico de
   // postgrest-js a `never`/`undefined` en .rpc() (mismo bug ya documentado
@@ -100,10 +106,10 @@ export async function approveAusencia(requestId: string): Promise<ResolveAusenci
     const friendly = translateResolverAusenciaError(error);
     if (friendly) {
       revalidatePath('/aprobaciones');
-      throw new Error(friendly);
+      return { ok: false, error: friendly };
     }
     console.error('[approveAusencia] error al invocar resolver_ausencia_request:', error.message);
-    throw new Error(copy.errors.generic);
+    return { ok: false, error: copy.errors.generic };
   }
 
   // La resolución ya está commiteada (fuente de verdad); todo lo que sigue
@@ -135,17 +141,19 @@ export async function approveAusencia(requestId: string): Promise<ResolveAusenci
     console.error('[email] fallo al notificar aprobación de ausencia:', emailErr);
   }
 
-  return { emailSent };
+  return { ok: true, emailSent };
 }
 
 export async function rejectAusencia(requestId: string, motivo: string): Promise<ResolveAusenciaResult> {
   const trimmed = motivo.trim();
-  if (!trimmed) throw new Error(copy.aprobaciones.rejectModal.motivoRequired);
+  if (!trimmed) return { ok: false, error: copy.aprobaciones.rejectModal.motivoRequired };
 
   await requireAdmin();
   const supabase = await createServerClient();
 
-  await assertPendiente(supabase, requestId);
+  if (!(await isPendiente(supabase, requestId))) {
+    return { ok: false, error: copy.aprobaciones.messages.alreadyResolved };
+  }
 
   const { error } = await supabase.rpc('resolver_ausencia_request', {
     p_request_id:     requestId,
@@ -157,10 +165,10 @@ export async function rejectAusencia(requestId: string, motivo: string): Promise
     const friendly = translateResolverAusenciaError(error);
     if (friendly) {
       revalidatePath('/aprobaciones');
-      throw new Error(friendly);
+      return { ok: false, error: friendly };
     }
     console.error('[rejectAusencia] error al invocar resolver_ausencia_request:', error.message);
-    throw new Error(copy.errors.generic);
+    return { ok: false, error: copy.errors.generic };
   }
 
   revalidatePath('/aprobaciones');
@@ -190,5 +198,5 @@ export async function rejectAusencia(requestId: string, motivo: string): Promise
     console.error('[email] fallo al notificar rechazo de ausencia:', emailErr);
   }
 
-  return { emailSent };
+  return { ok: true, emailSent };
 }

@@ -102,7 +102,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
 
     await expect(
       createAusenciaRequest({ motivo: 'dia_tramite', fechaInicio: MANANA, fechaFin: MANANA })
-    ).rejects.toThrow(copy.errors.unauthorized);
+    ).resolves.toEqual({ ok: false, error: copy.errors.unauthorized });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -113,7 +113,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       createAusenciaRequest({ motivo: '' as any, fechaInicio: MANANA, fechaFin: MANANA })
-    ).rejects.toThrow(copy.solicitudAusencia.errors.motivoRequerido);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.motivoRequerido });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -123,7 +123,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
 
     await expect(
       createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: '', fechaFin: '' })
-    ).rejects.toThrow(copy.solicitudAusencia.errors.fechaRequerida);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.fechaRequerida });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -133,7 +133,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
 
     await expect(
       createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: '2027-07-10', fechaFin: '2027-07-05' })
-    ).rejects.toThrow(copy.solicitudAusencia.errors.fechaFinAnteriorAInicio);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.fechaFinAnteriorAInicio });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -151,7 +151,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
 
     await expect(
       createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: ayerIso, fechaFin: ayerIso })
-    ).rejects.toThrow(copy.solicitudAusencia.errors.fechaRetroactiva);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.fechaRetroactiva });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -161,7 +161,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
 
     await expect(
       createAusenciaRequest({ motivo: 'otros', fechaInicio: MANANA, fechaFin: MANANA })
-    ).rejects.toThrow(copy.solicitudAusencia.errors.motivoOtrosRequerido);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.motivoOtrosRequerido });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -176,7 +176,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
         fechaFin: MANANA,
         motivoOtrosTexto: 'x'.repeat(81),
       })
-    ).rejects.toThrow(copy.solicitudAusencia.errors.motivoOtrosMaximo);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.motivoOtrosMaximo });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -278,7 +278,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
 
     await expect(
       createAusenciaRequest({ motivo: 'licencia_medica', fechaInicio: MANANA, fechaFin: MANANA })
-    ).rejects.toThrow(copy.solicitudAusencia.errors.pendienteDuplicada);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.pendienteDuplicada });
   });
 
   it('otros errores de Supabase se traducen al genérico es-AR, nunca se tragan ni muestran crudos', async () => {
@@ -287,7 +287,7 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
 
     await expect(
       createAusenciaRequest({ motivo: 'dia_tramite', fechaInicio: MANANA, fechaFin: MANANA })
-    ).rejects.toThrow(copy.errors.generic);
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
   });
 });
 

@@ -92,7 +92,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [MANANA],
       })
-    ).rejects.toThrow(copy.errors.unauthorized);
+    ).resolves.toEqual({ ok: false, error: copy.errors.unauthorized });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -108,7 +108,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [MANANA],
       })
-    ).rejects.toThrow(copy.solicitudPasaje.errors.motivoRequerido);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.motivoRequerido });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -123,7 +123,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [MANANA],
       })
-    ).rejects.toThrow(copy.solicitudPasaje.errors.origenRequerido);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.origenRequerido });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -138,7 +138,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: '',
         diasViaje: [MANANA],
       })
-    ).rejects.toThrow(copy.solicitudPasaje.errors.destinoRequerido);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.destinoRequerido });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -153,7 +153,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [],
       })
-    ).rejects.toThrow(copy.solicitudPasaje.errors.diasRequeridos);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.diasRequeridos });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -169,7 +169,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [MANANA, ayer],
       })
-    ).rejects.toThrow(copy.solicitudPasaje.errors.diaRetroactivo);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.diaRetroactivo });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -245,7 +245,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [MANANA],
       })
-    ).rejects.toThrow(copy.solicitudPasaje.errors.empleadoRequerido);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.empleadoRequerido });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -298,7 +298,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [MANANA],
       })
-    ).rejects.toThrow(copy.solicitudPasaje.errors.empleadoFueraDeEquipo);
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.empleadoFueraDeEquipo });
     expect(insertMock).not.toHaveBeenCalled();
   });
 
@@ -315,7 +315,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [MANANA],
       })
-    ).rejects.toThrow(copy.errors.generic);
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
     expect(insertMock).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
@@ -332,7 +332,7 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
         destino: 'Sitio',
         diasViaje: [MANANA],
       })
-    ).rejects.toThrow(copy.errors.generic);
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
     errorSpy.mockRestore();
   });
 });

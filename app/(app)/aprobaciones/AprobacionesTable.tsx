@@ -275,12 +275,27 @@ export function AprobacionesTable({
     startTransition(async () => {
       try {
         if (item.kind === 'documento') {
+          // approveDocument (aprobaciones/actions.ts, documentos) sigue con
+          // el patrón throw — fuera de alcance de FB-F4-16 (solo ausencia y
+          // pasaje). Mismo bug de redacción en prod, documentado y no
+          // tocado, ver docs/prompts/FB-F4-16.md.
           await approveDocument(item.data.id);
         } else if (item.kind === 'pasaje') {
+          // FB-F4-16: approvePasaje/approveAusencia devuelven { ok, ... } en
+          // vez de tirar — Next.js redacta el mensaje de un throw que cruce
+          // el límite de una Server Action en build de producción.
           const result = await approvePasaje(item.data.id);
+          if (!result.ok) {
+            setActionError(result.error);
+            return;
+          }
           if (!result.emailSent) setActionNotice(copy.aprobaciones.messages.resolvedEmailFailed);
         } else {
           const result = await approveAusencia(item.data.id);
+          if (!result.ok) {
+            setActionError(result.error);
+            return;
+          }
           if (!result.emailSent) setActionNotice(copy.aprobaciones.messages.resolvedEmailFailed);
         }
       } catch (err) {
@@ -301,9 +316,17 @@ export function AprobacionesTable({
           await rejectDocument(item.data.id, motivo);
         } else if (item.kind === 'pasaje') {
           const result = await rejectPasaje(item.data.id, motivo);
+          if (!result.ok) {
+            setActionError(result.error);
+            return;
+          }
           if (!result.emailSent) setActionNotice(copy.aprobaciones.messages.resolvedEmailFailed);
         } else {
           const result = await rejectAusencia(item.data.id, motivo);
+          if (!result.ok) {
+            setActionError(result.error);
+            return;
+          }
           if (!result.emailSent) setActionNotice(copy.aprobaciones.messages.resolvedEmailFailed);
         }
       } catch (err) {

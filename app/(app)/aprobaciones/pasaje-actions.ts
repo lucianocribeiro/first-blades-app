@@ -22,26 +22,27 @@ import type { MotivoViaje } from '@/lib/db-types';
 // que ausencia-actions.ts.
 type ServerSupabase = Awaited<ReturnType<typeof createServerClient>>;
 
-export type ResolvePasajeResult = { emailSent: boolean };
+// FB-F4-16: mismo fix que ausencia-actions.ts — contrato return-based en vez
+// de throw, porque Next.js redacta el mensaje de cualquier error que cruce
+// el límite de una Server Action en un build de producción (confirmado
+// contra CI real en FB-F4-14 §8).
+export type ResolvePasajeResult =
+  | { ok: true; emailSent: boolean }
+  | { ok: false; error: string };
 
 // Re-lee la solicitud ANTES de invocar la RPC — mismo criterio que
-// assertPendiente en ausencia-actions.ts: da un error amigable de "ya fue
+// isPendiente en ausencia-actions.ts: da un error amigable de "ya fue
 // resuelta" sin depender del texto crudo de Postgres, y evita invocar la RPC
 // (y el mail) para un requestId ya resuelto o inexistente.
-async function assertPendiente(supabase: ServerSupabase, requestId: string): Promise<void> {
+async function isPendiente(supabase: ServerSupabase, requestId: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('pasaje_requests')
     .select('estado')
     .eq('id', requestId)
     .single();
 
-  if (error || !data) {
-    throw new Error(copy.aprobaciones.messages.alreadyResolved);
-  }
-  const row = data as { estado: string };
-  if (row.estado !== 'pendiente') {
-    throw new Error(copy.aprobaciones.messages.alreadyResolved);
-  }
+  if (error || !data) return false;
+  return (data as { estado: string }).estado === 'pendiente';
 }
 
 // Vuelve a leer la solicitud + el perfil del EMPLEADO (quien viaja, no
@@ -76,7 +77,9 @@ export async function approvePasaje(requestId: string): Promise<ResolvePasajeRes
   await requireAdmin();
   const supabase = await createServerClient();
 
-  await assertPendiente(supabase, requestId);
+  if (!(await isPendiente(supabase, requestId))) {
+    return { ok: false, error: copy.aprobaciones.messages.alreadyResolved };
+  }
 
   // El cliente de createServerClient() (@supabase/ssr) colapsa el genérico de
   // postgrest-js a `never`/`undefined` en .rpc() (mismo bug ya documentado en
@@ -91,10 +94,10 @@ export async function approvePasaje(requestId: string): Promise<ResolvePasajeRes
     const friendly = translateResolverAusenciaError(error);
     if (friendly) {
       revalidatePath('/aprobaciones');
-      throw new Error(friendly);
+      return { ok: false, error: friendly };
     }
     console.error('[approvePasaje] error al invocar resolver_pasaje_request:', error.message);
-    throw new Error(copy.errors.generic);
+    return { ok: false, error: copy.errors.generic };
   }
 
   // La resolución ya está commiteada (fuente de verdad); todo lo que sigue
@@ -126,17 +129,19 @@ export async function approvePasaje(requestId: string): Promise<ResolvePasajeRes
     console.error('[email] fallo al notificar aprobación de pasaje:', emailErr);
   }
 
-  return { emailSent };
+  return { ok: true, emailSent };
 }
 
 export async function rejectPasaje(requestId: string, motivo: string): Promise<ResolvePasajeResult> {
   const trimmed = motivo.trim();
-  if (!trimmed) throw new Error(copy.aprobaciones.rejectModal.motivoRequired);
+  if (!trimmed) return { ok: false, error: copy.aprobaciones.rejectModal.motivoRequired };
 
   await requireAdmin();
   const supabase = await createServerClient();
 
-  await assertPendiente(supabase, requestId);
+  if (!(await isPendiente(supabase, requestId))) {
+    return { ok: false, error: copy.aprobaciones.messages.alreadyResolved };
+  }
 
   const { error } = await supabase.rpc('resolver_pasaje_request', {
     p_request_id:     requestId,
@@ -148,10 +153,10 @@ export async function rejectPasaje(requestId: string, motivo: string): Promise<R
     const friendly = translateResolverAusenciaError(error);
     if (friendly) {
       revalidatePath('/aprobaciones');
-      throw new Error(friendly);
+      return { ok: false, error: friendly };
     }
     console.error('[rejectPasaje] error al invocar resolver_pasaje_request:', error.message);
-    throw new Error(copy.errors.generic);
+    return { ok: false, error: copy.errors.generic };
   }
 
   revalidatePath('/aprobaciones');
@@ -181,5 +186,5 @@ export async function rejectPasaje(requestId: string, motivo: string): Promise<R
     console.error('[email] fallo al notificar rechazo de pasaje:', emailErr);
   }
 
-  return { emailSent };
+  return { ok: true, emailSent };
 }

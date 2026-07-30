@@ -15,11 +15,17 @@ import {
 // selector de equipo); para empleado no se muestra el campo y no se envía.
 export type CreatePasajeFormInput = CreatePasajeInput & { empleadoId?: string };
 
-export async function createPasajeRequest(input: CreatePasajeFormInput): Promise<void> {
+// FB-F4-16: contrato return-based en vez de throw — mismo motivo que
+// solicitud-ausencia/actions.ts::createAusenciaRequest (Next.js redacta el
+// mensaje de cualquier error que cruce el límite de una Server Action en un
+// build de producción, confirmado contra CI real en FB-F4-14 §8).
+export type CreatePasajeResult = { ok: true } | { ok: false; error: string };
+
+export async function createPasajeRequest(input: CreatePasajeFormInput): Promise<CreatePasajeResult> {
   const profile = await requireAuth();
 
   // El formulario no se muestra a admin (modo consulta); doble chequeo en servidor.
-  if (profile.role === 'admin') throw new Error(copy.errors.unauthorized);
+  if (profile.role === 'admin') return { ok: false, error: copy.errors.unauthorized };
 
   const supabase = await createServerClient();
 
@@ -37,7 +43,7 @@ export async function createPasajeRequest(input: CreatePasajeFormInput): Promise
     empleadoId = profile.id;
   } else {
     const candidateId = input.empleadoId?.trim();
-    if (!candidateId) throw new Error(copy.solicitudPasaje.errors.empleadoRequerido);
+    if (!candidateId) return { ok: false, error: copy.solicitudPasaje.errors.empleadoRequerido };
 
     if (candidateId !== profile.id) {
       const { data: member, error: memberError } = await supabase
@@ -49,9 +55,9 @@ export async function createPasajeRequest(input: CreatePasajeFormInput): Promise
 
       if (memberError) {
         console.error('[createPasajeRequest] error al validar el equipo:', memberError.message);
-        throw new Error(copy.errors.generic);
+        return { ok: false, error: copy.errors.generic };
       }
-      if (!member) throw new Error(copy.solicitudPasaje.errors.empleadoFueraDeEquipo);
+      if (!member) return { ok: false, error: copy.solicitudPasaje.errors.empleadoFueraDeEquipo };
     }
     empleadoId = candidateId;
   }
@@ -65,7 +71,7 @@ export async function createPasajeRequest(input: CreatePasajeFormInput): Promise
     destino:     input.destino,
     diasViaje:   input.diasViaje,
   });
-  if (!result.valid) throw new Error(result.error);
+  if (!result.valid) return { ok: false, error: result.error };
 
   const insertData: PasajeRequestInsert[] = [
     buildPasajeInsertPayload(profile.id, empleadoId, input),
@@ -79,8 +85,9 @@ export async function createPasajeRequest(input: CreatePasajeFormInput): Promise
 
   if (error) {
     console.error('[createPasajeRequest] error al insertar:', error.message);
-    throw new Error(copy.errors.generic);
+    return { ok: false, error: copy.errors.generic };
   }
 
   revalidatePath('/solicitud-pasaje');
+  return { ok: true };
 }
