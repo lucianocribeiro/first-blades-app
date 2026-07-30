@@ -195,3 +195,99 @@ export async function seedPendingPasaje(opts: {
   if (error || !data) throw new Error(`[e2e] no se pudo sembrar el pasaje pendiente: ${error?.message}`);
   return data.id;
 }
+
+// ─── FB-F4-14: aprobadas (para /aprobadas — cancelar/editar + guarda LIFO) ─
+//
+// A diferencia de seedPendingAusencia/seedPendingPasaje, estas siembran
+// directo en estado='aprobado' (no pasan por la RPC resolver_*): la spec
+// ejerce cancelar_editar_ausencia_aprobada/cancelar_editar_pasaje_aprobado
+// (0017), no la resolución. reviewedAt es la clave del orden LIFO — para
+// simular una aprobación posterior que bloquea, sembrar con un reviewedAt
+// mayor que el del objetivo.
+
+export async function seedApprovedAusencia(opts: {
+  userId: string;
+  reviewedById: string;
+  fechaInicio: string;
+  fechaFin: string;
+  reviewedAt: string;
+  motivo?: MotivoAusencia;
+  // Marcador único para que la spec ubique SU fila sin ambigüedad.
+  nota?: string;
+}): Promise<string> {
+  const admin = createAdminClient();
+
+  if (opts.nota) {
+    const { data: existing } = await admin
+      .from('ausencia_requests')
+      .select('id')
+      .eq('user_id', opts.userId)
+      .eq('notas', opts.nota)
+      .limit(1)
+      .single();
+    if (existing) return existing.id;
+  }
+
+  const { data, error } = await admin
+    .from('ausencia_requests')
+    .insert({
+      user_id: opts.userId,
+      motivo_ausencia: opts.motivo ?? 'vacaciones',
+      fecha_inicio: opts.fechaInicio,
+      fecha_fin: opts.fechaFin,
+      notas: opts.nota ?? null,
+      estado: 'aprobado',
+      reviewed_by: opts.reviewedById,
+      reviewed_at: opts.reviewedAt,
+    })
+    .select('id')
+    .single();
+
+  if (error || !data) throw new Error(`[e2e] no se pudo sembrar la ausencia aprobada: ${error?.message}`);
+  return data.id;
+}
+
+export async function seedApprovedPasaje(opts: {
+  solicitanteId: string;
+  empleadoId: string;
+  reviewedById: string;
+  diasViaje: string[];
+  reviewedAt: string;
+  motivoViaje?: MotivoViaje;
+  // Marcador único (recorrido) para que la spec ubique SU fila sin ambigüedad.
+  destino?: string;
+}): Promise<string> {
+  const admin = createAdminClient();
+  const diasOrdenados = [...opts.diasViaje].sort();
+  const destino = opts.destino ?? 'Sitio remoto aprobado';
+
+  const { data: existing } = await admin
+    .from('pasaje_requests')
+    .select('id')
+    .eq('empleado_id', opts.empleadoId)
+    .eq('estado', 'aprobado')
+    .eq('destino', destino)
+    .limit(1)
+    .single();
+  if (existing) return existing.id;
+
+  const { data, error } = await admin
+    .from('pasaje_requests')
+    .insert({
+      solicitante_id: opts.solicitanteId,
+      empleado_id: opts.empleadoId,
+      motivo_viaje: opts.motivoViaje ?? 'traslado_proyectos',
+      fecha_viaje: diasOrdenados[0],
+      origen: 'Base',
+      destino,
+      dias_viaje: diasOrdenados,
+      estado: 'aprobado',
+      reviewed_by: opts.reviewedById,
+      reviewed_at: opts.reviewedAt,
+    })
+    .select('id')
+    .single();
+
+  if (error || !data) throw new Error(`[e2e] no se pudo sembrar el pasaje aprobado: ${error?.message}`);
+  return data.id;
+}

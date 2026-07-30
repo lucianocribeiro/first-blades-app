@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { requireAdmin } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { copy } from '@/lib/copy';
@@ -9,7 +10,10 @@ import {
   type DiaTramiteRow,
   type SaldoDiasTramite,
 } from '@/lib/rotation/saldo-dias-tramite';
-import type { AusenciaRequest, Document, EstadoDia, PasajeRequest, Profile } from '@/lib/db-types';
+import type { AusenciaRequest, Document, PasajeRequest, Profile } from '@/lib/db-types';
+import type { OverwriteDay, OverwriteStatus } from '@/lib/rotation/overwrite-status';
+
+export type { OverwriteDay, OverwriteStatus };
 
 type UserProfilePick = Pick<Profile, 'full_name' | 'email'>;
 
@@ -19,15 +23,6 @@ type RawPasaje = PasajeRequest & {
   solicitante_profile?: UserProfilePick | null;
   empleado_profile?: UserProfilePick | null;
 };
-
-// FB-F4-05: previsualización de sobrescritura — días del rango de la
-// solicitud que ya tienen fila en rotation_assignments.
-export type OverwriteDay = { fecha: string; estado_dia: EstadoDia; es_estimado: boolean };
-
-// FB-F4-06: estado por request de la previsualización. "no hay días a
-// sobrescribir" (ok, days=[]) y "no se pudo calcular" (error) son casos
-// distintos — antes ambos colapsaban a "sin aviso" cuando la query fallaba.
-export type OverwriteStatus = { status: 'ok'; days: OverwriteDay[] } | { status: 'error' };
 
 export default async function AprobacionesPage() {
   await requireAdmin();
@@ -172,9 +167,14 @@ export default async function AprobacionesPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold text-secondary">{copy.aprobaciones.title}</h2>
-        <p className="text-sm text-neutral mt-0.5">{copy.aprobaciones.subtitle}</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-secondary">{copy.aprobaciones.title}</h2>
+          <p className="text-sm text-neutral mt-0.5">{copy.aprobaciones.subtitle}</p>
+        </div>
+        <Link href="/aprobadas" className="text-sm font-medium text-primary hover:underline whitespace-nowrap">
+          {copy.aprobaciones.verAprobadas}
+        </Link>
       </div>
 
       <Card padding="sm">

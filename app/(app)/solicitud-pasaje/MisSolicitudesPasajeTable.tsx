@@ -7,17 +7,33 @@ import type { PasajeRequestWithEmpleado } from './page';
 
 type Props = {
   requests: PasajeRequestWithEmpleado[];
+  // FB-F4-15: "Mis solicitudes" ahora lista pasajes desde DOS perspectivas
+  // (lo que pedí como solicitante, y lo que me pidieron como empleado
+  // viajero) — se necesita saber quién está mirando para elegir el label
+  // correcto por fila.
+  viewerId: string;
 };
 
-// "Para quién" solo se muestra cuando difiere del propio solicitante — un
-// supervisor pidiendo para sí mismo no necesita ver su propio nombre repetido.
-function empleadoLabel(req: PasajeRequestWithEmpleado): string {
-  if (req.solicitante_id === req.empleado_id) return '—';
-  const p = req.empleado_profile;
+function nombreDe(p: { full_name: string | null; email: string | null } | null | undefined): string {
   return p?.full_name || p?.email || '—';
 }
 
-export function MisSolicitudesPasajeTable({ requests }: Props) {
+// Perspectiva del viewer sobre CADA fila:
+//  - Si el viewer es el solicitante: "—" cuando pidió para sí mismo
+//    (solicitante_id === empleado_id), o "Para: <viajero>" cuando pidió
+//    para otro integrante de su equipo.
+//  - Si el viewer NO es el solicitante (es el empleado viajero, la fila le
+//    llegó porque alguien más — su supervisor — pidió el pasaje para él):
+//    "Pedido por: <solicitante>".
+function paraQuienLabel(req: PasajeRequestWithEmpleado, viewerId: string): string {
+  if (req.solicitante_id === viewerId) {
+    if (req.solicitante_id === req.empleado_id) return '—';
+    return `${copy.solicitudPasaje.detalle.paraLabel}: ${nombreDe(req.empleado_profile)}`;
+  }
+  return `${copy.solicitudPasaje.detalle.pedidoPorLabel}: ${nombreDe(req.solicitante_profile)}`;
+}
+
+export function MisSolicitudesPasajeTable({ requests, viewerId }: Props) {
   return (
     <Card>
       <h3 className="text-base font-semibold text-secondary mb-4">
@@ -28,7 +44,7 @@ export function MisSolicitudesPasajeTable({ requests }: Props) {
           {
             key: 'empleado',
             header: copy.solicitudPasaje.table.empleado,
-            render: (r: PasajeRequestWithEmpleado) => empleadoLabel(r),
+            render: (r: PasajeRequestWithEmpleado) => paraQuienLabel(r, viewerId),
           },
           {
             key: 'motivo',
@@ -62,6 +78,27 @@ export function MisSolicitudesPasajeTable({ requests }: Props) {
             header: copy.solicitudPasaje.table.motivoRechazo,
             render: (r: PasajeRequestWithEmpleado) =>
               r.estado === 'rechazado' ? (r.motivo_rechazo ?? '—') : '—',
+          },
+          {
+            key: 'postAprobacion',
+            header: copy.solicitudPasaje.table.postAprobacion,
+            // FB-F4-14 §3.7 — mismo criterio que MisSolicitudesTable.tsx (ausencia).
+            render: (r: PasajeRequestWithEmpleado) =>
+              r.post_aprobacion_tipo ? (
+                <div>
+                  <StatusBadge status={r.post_aprobacion_tipo} />
+                  {r.comentario_post_aprobacion && (
+                    <div className="text-xs mt-1">{r.comentario_post_aprobacion}</div>
+                  )}
+                  {r.post_aprobacion_at && (
+                    <div className="text-xs text-neutral mt-0.5">
+                      {new Date(r.post_aprobacion_at).toLocaleString('es-AR')}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                '—'
+              ),
           },
         ]}
         rows={requests}
