@@ -153,7 +153,7 @@ describe('approveAusencia: happy path', () => {
       motivoAusencia: 'dia_tramite',
       motivoOtrosTexto: null,
     });
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
     expect(revalidatePath).toHaveBeenCalledWith('/calendario');
   });
@@ -174,7 +174,7 @@ describe('approveAusencia: happy path', () => {
     const result = await approveAusencia('req-1');
 
     expect(sendAusenciaApprovalEmail).not.toHaveBeenCalled();
-    expect(result).toEqual({ emailSent: false });
+    expect(result).toEqual({ ok: true, emailSent: false });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -184,7 +184,7 @@ describe('approveAusencia: happy path', () => {
     vi.mocked(sendAusenciaApprovalEmail).mockRejectedValueOnce(new Error('gmail caído'));
     mockClient();
 
-    await expect(approveAusencia('req-1')).resolves.toEqual({ emailSent: false });
+    await expect(approveAusencia('req-1')).resolves.toEqual({ ok: true, emailSent: false });
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('[email]'),
       expect.any(Error)
@@ -201,9 +201,7 @@ describe('rejectAusencia: happy path y validación', () => {
   it('motivo vacío: copy amigable, NO llama la RPC ni envía mail', async () => {
     const client = mockClient();
 
-    await expect(rejectAusencia('req-1', '   ')).rejects.toThrow(
-      copy.aprobaciones.rejectModal.motivoRequired
-    );
+    await expect(rejectAusencia('req-1', '   ')).resolves.toEqual({ ok: false, error: copy.aprobaciones.rejectModal.motivoRequired });
     expect(client.rpc).not.toHaveBeenCalled();
     expect(sendAusenciaRejectionEmail).not.toHaveBeenCalled();
   });
@@ -230,7 +228,7 @@ describe('rejectAusencia: happy path y validación', () => {
       motivoOtrosTexto: null,
       motivoRechazo: 'No corresponde',
     });
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 });
 
@@ -244,7 +242,7 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
       rpcError: { message: 'La solicitud req-1 ya fue resuelta (estado actual: aprobado)', code: '22023' },
     });
 
-    await expect(approveAusencia('req-1')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    await expect(approveAusencia('req-1')).resolves.toEqual({ ok: false, error: copy.aprobaciones.messages.alreadyResolved });
     expect(sendAusenciaApprovalEmail).not.toHaveBeenCalled();
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
   });
@@ -254,7 +252,7 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
       rpcError: { message: 'La solicitud req-1 ya fue resuelta (estado actual: rechazado)', code: '22023' },
     });
 
-    await expect(rejectAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    await expect(rejectAusencia('req-1', 'motivo')).resolves.toEqual({ ok: false, error: copy.aprobaciones.messages.alreadyResolved });
     expect(sendAusenciaRejectionEmail).not.toHaveBeenCalled();
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
   });
@@ -292,7 +290,7 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
         motivoAusencia: 'vacaciones',
       })
     );
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 
   it('rejectAusencia: motivo "otros" → mail generalizado re-lee motivo_otros_texto', async () => {
@@ -320,7 +318,7 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
         motivoRechazo: 'motivo',
       })
     );
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 
   it('approveAusencia: ya resuelta (estado aprobado) detectada en el pre-check → alreadyResolved, NO llega a invocar la RPC', async () => {
@@ -335,7 +333,7 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
       },
     });
 
-    await expect(approveAusencia('req-1')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    await expect(approveAusencia('req-1')).resolves.toEqual({ ok: false, error: copy.aprobaciones.messages.alreadyResolved });
     expect(client.rpc).not.toHaveBeenCalled();
     expect(sendAusenciaApprovalEmail).not.toHaveBeenCalled();
   });
@@ -343,7 +341,7 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
   it('approveAusencia: solicitud inexistente en el pre-check → alreadyResolved, NO llega a invocar la RPC', async () => {
     const client = mockClient({ requestData: null, requestError: { message: 'no rows' } });
 
-    await expect(approveAusencia('req-1')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    await expect(approveAusencia('req-1')).resolves.toEqual({ ok: false, error: copy.aprobaciones.messages.alreadyResolved });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
@@ -354,7 +352,7 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
 
     expect(client.rpc).toHaveBeenCalledTimes(1);
     expect(sendAusenciaApprovalEmail).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 
   it('regresión: día de trámite pendiente sigue resolviéndose normal (rechazar) y manda el mail con el motivo', async () => {
@@ -366,7 +364,7 @@ describe('scope de la cola (FB-F4-05): la bandeja resuelve ausencias de cualquie
     expect(sendAusenciaRejectionEmail).toHaveBeenCalledWith(
       expect.objectContaining({ motivoRechazo: 'motivo real' })
     );
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 });
 
@@ -379,7 +377,7 @@ describe('cualquier otro error de la RPC: no se traga', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockClient({ rpcError: { message: 'Solo un administrador puede resolver solicitudes de ausencia', code: '42501' } });
 
-    await expect(approveAusencia('req-1')).rejects.toThrow(copy.errors.generic);
+    await expect(approveAusencia('req-1')).resolves.toEqual({ ok: false, error: copy.errors.generic });
     expect(sendAusenciaApprovalEmail).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();

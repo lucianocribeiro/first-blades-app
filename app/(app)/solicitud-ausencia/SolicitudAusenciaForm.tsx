@@ -66,19 +66,22 @@ export function SolicitudAusenciaForm({ saldo }: Props) {
     }
 
     startTransition(async () => {
-      try {
-        await createAusenciaRequest({
-          motivo:           motivo as MotivoAusencia,
-          fechaInicio,
-          fechaFin:         fechaFinEfectiva,
-          motivoOtrosTexto: isOtros ? motivoOtrosTexto.trim() : undefined,
-          nota:             nota.trim() || undefined,
-        });
-        resetForm();
-        setSuccess(true);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : copy.errors.generic);
+      // FB-F4-16: createAusenciaRequest devuelve { ok, error } en vez de
+      // tirar — Next.js redacta el mensaje de un throw que cruce el límite
+      // de una Server Action en build de producción.
+      const result = await createAusenciaRequest({
+        motivo:           motivo as MotivoAusencia,
+        fechaInicio,
+        fechaFin:         fechaFinEfectiva,
+        motivoOtrosTexto: isOtros ? motivoOtrosTexto.trim() : undefined,
+        nota:             nota.trim() || undefined,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
       }
+      resetForm();
+      setSuccess(true);
     });
   }
 

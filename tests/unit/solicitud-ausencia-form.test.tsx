@@ -10,8 +10,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
+// FB-F4-16: createAusenciaRequest devuelve { ok, error } en vez de tirar.
 vi.mock('@/app/(app)/solicitud-ausencia/actions', () => ({
-  createAusenciaRequest: vi.fn().mockResolvedValue(undefined),
+  createAusenciaRequest: vi.fn().mockResolvedValue({ ok: true }),
 }));
 
 import { SolicitudAusenciaForm } from '@/app/(app)/solicitud-ausencia/SolicitudAusenciaForm';
@@ -189,5 +190,38 @@ describe('SolicitudAusenciaForm: validación de cliente (UX, no autoridad)', () 
       expect.objectContaining({ motivo: 'vacaciones', fechaInicio: '2027-07-01', fechaFin: '2027-07-05' })
     );
     await waitFor(() => expect(screen.getByText(copy.solicitudAusencia.messages.success)).toBeInTheDocument());
+  });
+});
+
+// ─── FB-F4-17: {ok:false} de la action se muestra, no queda tragado ────────
+
+describe('SolicitudAusenciaForm: {ok:false} de createAusenciaRequest se muestra (FB-F4-17)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('la action devuelve {ok:false, error} → el error se renderiza y el éxito NO se muestra', async () => {
+    // El mock por defecto del módulo resuelve {ok:true} (ver arriba) — acá se
+    // sobreescribe UNA vez para probar la rama que un futuro cambio podría
+    // volver a tragarse sin que un test lo note (aprendizaje Fase 3).
+    vi.mocked(createAusenciaRequest).mockResolvedValueOnce({
+      ok: false,
+      error: copy.solicitudAusencia.errors.pendienteDuplicada,
+    });
+
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    selectMotivo('vacaciones');
+    fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
+      target: { value: MANANA },
+    });
+    fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaFin, { exact: false }), {
+      target: { value: MANANA },
+    });
+    submitForm(container);
+
+    await waitFor(() =>
+      expect(screen.getByText(copy.solicitudAusencia.errors.pendienteDuplicada)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(copy.solicitudAusencia.messages.success)).not.toBeInTheDocument();
   });
 });

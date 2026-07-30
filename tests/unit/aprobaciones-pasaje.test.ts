@@ -150,7 +150,7 @@ describe('approvePasaje: happy path', () => {
       destino: 'Sitio',
       diasViaje: ['2027-06-16', '2027-06-17'],
     });
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
     expect(revalidatePath).toHaveBeenCalledWith('/calendario');
     expect(revalidatePath).toHaveBeenCalledWith('/solicitud-pasaje');
@@ -172,7 +172,7 @@ describe('approvePasaje: happy path', () => {
     const result = await approvePasaje('req-1');
 
     expect(sendPasajeApprovalEmail).not.toHaveBeenCalled();
-    expect(result).toEqual({ emailSent: false });
+    expect(result).toEqual({ ok: true, emailSent: false });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -182,7 +182,7 @@ describe('approvePasaje: happy path', () => {
     vi.mocked(sendPasajeApprovalEmail).mockRejectedValueOnce(new Error('gmail caído'));
     mockClient();
 
-    await expect(approvePasaje('req-1')).resolves.toEqual({ emailSent: false });
+    await expect(approvePasaje('req-1')).resolves.toEqual({ ok: true, emailSent: false });
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('[email]'),
       expect.any(Error)
@@ -207,7 +207,7 @@ describe('approvePasaje: happy path', () => {
     expect(sendPasajeApprovalEmail).toHaveBeenCalledWith(
       expect.objectContaining({ diasViaje: [] })
     );
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 });
 
@@ -219,9 +219,7 @@ describe('rejectPasaje: happy path y validación', () => {
   it('motivo vacío: copy amigable, NO llama la RPC ni envía mail', async () => {
     const client = mockClient();
 
-    await expect(rejectPasaje('req-1', '   ')).rejects.toThrow(
-      copy.aprobaciones.rejectModal.motivoRequired
-    );
+    await expect(rejectPasaje('req-1', '   ')).resolves.toEqual({ ok: false, error: copy.aprobaciones.rejectModal.motivoRequired });
     expect(client.rpc).not.toHaveBeenCalled();
     expect(sendPasajeRejectionEmail).not.toHaveBeenCalled();
   });
@@ -248,7 +246,7 @@ describe('rejectPasaje: happy path y validación', () => {
       diasViaje: ['2027-06-16', '2027-06-17'],
       motivoRechazo: 'No hay presupuesto',
     });
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 });
 
@@ -262,7 +260,7 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
       rpcError: { message: 'La solicitud req-1 ya fue resuelta (estado actual: aprobado)', code: '22023' },
     });
 
-    await expect(approvePasaje('req-1')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    await expect(approvePasaje('req-1')).resolves.toEqual({ ok: false, error: copy.aprobaciones.messages.alreadyResolved });
     expect(sendPasajeApprovalEmail).not.toHaveBeenCalled();
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
   });
@@ -272,7 +270,7 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
       rpcError: { message: 'La solicitud req-1 ya fue resuelta (estado actual: rechazado)', code: '22023' },
     });
 
-    await expect(rejectPasaje('req-1', 'motivo')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    await expect(rejectPasaje('req-1', 'motivo')).resolves.toEqual({ ok: false, error: copy.aprobaciones.messages.alreadyResolved });
     expect(sendPasajeRejectionEmail).not.toHaveBeenCalled();
     expect(revalidatePath).toHaveBeenCalledWith('/aprobaciones');
   });
@@ -289,7 +287,7 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
       },
     });
 
-    await expect(approvePasaje('req-1')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    await expect(approvePasaje('req-1')).resolves.toEqual({ ok: false, error: copy.aprobaciones.messages.alreadyResolved });
     expect(client.rpc).not.toHaveBeenCalled();
     expect(sendPasajeApprovalEmail).not.toHaveBeenCalled();
   });
@@ -297,7 +295,7 @@ describe('condición de carrera: la solicitud ya fue resuelta por otro admin', (
   it('approvePasaje: solicitud inexistente en el pre-check → alreadyResolved, NO llega a invocar la RPC', async () => {
     const client = mockClient({ requestData: null, requestError: { message: 'no rows' } });
 
-    await expect(approvePasaje('req-1')).rejects.toThrow(copy.aprobaciones.messages.alreadyResolved);
+    await expect(approvePasaje('req-1')).resolves.toEqual({ ok: false, error: copy.aprobaciones.messages.alreadyResolved });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 });
@@ -311,7 +309,7 @@ describe('cualquier otro error de la RPC: no se traga', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockClient({ rpcError: { message: 'Solo un administrador puede resolver solicitudes de pasaje', code: '42501' } });
 
-    await expect(approvePasaje('req-1')).rejects.toThrow(copy.errors.generic);
+    await expect(approvePasaje('req-1')).resolves.toEqual({ ok: false, error: copy.errors.generic });
     expect(sendPasajeApprovalEmail).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();

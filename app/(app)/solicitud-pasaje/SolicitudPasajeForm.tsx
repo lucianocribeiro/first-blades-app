@@ -85,20 +85,23 @@ export function SolicitudPasajeForm({ team, showEmpleadoSelector }: Props) {
     }
 
     startTransition(async () => {
-      try {
-        await createPasajeRequest({
-          empleadoId:  showEmpleadoSelector ? empleadoId : undefined,
-          motivoViaje: motivoViaje as MotivoViaje,
-          origen:      origen.trim(),
-          destino:     destino.trim(),
-          diasViaje:   diasCompletos,
-          nota:        nota.trim() || undefined,
-        });
-        resetForm();
-        setSuccess(true);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : copy.errors.generic);
+      // FB-F4-16: createPasajeRequest devuelve { ok, error } en vez de
+      // tirar — Next.js redacta el mensaje de un throw que cruce el límite
+      // de una Server Action en build de producción.
+      const submitResult = await createPasajeRequest({
+        empleadoId:  showEmpleadoSelector ? empleadoId : undefined,
+        motivoViaje: motivoViaje as MotivoViaje,
+        origen:      origen.trim(),
+        destino:     destino.trim(),
+        diasViaje:   diasCompletos,
+        nota:        nota.trim() || undefined,
+      });
+      if (!submitResult.ok) {
+        setError(submitResult.error);
+        return;
       }
+      resetForm();
+      setSuccess(true);
     });
   }
 
