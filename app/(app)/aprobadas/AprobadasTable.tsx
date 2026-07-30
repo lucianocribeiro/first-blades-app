@@ -442,17 +442,17 @@ export function AprobadasTable({ items, employees }: AprobadasTableProps) {
     setActionError('');
     setActionNotice('');
     startTransition(async () => {
-      try {
-        const result =
-          item.kind === 'ausencia'
-            ? await cancelarAusencia(item.data.id, comentario)
-            : await cancelarPasaje(item.data.id, comentario);
-        setActionNotice(
-          result.emailSent ? copy.aprobadas.messages.cancelSuccess : copy.aprobadas.messages.emailFailed
-        );
-      } catch (err) {
-        setActionError(err instanceof Error ? err.message : copy.aprobadas.errors.generic);
+      const result =
+        item.kind === 'ausencia'
+          ? await cancelarAusencia(item.data.id, comentario)
+          : await cancelarPasaje(item.data.id, comentario);
+      if (!result.ok) {
+        setActionError(result.error);
+        return;
       }
+      setActionNotice(
+        result.emailSent ? copy.aprobadas.messages.cancelSuccess : copy.aprobadas.messages.emailFailed
+      );
     });
   }
 
@@ -463,14 +463,14 @@ export function AprobadasTable({ items, employees }: AprobadasTableProps) {
     setActionError('');
     setActionNotice('');
     startTransition(async () => {
-      try {
-        const result = await editarFechasAusencia(item.data.id, comentario, fechaInicio, fechaFin);
-        setActionNotice(
-          result.emailSent ? copy.aprobadas.messages.editSuccess : copy.aprobadas.messages.emailFailed
-        );
-      } catch (err) {
-        setActionError(err instanceof Error ? err.message : copy.aprobadas.errors.generic);
+      const result = await editarFechasAusencia(item.data.id, comentario, fechaInicio, fechaFin);
+      if (!result.ok) {
+        setActionError(result.error);
+        return;
       }
+      setActionNotice(
+        result.emailSent ? copy.aprobadas.messages.editSuccess : copy.aprobadas.messages.emailFailed
+      );
     });
   }
 
@@ -481,14 +481,14 @@ export function AprobadasTable({ items, employees }: AprobadasTableProps) {
     setActionError('');
     setActionNotice('');
     startTransition(async () => {
-      try {
-        const result = await editarFechasPasaje(item.data.id, comentario, diasViaje);
-        setActionNotice(
-          result.emailSent ? copy.aprobadas.messages.editSuccess : copy.aprobadas.messages.emailFailed
-        );
-      } catch (err) {
-        setActionError(err instanceof Error ? err.message : copy.aprobadas.errors.generic);
+      const result = await editarFechasPasaje(item.data.id, comentario, diasViaje);
+      if (!result.ok) {
+        setActionError(result.error);
+        return;
       }
+      setActionNotice(
+        result.emailSent ? copy.aprobadas.messages.editSuccess : copy.aprobadas.messages.emailFailed
+      );
     });
   }
 

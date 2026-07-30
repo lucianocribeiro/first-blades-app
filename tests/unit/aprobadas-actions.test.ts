@@ -26,6 +26,12 @@
  *  - Previsualización de sobrescritura (editar): días con fila (ok), sin
  *    días (ok vacío), fallo de query (error) — para ausencia y pasaje.
  *  - Límite de rol (admin / no-admin) sobre las cuatro actions.
+ *
+ * Contrato de retorno: { ok: true, emailSent } | { ok: false, error } — NO
+ * throw para ningún error esperado/traducido. En un build de producción,
+ * Next.js redacta el mensaje de cualquier error que cruce el límite de una
+ * Server Action (confirmado contra CI real, tests/e2e/aprobadas.spec.ts), así
+ * que el copy amigable viaja en el valor de retorno, no en una excepción.
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -212,9 +218,10 @@ describe('cancelarAusencia', () => {
 
   it('comentario vacío: copy amigable, NO llama la RPC ni envía mail', async () => {
     const client = mockClient();
-    await expect(cancelarAusencia('req-1', '   ')).rejects.toThrow(
-      copy.aprobadas.cancelModal.comentarioRequired
-    );
+    await expect(cancelarAusencia('req-1', '   ')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.cancelModal.comentarioRequired,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
     expect(sendAusenciaCanceladaEmail).not.toHaveBeenCalled();
   });
@@ -237,7 +244,7 @@ describe('cancelarAusencia', () => {
       motivoOtrosTexto: null,
       comentario: 'Ya no corresponde',
     });
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
     expect(revalidatePath).toHaveBeenCalledWith('/aprobadas');
     expect(revalidatePath).toHaveBeenCalledWith('/solicitud-ausencia');
     expect(revalidatePath).toHaveBeenCalledWith('/calendario');
@@ -245,13 +252,19 @@ describe('cancelarAusencia', () => {
 
   it('ya no vigente (pendiente): copy amigable, NO llega a invocar la RPC', async () => {
     const client = mockClient({ ausenciaData: { ...DEFAULT_AUSENCIA, estado: 'pendiente' } });
-    await expect(cancelarAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobadas.errors.yaNoVigente);
+    await expect(cancelarAusencia('req-1', 'motivo')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.yaNoVigente,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
   it('ya cancelada: copy amigable, NO llega a invocar la RPC', async () => {
     const client = mockClient({ ausenciaData: { ...DEFAULT_AUSENCIA, post_aprobacion_tipo: 'cancelada' } });
-    await expect(cancelarAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobadas.errors.yaNoVigente);
+    await expect(cancelarAusencia('req-1', 'motivo')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.yaNoVigente,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
@@ -263,15 +276,18 @@ describe('cancelarAusencia', () => {
       },
     });
 
-    await expect(cancelarAusencia('req-1', 'motivo')).rejects.toThrow(
-      /pasaje abc-123 \(2027-06-02, aprobada/
-    );
+    const result = await cancelarAusencia('req-1', 'motivo');
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; error: string }).error).toMatch(/pasaje abc-123 \(2027-06-02, aprobada/);
     expect(sendAusenciaCanceladaEmail).not.toHaveBeenCalled();
   });
 
   it('condición de carrera (RPC aborta "ya fue cancelada"): copy amigable, no mail', async () => {
     mockClient({ rpcError: { message: 'La solicitud req-1 ya fue cancelada' } });
-    await expect(cancelarAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobadas.errors.yaNoVigente);
+    await expect(cancelarAusencia('req-1', 'motivo')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.yaNoVigente,
+    });
     expect(sendAusenciaCanceladaEmail).not.toHaveBeenCalled();
   });
 
@@ -279,7 +295,10 @@ describe('cancelarAusencia', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockClient({ rpcError: { message: 'Solo un administrador puede cancelar o editar una ausencia aprobada' } });
 
-    await expect(cancelarAusencia('req-1', 'motivo')).rejects.toThrow(copy.aprobadas.errors.generic);
+    await expect(cancelarAusencia('req-1', 'motivo')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.generic,
+    });
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
   });
@@ -290,7 +309,7 @@ describe('cancelarAusencia', () => {
 
     const result = await cancelarAusencia('req-1', 'motivo');
     expect(sendAusenciaCanceladaEmail).not.toHaveBeenCalled();
-    expect(result).toEqual({ emailSent: false });
+    expect(result).toEqual({ ok: true, emailSent: false });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -300,7 +319,7 @@ describe('cancelarAusencia', () => {
     vi.mocked(sendAusenciaCanceladaEmail).mockRejectedValueOnce(new Error('gmail caído'));
     mockClient();
 
-    await expect(cancelarAusencia('req-1', 'motivo')).resolves.toEqual({ emailSent: false });
+    await expect(cancelarAusencia('req-1', 'motivo')).resolves.toEqual({ ok: true, emailSent: false });
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[email]'), expect.any(Error));
     errorSpy.mockRestore();
   });
@@ -313,25 +332,28 @@ describe('editarFechasAusencia', () => {
 
   it('comentario vacío: copy amigable, NO llama la RPC', async () => {
     const client = mockClient();
-    await expect(editarFechasAusencia('req-1', '  ', '2027-07-01', '2027-07-02')).rejects.toThrow(
-      copy.aprobadas.editModal.comentarioRequired
-    );
+    await expect(editarFechasAusencia('req-1', '  ', '2027-07-01', '2027-07-02')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.editModal.comentarioRequired,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
   it('rango invertido: copy amigable, NO llama la RPC (validado antes de invocarla)', async () => {
     const client = mockClient();
-    await expect(editarFechasAusencia('req-1', 'motivo', '2027-07-05', '2027-07-01')).rejects.toThrow(
-      copy.aprobadas.errors.fechaFinAnteriorAInicio
-    );
+    await expect(editarFechasAusencia('req-1', 'motivo', '2027-07-05', '2027-07-01')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.fechaFinAnteriorAInicio,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
   it('fecha retroactiva: copy amigable, NO llama la RPC', async () => {
     const client = mockClient();
-    await expect(editarFechasAusencia('req-1', 'motivo', '2020-01-01', '2020-01-02')).rejects.toThrow(
-      copy.aprobadas.errors.fechaRetroactiva
-    );
+    await expect(editarFechasAusencia('req-1', 'motivo', '2020-01-01', '2020-01-02')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.fechaRetroactiva,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
@@ -361,14 +383,15 @@ describe('editarFechasAusencia', () => {
       motivoOtrosTexto: null,
       comentario: 'corrección',
     });
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 
   it('ya no vigente: NO llega a invocar la RPC', async () => {
     const client = mockClient({ ausenciaData: { ...DEFAULT_AUSENCIA, post_aprobacion_tipo: 'cancelada' } });
-    await expect(editarFechasAusencia('req-1', 'motivo', '2027-09-05', '2027-09-06')).rejects.toThrow(
-      copy.aprobadas.errors.yaNoVigente
-    );
+    await expect(editarFechasAusencia('req-1', 'motivo', '2027-09-05', '2027-09-06')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.yaNoVigente,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 });
@@ -380,7 +403,10 @@ describe('cancelarPasaje', () => {
 
   it('comentario vacío: copy amigable, NO llama la RPC', async () => {
     const client = mockClient();
-    await expect(cancelarPasaje('req-1', '')).rejects.toThrow(copy.aprobadas.cancelModal.comentarioRequired);
+    await expect(cancelarPasaje('req-1', '')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.cancelModal.comentarioRequired,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
@@ -402,7 +428,7 @@ describe('cancelarPasaje', () => {
       diasViaje: ['2027-06-16', '2027-06-17'],
       comentario: 'viaje suspendido',
     });
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
     expect(revalidatePath).toHaveBeenCalledWith('/aprobadas');
     expect(revalidatePath).toHaveBeenCalledWith('/solicitud-pasaje');
   });
@@ -415,7 +441,9 @@ describe('cancelarPasaje', () => {
       },
     });
 
-    await expect(cancelarPasaje('req-1', 'motivo')).rejects.toThrow(/ausencia xyz-789/);
+    const result = await cancelarPasaje('req-1', 'motivo');
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; error: string }).error).toMatch(/ausencia xyz-789/);
     expect(sendPasajeCanceladoEmail).not.toHaveBeenCalled();
   });
 });
@@ -427,17 +455,19 @@ describe('editarFechasPasaje', () => {
 
   it('sin días: copy amigable, NO llama la RPC', async () => {
     const client = mockClient();
-    await expect(editarFechasPasaje('req-1', 'motivo', [])).rejects.toThrow(
-      copy.aprobadas.errors.diasRequeridos
-    );
+    await expect(editarFechasPasaje('req-1', 'motivo', [])).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.diasRequeridos,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
   it('día retroactivo: copy amigable, NO llama la RPC', async () => {
     const client = mockClient();
-    await expect(editarFechasPasaje('req-1', 'motivo', ['2020-01-01'])).rejects.toThrow(
-      copy.aprobadas.errors.diaRetroactivo
-    );
+    await expect(editarFechasPasaje('req-1', 'motivo', ['2020-01-01'])).resolves.toEqual({
+      ok: false,
+      error: copy.aprobadas.errors.diaRetroactivo,
+    });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 
@@ -465,7 +495,7 @@ describe('editarFechasPasaje', () => {
       diasViajeNuevos: ['2027-09-15', '2027-09-16'],
       comentario: 'cambio de itinerario',
     });
-    expect(result).toEqual({ emailSent: true });
+    expect(result).toEqual({ ok: true, emailSent: true });
   });
 });
 

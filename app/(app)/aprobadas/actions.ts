@@ -22,7 +22,21 @@ import type { OverwriteDay, OverwriteStatus } from '@/lib/rotation/overwrite-sta
 // real del admin (createServerClient()), no un cliente service_role.
 type ServerSupabase = Awaited<ReturnType<typeof createServerClient>>;
 
-export type CancelarEditarResult = { emailSent: boolean };
+// Resultado devuelto (NUNCA throw para un error esperado/traducido): en un
+// build de producción, Next.js redacta el mensaje de cualquier error que
+// cruce el límite de una Server Action ("An error occurred in the Server
+// Components render. The specific message is omitted in production
+// builds..."), incluso si el cliente lo atrapa con try/catch — confirmado
+// contra CI real (tests/e2e/aprobadas.spec.ts, build de producción; quitar
+// el revalidatePath previo al throw no lo evitó). Un valor de retorno
+// normal no pasa por esa redacción, así que el copy amigable (comentario
+// obligatorio, no-retroactiva, bloqueo LIFO, "ya no vigente") viaja en
+// `error`, no en una excepción. Mismo problema late en
+// aprobaciones/ausencia-actions.ts y pasaje-actions.ts (throw new
+// Error(friendly) ahí también) — fuera de alcance de FB-F4-14, no tocado acá.
+export type CancelarEditarResult =
+  | { ok: true; emailSent: boolean }
+  | { ok: false; error: string };
 
 type AusenciaForAction = {
   estado: string;
@@ -50,11 +64,13 @@ type PasajeForAction = {
 // Postgres, y de paso trae los datos que el mail necesita (fechas/motivo
 // ANTERIORES a la edición, y el perfil del dueño) — capa de app superpuesta
 // a la RPC, no la reemplaza; la RPC sigue siendo la autoridad real (mismo
-// criterio que aprobaciones/ausencia-actions.ts::assertPendiente).
+// criterio que aprobaciones/ausencia-actions.ts::assertPendiente). Devuelve
+// null (no throw) si no se encontró o no está vigente — ver nota de
+// CancelarEditarResult sobre por qué no se puede throw acá.
 async function fetchAusenciaForAction(
   supabase: ServerSupabase,
   requestId: string
-): Promise<AusenciaForAction> {
+): Promise<AusenciaForAction | null> {
   const { data, error } = await supabase
     .from('ausencia_requests')
     .select(
@@ -63,16 +79,14 @@ async function fetchAusenciaForAction(
     .eq('id', requestId)
     .single();
 
-  if (error || !data) {
-    throw new Error(copy.aprobadas.errors.yaNoVigente);
-  }
+  if (error || !data) return null;
   return data as unknown as AusenciaForAction;
 }
 
 async function fetchPasajeForAction(
   supabase: ServerSupabase,
   requestId: string
-): Promise<PasajeForAction> {
+): Promise<PasajeForAction | null> {
   const { data, error } = await supabase
     .from('pasaje_requests')
     .select(
@@ -81,29 +95,25 @@ async function fetchPasajeForAction(
     .eq('id', requestId)
     .single();
 
-  if (error || !data) {
-    throw new Error(copy.aprobadas.errors.yaNoVigente);
-  }
+  if (error || !data) return null;
   return data as unknown as PasajeForAction;
 }
 
-function assertAprobadaVigente(row: { estado: string; post_aprobacion_tipo: string | null }): void {
-  if (row.estado !== 'aprobado' || row.post_aprobacion_tipo === 'cancelada') {
-    throw new Error(copy.aprobadas.errors.yaNoVigente);
-  }
+function isVigente(row: { estado: string; post_aprobacion_tipo: string | null }): boolean {
+  return row.estado === 'aprobado' && row.post_aprobacion_tipo !== 'cancelada';
 }
 
 // ─── Ausencia: cancelar ─────────────────────────────────────────────────
 
 export async function cancelarAusencia(requestId: string, comentario: string): Promise<CancelarEditarResult> {
   const trimmed = comentario.trim();
-  if (!trimmed) throw new Error(copy.aprobadas.cancelModal.comentarioRequired);
+  if (!trimmed) return { ok: false, error: copy.aprobadas.cancelModal.comentarioRequired };
 
   await requireAdmin();
   const supabase = await createServerClient();
 
   const req = await fetchAusenciaForAction(supabase, requestId);
-  assertAprobadaVigente(req);
+  if (!req || !isVigente(req)) return { ok: false, error: copy.aprobadas.errors.yaNoVigente };
 
   // El cliente de createServerClient() (@supabase/ssr) colapsa el genérico de
   // postgrest-js a `never`/`undefined` en .rpc() (mismo bug ya documentado en
@@ -117,14 +127,9 @@ export async function cancelarAusencia(requestId: string, comentario: string): P
 
   if (error) {
     const friendly = translateCancelarEditarError(error);
-    if (friendly) {
-      // Sin revalidatePath: la RPC abortó, nada cambió en la DB — y
-      // llamarlo antes de un throw acá hace que Next.js (build de
-      // producción) redacte el mensaje del error (confirmado por CI real).
-      throw new Error(friendly);
-    }
+    if (friendly) return { ok: false, error: friendly };
     console.error('[cancelarAusencia] error al invocar cancelar_editar_ausencia_aprobada:', error.message);
-    throw new Error(copy.aprobadas.errors.generic);
+    return { ok: false, error: copy.aprobadas.errors.generic };
   }
 
   // La cancelación ya está commiteada (fuente de verdad); todo lo que sigue
@@ -156,7 +161,7 @@ export async function cancelarAusencia(requestId: string, comentario: string): P
     console.error('[email] fallo al notificar cancelación de ausencia:', emailErr);
   }
 
-  return { emailSent };
+  return { ok: true, emailSent };
 }
 
 // ─── Ausencia: editar fechas ────────────────────────────────────────────
@@ -168,16 +173,16 @@ export async function editarFechasAusencia(
   fechaFin: string
 ): Promise<CancelarEditarResult> {
   const trimmed = comentario.trim();
-  if (!trimmed) throw new Error(copy.aprobadas.editModal.comentarioRequired);
+  if (!trimmed) return { ok: false, error: copy.aprobadas.editModal.comentarioRequired };
 
   const validation = validateFechasEdicionAusencia(fechaInicio, fechaFin);
-  if (!validation.valid) throw new Error(validation.error);
+  if (!validation.valid) return { ok: false, error: validation.error };
 
   await requireAdmin();
   const supabase = await createServerClient();
 
   const req = await fetchAusenciaForAction(supabase, requestId);
-  assertAprobadaVigente(req);
+  if (!req || !isVigente(req)) return { ok: false, error: copy.aprobadas.errors.yaNoVigente };
 
   const { error } = await supabase.rpc('cancelar_editar_ausencia_aprobada', {
     p_request_id:          requestId,
@@ -189,14 +194,9 @@ export async function editarFechasAusencia(
 
   if (error) {
     const friendly = translateCancelarEditarError(error);
-    if (friendly) {
-      // Sin revalidatePath: la RPC abortó, nada cambió en la DB — y
-      // llamarlo antes de un throw acá hace que Next.js (build de
-      // producción) redacte el mensaje del error (confirmado por CI real).
-      throw new Error(friendly);
-    }
+    if (friendly) return { ok: false, error: friendly };
     console.error('[editarFechasAusencia] error al invocar cancelar_editar_ausencia_aprobada:', error.message);
-    throw new Error(copy.aprobadas.errors.generic);
+    return { ok: false, error: copy.aprobadas.errors.generic };
   }
 
   revalidatePath('/aprobadas');
@@ -228,20 +228,20 @@ export async function editarFechasAusencia(
     console.error('[email] fallo al notificar edición de ausencia:', emailErr);
   }
 
-  return { emailSent };
+  return { ok: true, emailSent };
 }
 
 // ─── Pasaje: cancelar ───────────────────────────────────────────────────
 
 export async function cancelarPasaje(requestId: string, comentario: string): Promise<CancelarEditarResult> {
   const trimmed = comentario.trim();
-  if (!trimmed) throw new Error(copy.aprobadas.cancelModal.comentarioRequired);
+  if (!trimmed) return { ok: false, error: copy.aprobadas.cancelModal.comentarioRequired };
 
   await requireAdmin();
   const supabase = await createServerClient();
 
   const req = await fetchPasajeForAction(supabase, requestId);
-  assertAprobadaVigente(req);
+  if (!req || !isVigente(req)) return { ok: false, error: copy.aprobadas.errors.yaNoVigente };
 
   const { error } = await supabase.rpc('cancelar_editar_pasaje_aprobado', {
     p_request_id: requestId,
@@ -251,14 +251,9 @@ export async function cancelarPasaje(requestId: string, comentario: string): Pro
 
   if (error) {
     const friendly = translateCancelarEditarError(error);
-    if (friendly) {
-      // Sin revalidatePath: la RPC abortó, nada cambió en la DB — y
-      // llamarlo antes de un throw acá hace que Next.js (build de
-      // producción) redacte el mensaje del error (confirmado por CI real).
-      throw new Error(friendly);
-    }
+    if (friendly) return { ok: false, error: friendly };
     console.error('[cancelarPasaje] error al invocar cancelar_editar_pasaje_aprobado:', error.message);
-    throw new Error(copy.aprobadas.errors.generic);
+    return { ok: false, error: copy.aprobadas.errors.generic };
   }
 
   revalidatePath('/aprobadas');
@@ -288,7 +283,7 @@ export async function cancelarPasaje(requestId: string, comentario: string): Pro
     console.error('[email] fallo al notificar cancelación de pasaje:', emailErr);
   }
 
-  return { emailSent };
+  return { ok: true, emailSent };
 }
 
 // ─── Pasaje: editar fechas (días discretos) ─────────────────────────────
@@ -299,16 +294,16 @@ export async function editarFechasPasaje(
   diasViaje: string[]
 ): Promise<CancelarEditarResult> {
   const trimmed = comentario.trim();
-  if (!trimmed) throw new Error(copy.aprobadas.editModal.comentarioRequired);
+  if (!trimmed) return { ok: false, error: copy.aprobadas.editModal.comentarioRequired };
 
   const validation = validateDiasEdicionPasaje(diasViaje);
-  if (!validation.valid) throw new Error(validation.error);
+  if (!validation.valid) return { ok: false, error: validation.error };
 
   await requireAdmin();
   const supabase = await createServerClient();
 
   const req = await fetchPasajeForAction(supabase, requestId);
-  assertAprobadaVigente(req);
+  if (!req || !isVigente(req)) return { ok: false, error: copy.aprobadas.errors.yaNoVigente };
 
   const diasOrdenados = [...new Set(diasViaje)].sort();
 
@@ -321,14 +316,9 @@ export async function editarFechasPasaje(
 
   if (error) {
     const friendly = translateCancelarEditarError(error);
-    if (friendly) {
-      // Sin revalidatePath: la RPC abortó, nada cambió en la DB — y
-      // llamarlo antes de un throw acá hace que Next.js (build de
-      // producción) redacte el mensaje del error (confirmado por CI real).
-      throw new Error(friendly);
-    }
+    if (friendly) return { ok: false, error: friendly };
     console.error('[editarFechasPasaje] error al invocar cancelar_editar_pasaje_aprobado:', error.message);
-    throw new Error(copy.aprobadas.errors.generic);
+    return { ok: false, error: copy.aprobadas.errors.generic };
   }
 
   revalidatePath('/aprobadas');
@@ -359,7 +349,7 @@ export async function editarFechasPasaje(
     console.error('[email] fallo al notificar edición de pasaje:', emailErr);
   }
 
-  return { emailSent };
+  return { ok: true, emailSent };
 }
 
 // ─── Previsualización de sobrescritura (editar) ─────────────────────────
