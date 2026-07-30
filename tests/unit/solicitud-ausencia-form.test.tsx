@@ -192,3 +192,36 @@ describe('SolicitudAusenciaForm: validación de cliente (UX, no autoridad)', () 
     await waitFor(() => expect(screen.getByText(copy.solicitudAusencia.messages.success)).toBeInTheDocument());
   });
 });
+
+// ─── FB-F4-17: {ok:false} de la action se muestra, no queda tragado ────────
+
+describe('SolicitudAusenciaForm: {ok:false} de createAusenciaRequest se muestra (FB-F4-17)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('la action devuelve {ok:false, error} → el error se renderiza y el éxito NO se muestra', async () => {
+    // El mock por defecto del módulo resuelve {ok:true} (ver arriba) — acá se
+    // sobreescribe UNA vez para probar la rama que un futuro cambio podría
+    // volver a tragarse sin que un test lo note (aprendizaje Fase 3).
+    vi.mocked(createAusenciaRequest).mockResolvedValueOnce({
+      ok: false,
+      error: copy.solicitudAusencia.errors.pendienteDuplicada,
+    });
+
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    selectMotivo('vacaciones');
+    fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
+      target: { value: MANANA },
+    });
+    fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaFin, { exact: false }), {
+      target: { value: MANANA },
+    });
+    submitForm(container);
+
+    await waitFor(() =>
+      expect(screen.getByText(copy.solicitudAusencia.errors.pendienteDuplicada)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(copy.solicitudAusencia.messages.success)).not.toBeInTheDocument();
+  });
+});
