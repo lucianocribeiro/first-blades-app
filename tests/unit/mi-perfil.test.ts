@@ -12,44 +12,37 @@ import { DOCUMENT_TYPES } from '@/lib/db-types';
 import { copy } from '@/lib/copy';
 
 // ─── validateDocumentFile ─────────────────────────────────────
+// FB-F4-19: devuelve { ok, error } en vez de tirar (lib/storage.ts).
 
 describe('validateDocumentFile', () => {
   it('acepta PDF', () => {
-    expect(() =>
-      validateDocumentFile({ size: 1024, type: 'application/pdf' })
-    ).not.toThrow();
+    expect(validateDocumentFile({ size: 1024, type: 'application/pdf' })).toEqual({ ok: true });
   });
 
   it('acepta imagen JPEG', () => {
-    expect(() =>
-      validateDocumentFile({ size: 500_000, type: 'image/jpeg' })
-    ).not.toThrow();
+    expect(validateDocumentFile({ size: 500_000, type: 'image/jpeg' })).toEqual({ ok: true });
   });
 
   it('acepta imagen PNG', () => {
-    expect(() =>
-      validateDocumentFile({ size: 200_000, type: 'image/png' })
-    ).not.toThrow();
+    expect(validateDocumentFile({ size: 200_000, type: 'image/png' })).toEqual({ ok: true });
   });
 
   it('rechaza archivo mayor a 10 MB', () => {
-    expect(() =>
-      validateDocumentFile({ size: 11 * 1024 * 1024, type: 'application/pdf' })
-    ).toThrow('10 MB');
+    const result = validateDocumentFile({ size: 11 * 1024 * 1024, type: 'application/pdf' });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain('10 MB');
   });
 
   it('rechaza tipo no permitido', () => {
-    expect(() =>
-      validateDocumentFile({ size: 1024, type: 'application/exe' })
-    ).toThrow('no permitido');
+    const result = validateDocumentFile({ size: 1024, type: 'application/exe' });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain('no permitido');
   });
 
   it('rechaza archivo vacío (size = 0 no necesariamente falla en validateDocumentFile, pero tamaño > 10MB sí)', () => {
     // El size 0 pasa validateDocumentFile (no tiene límite mínimo);
     // la validación de "archivo seleccionado" es responsabilidad de la acción (size > 0).
-    expect(() =>
-      validateDocumentFile({ size: 0, type: 'application/pdf' })
-    ).not.toThrow();
+    expect(validateDocumentFile({ size: 0, type: 'application/pdf' })).toEqual({ ok: true });
   });
 });
 

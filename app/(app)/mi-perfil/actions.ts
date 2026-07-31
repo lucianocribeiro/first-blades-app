@@ -81,19 +81,17 @@ export async function handleDocumentUpload(formData: FormData): Promise<Document
   }
 
   // Validar archivo (tamaño / mime) — mismo criterio de error esperado.
-  try {
-    validateDocumentFile({ size: file.size, type: file.type });
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : copy.documentos.messages.uploadError };
-  }
+  // FB-F4-19: validateDocumentFile/storageUpload devuelven { ok, error } en
+  // vez de tirar (lib/storage.ts) — cierra la trampa de raíz que dejaba
+  // FB-F4-AUD-13 (helper compartido; un caller futuro sin envolver el throw
+  // reintroducía el mensaje redactado en producción).
+  const validation = validateDocumentFile({ size: file.size, type: file.type });
+  if (!validation.ok) return { ok: false, error: validation.error };
 
   // Subir a Storage (admin client: validación ya hecha, path enforces userId)
-  let storagePath: string;
-  try {
-    ({ storagePath } = await storageUpload(profile.id, file, documentType));
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : copy.documentos.messages.uploadError };
-  }
+  const uploadResult = await storageUpload(profile.id, file, documentType);
+  if (!uploadResult.ok) return { ok: false, error: uploadResult.error };
+  const { storagePath } = uploadResult;
 
   // Insertar en documents vía admin client (server action ya validó identidad y constraints).
   // estado forzado a 'pendiente' en código; el admin client garantiza que el write no falla
@@ -156,11 +154,8 @@ export async function getSignedUrls(
   const result: Record<string, string> = {};
   for (const path of paths) {
     if (!authorized.has(path)) continue;
-    try {
-      result[path] = await createSignedUrl(path);
-    } catch {
-      result[path] = '';
-    }
+    const signedUrlResult = await createSignedUrl(path);
+    result[path] = signedUrlResult.ok ? signedUrlResult.url : '';
   }
   return result;
 }
@@ -228,18 +223,12 @@ export async function uploadDocumentForEmployee(
     if (certOtrosText && certOtrosText.length > 80) return { ok: false, error: copy.documentos.errors.descripcionMaxima };
   }
 
-  try {
-    validateDocumentFile({ size: file.size, type: file.type });
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : copy.documentos.messages.uploadError };
-  }
+  const validation = validateDocumentFile({ size: file.size, type: file.type });
+  if (!validation.ok) return { ok: false, error: validation.error };
 
-  let storagePath: string;
-  try {
-    ({ storagePath } = await storageUpload(employeeId, file, documentType));
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : copy.documentos.messages.uploadError };
-  }
+  const uploadResult = await storageUpload(employeeId, file, documentType);
+  if (!uploadResult.ok) return { ok: false, error: uploadResult.error };
+  const { storagePath } = uploadResult;
 
   const adminClient = createAdminClient();
   const insertData: DocumentInsert = {

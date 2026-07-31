@@ -2,50 +2,36 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { validateDocumentFile, DOCUMENTS_BUCKET } from '@/lib/storage';
 
 // ─── validateDocumentFile ─────────────────────────────────────
+// FB-F4-19: devuelve { ok, error } en vez de tirar (lib/storage.ts).
 
 describe('validateDocumentFile', () => {
   it('acepta archivos de tipo permitido dentro del límite', () => {
-    expect(() =>
-      validateDocumentFile({ size: 1024, type: 'application/pdf' })
-    ).not.toThrow();
-
-    expect(() =>
-      validateDocumentFile({ size: 1024, type: 'image/jpeg' })
-    ).not.toThrow();
-
-    expect(() =>
-      validateDocumentFile({ size: 1024, type: 'image/png' })
-    ).not.toThrow();
+    expect(validateDocumentFile({ size: 1024, type: 'application/pdf' })).toEqual({ ok: true });
+    expect(validateDocumentFile({ size: 1024, type: 'image/jpeg' })).toEqual({ ok: true });
+    expect(validateDocumentFile({ size: 1024, type: 'image/png' })).toEqual({ ok: true });
   });
 
   it('rechaza archivos que superan 10 MB', () => {
-    expect(() =>
-      validateDocumentFile({ size: 10 * 1024 * 1024 + 1, type: 'application/pdf' })
-    ).toThrow('límite de 10 MB');
+    const result = validateDocumentFile({ size: 10 * 1024 * 1024 + 1, type: 'application/pdf' });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain('límite de 10 MB');
   });
 
   it('rechaza archivos de tipo no permitido', () => {
-    expect(() =>
-      validateDocumentFile({ size: 100, type: 'application/zip' })
-    ).toThrow('no permitido');
-
-    expect(() =>
-      validateDocumentFile({ size: 100, type: 'text/html' })
-    ).toThrow('no permitido');
-
-    expect(() =>
-      validateDocumentFile({ size: 100, type: 'application/javascript' })
-    ).toThrow('no permitido');
+    for (const type of ['application/zip', 'text/html', 'application/javascript']) {
+      const result = validateDocumentFile({ size: 100, type });
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.error).toContain('no permitido');
+    }
   });
 
   it('acepta exactamente 10 MB', () => {
-    expect(() =>
-      validateDocumentFile({ size: 10 * 1024 * 1024, type: 'application/pdf' })
-    ).not.toThrow();
+    expect(validateDocumentFile({ size: 10 * 1024 * 1024, type: 'application/pdf' })).toEqual({ ok: true });
   });
 });
 
 // ─── createSignedUrl ─────────────────────────────────────────
+// FB-F4-19: devuelve { ok, url } | { ok:false, error } en vez de tirar.
 
 describe('createSignedUrl', () => {
   beforeEach(() => {
@@ -72,11 +58,11 @@ describe('createSignedUrl', () => {
     }));
 
     const { createSignedUrl } = await import('@/lib/storage');
-    const url = await createSignedUrl('user-1/doc.pdf');
-    expect(url).toBe(mockSignedUrl);
+    const result = await createSignedUrl('user-1/doc.pdf');
+    expect(result).toEqual({ ok: true, url: mockSignedUrl });
   });
 
-  it('lanza error si Supabase Storage devuelve error', async () => {
+  it('devuelve {ok:false} si Supabase Storage devuelve error', async () => {
     vi.doMock('@/lib/supabase/admin', () => ({
       createAdminClient: () => ({
         storage: {
@@ -91,10 +77,13 @@ describe('createSignedUrl', () => {
     }));
 
     const { createSignedUrl } = await import('@/lib/storage');
-    await expect(createSignedUrl('user-1/missing.pdf')).rejects.toThrow('Bucket not found');
+    await expect(createSignedUrl('user-1/missing.pdf')).resolves.toEqual({
+      ok: false,
+      error: 'Bucket not found',
+    });
   });
 
-  it('lanza error si no hay signedUrl en la respuesta', async () => {
+  it('devuelve {ok:false} si no hay signedUrl en la respuesta', async () => {
     vi.doMock('@/lib/supabase/admin', () => ({
       createAdminClient: () => ({
         storage: {
@@ -109,9 +98,9 @@ describe('createSignedUrl', () => {
     }));
 
     const { createSignedUrl } = await import('@/lib/storage');
-    await expect(createSignedUrl('user-1/broken.pdf')).rejects.toThrow(
-      'No se pudo generar la URL'
-    );
+    const result = await createSignedUrl('user-1/broken.pdf');
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain('No se pudo generar la URL');
   });
 
   it('las URLs son privadas (no usan el bucket público)', async () => {
