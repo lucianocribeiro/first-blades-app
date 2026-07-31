@@ -6,9 +6,18 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { copy } from '@/lib/copy';
 import { sendDocumentRejectionEmail } from '@/lib/email/rejection-email';
 
+// Resultado devuelto (nunca throw para un error esperado): en un build de
+// producción, Next.js redacta el mensaje de cualquier error que cruce el
+// límite de una Server Action, aunque el cliente lo atrapa con try/catch —
+// mismo bug ya resuelto en aprobadas/actions.ts (FB-F4-14) y en
+// aprobaciones/ausencia-actions.ts / pasaje-actions.ts y
+// solicitud-ausencia|pasaje/actions.ts (FB-F4-16). Este archivo quedaba
+// pendiente (documentado, no tocado, en esos prompts) — FB-F4-18 lo cierra.
+export type DocumentActionResult = { ok: true } | { ok: false; error: string };
+
 // ─── Aprobar documento ────────────────────────────────────────
 
-export async function approveDocument(documentId: string): Promise<void> {
+export async function approveDocument(documentId: string): Promise<DocumentActionResult> {
   const admin_profile = await requireAdmin();
   const admin = createAdminClient();
 
@@ -23,7 +32,7 @@ export async function approveDocument(documentId: string): Promise<void> {
     .eq('id', documentId)
     .eq('estado', 'pendiente'); // solo transicionamos desde pendiente
 
-  if (error) throw new Error(error.message);
+  if (error) return { ok: false, error: error.message };
 
   // Registrar en audit_log (no bloqueante: si falla, la aprobación ya se aplicó)
   try {
@@ -40,12 +49,13 @@ export async function approveDocument(documentId: string): Promise<void> {
 
   revalidatePath('/aprobaciones');
   revalidatePath('/mi-perfil');
+  return { ok: true };
 }
 
 // ─── Rechazar documento ───────────────────────────────────────
 
-export async function rejectDocument(documentId: string, motivo: string): Promise<void> {
-  if (!motivo.trim()) throw new Error(copy.aprobaciones.rejectModal.motivoRequired);
+export async function rejectDocument(documentId: string, motivo: string): Promise<DocumentActionResult> {
+  if (!motivo.trim()) return { ok: false, error: copy.aprobaciones.rejectModal.motivoRequired };
 
   const admin_profile = await requireAdmin();
   const admin = createAdminClient();
@@ -62,7 +72,7 @@ export async function rejectDocument(documentId: string, motivo: string): Promis
     .eq('id', documentId)
     .eq('estado', 'pendiente');
 
-  if (error) throw new Error(error.message);
+  if (error) return { ok: false, error: error.message };
 
   // Registrar en audit_log (no bloqueante: si falla, el rechazo ya se aplicó)
   try {
@@ -118,4 +128,5 @@ export async function rejectDocument(documentId: string, motivo: string): Promis
 
   revalidatePath('/aprobaciones');
   revalidatePath('/mi-perfil');
+  return { ok: true };
 }
