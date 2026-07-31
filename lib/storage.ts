@@ -19,36 +19,53 @@ const ALLOWED_MIME_TYPES = new Set([
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
+// Resultado devuelto (nunca throw para un error esperado): mismo motivo que
+// las Server Actions (FB-F4-14/16/18) — un throw que cruza el límite de una
+// Server Action se redacta en build de producción. Este helper es compartido
+// por más de un caller, así que la traducción vive acá, en la raíz, en vez
+// de depender de que cada caller futuro se acuerde de envolverlo (FB-F4-19,
+// hallazgo de FB-F4-AUD-13: antes el helper seguía tirando y cada caller
+// tenía que envolverlo — una trampa latente para un caller nuevo).
+
 // ─── Validación ───────────────────────────────────────────────
 
-export function validateDocumentFile(file: { size: number; type: string }): void {
+export type ValidateDocumentFileResult = { ok: true } | { ok: false; error: string };
+
+export function validateDocumentFile(file: { size: number; type: string }): ValidateDocumentFileResult {
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    throw new Error(copy.documentos.errors.archivoDemasiadoGrande);
+    return { ok: false, error: copy.documentos.errors.archivoDemasiadoGrande };
   }
   if (!ALLOWED_MIME_TYPES.has(file.type)) {
-    throw new Error(`${copy.documentos.errors.tipoArchivoNoPermitido} ${file.type}`);
+    return { ok: false, error: `${copy.documentos.errors.tipoArchivoNoPermitido} ${file.type}` };
   }
+  return { ok: true };
 }
 
 // ─── Signed URL ───────────────────────────────────────────────
+
+export type CreateSignedUrlResult = { ok: true; url: string } | { ok: false; error: string };
 
 /**
  * Genera una URL de acceso privada y temporaria para un archivo en Storage.
  * Nunca devuelve una URL pública; el bucket está configurado como privado.
  */
-export async function createSignedUrl(storagePath: string): Promise<string> {
+export async function createSignedUrl(storagePath: string): Promise<CreateSignedUrlResult> {
   const admin = createAdminClient();
   const { data, error } = await admin.storage
     .from(DOCUMENTS_BUCKET)
     .createSignedUrl(storagePath, SIGNED_URL_EXPIRY_SECONDS);
 
-  if (error) throw new Error(error.message);
-  if (!data?.signedUrl) throw new Error(copy.documentos.errors.urlNoDisponible);
+  if (error) return { ok: false, error: error.message };
+  if (!data?.signedUrl) return { ok: false, error: copy.documentos.errors.urlNoDisponible };
 
-  return data.signedUrl;
+  return { ok: true, url: data.signedUrl };
 }
 
 // ─── Upload ───────────────────────────────────────────────────
+
+export type UploadDocumentResult =
+  | { ok: true; storagePath: string; signedUrl: string }
+  | { ok: false; error: string };
 
 /**
  * Sube un archivo al bucket privado y devuelve la ruta de Storage + URL firmada.
@@ -59,8 +76,9 @@ export async function uploadDocument(
   userId: string,
   file: File,
   documentType: string
-): Promise<{ storagePath: string; signedUrl: string }> {
-  validateDocumentFile(file);
+): Promise<UploadDocumentResult> {
+  const validation = validateDocumentFile(file);
+  if (!validation.ok) return validation;
 
   const ext = file.name.split('.').pop() ?? 'bin';
   const storagePath = `${userId}/${documentType}-${Date.now()}.${ext}`;
@@ -70,9 +88,10 @@ export async function uploadDocument(
     .from(DOCUMENTS_BUCKET)
     .upload(storagePath, file, { cacheControl: '3600', upsert: false });
 
-  if (uploadError) throw new Error(uploadError.message);
+  if (uploadError) return { ok: false, error: uploadError.message };
 
-  const signedUrl = await createSignedUrl(storagePath);
+  const signedUrlResult = await createSignedUrl(storagePath);
+  if (!signedUrlResult.ok) return signedUrlResult;
 
-  return { storagePath, signedUrl };
+  return { ok: true, storagePath, signedUrl: signedUrlResult.url };
 }
