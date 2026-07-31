@@ -284,7 +284,7 @@ describe('rejectDocument: notificación por email al dueño', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(createAdminClient).mockReturnValue(adminMock as any);
 
-    await expect(rejectDocument('doc-1', 'motivo')).resolves.toBeUndefined();
+    await expect(rejectDocument('doc-1', 'motivo')).resolves.toEqual({ ok: true });
     expect(sendDocumentRejectionEmail).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -297,7 +297,7 @@ describe('rejectDocument: notificación por email al dueño', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(createAdminClient).mockReturnValue(adminMock as any);
 
-    await expect(rejectDocument('doc-1', 'motivo')).resolves.toBeUndefined();
+    await expect(rejectDocument('doc-1', 'motivo')).resolves.toEqual({ ok: true });
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('[email]'),
       expect.any(Error)
@@ -305,8 +305,11 @@ describe('rejectDocument: notificación por email al dueño', () => {
     errorSpy.mockRestore();
   });
 
-  it('rechaza el motivo vacío antes de tocar nada', async () => {
-    await expect(rejectDocument('doc-1', '   ')).rejects.toThrow();
+  it('rechaza el motivo vacío antes de tocar nada (FB-F4-18: {ok:false}, no throw)', async () => {
+    await expect(rejectDocument('doc-1', '   ')).resolves.toEqual({
+      ok: false,
+      error: copy.aprobaciones.rejectModal.motivoRequired,
+    });
     expect(sendDocumentRejectionEmail).not.toHaveBeenCalled();
   });
 });

@@ -78,12 +78,15 @@ export function AdminDocumentUploadModal({ open, onClose, employeeId }: AdminDoc
     if (fechaVenc) formData.set('fecha_vencimiento', fechaVenc);
 
     startTransition(async () => {
-      try {
-        await uploadDocumentForEmployee(formData, employeeId);
-        handleClose();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : copy.documentos.messages.uploadError);
+      // FB-F4-18: uploadDocumentForEmployee devuelve { ok, error } en vez de
+      // tirar — Next.js redacta el mensaje de un throw que cruce el límite
+      // de una Server Action en build de producción.
+      const result = await uploadDocumentForEmployee(formData, employeeId);
+      if (!result.ok) {
+        setError(result.error);
+        return;
       }
+      handleClose();
     });
   }
 

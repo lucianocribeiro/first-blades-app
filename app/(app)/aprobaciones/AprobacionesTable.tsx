@@ -275,11 +275,13 @@ export function AprobacionesTable({
     startTransition(async () => {
       try {
         if (item.kind === 'documento') {
-          // approveDocument (aprobaciones/actions.ts, documentos) sigue con
-          // el patrón throw — fuera de alcance de FB-F4-16 (solo ausencia y
-          // pasaje). Mismo bug de redacción en prod, documentado y no
-          // tocado, ver docs/prompts/FB-F4-16.md.
-          await approveDocument(item.data.id);
+          // FB-F4-18: approveDocument devuelve { ok, error } en vez de
+          // tirar — mismo motivo que pasaje/ausencia (FB-F4-16).
+          const result = await approveDocument(item.data.id);
+          if (!result.ok) {
+            setActionError(result.error);
+            return;
+          }
         } else if (item.kind === 'pasaje') {
           // FB-F4-16: approvePasaje/approveAusencia devuelven { ok, ... } en
           // vez de tirar — Next.js redacta el mensaje de un throw que cruce
@@ -313,7 +315,11 @@ export function AprobacionesTable({
     startTransition(async () => {
       try {
         if (item.kind === 'documento') {
-          await rejectDocument(item.data.id, motivo);
+          const result = await rejectDocument(item.data.id, motivo);
+          if (!result.ok) {
+            setActionError(result.error);
+            return;
+          }
         } else if (item.kind === 'pasaje') {
           const result = await rejectPasaje(item.data.id, motivo);
           if (!result.ok) {

@@ -53,7 +53,12 @@ export async function updateProfile(input: UpdateProfileInput) {
 
 const ALLOWED_DOCUMENT_TYPES: DocumentType[] = ['dni', 'licencia', 'foto_carnet', 'certificado'];
 
-export async function handleDocumentUpload(formData: FormData): Promise<void> {
+// Resultado devuelto (nunca throw para un error esperado): mismo motivo que
+// aprobaciones/actions.ts (FB-F4-18) — un throw que cruza el límite de una
+// Server Action se redacta en build de producción.
+export type DocumentUploadResult = { ok: true } | { ok: false; error: string };
+
+export async function handleDocumentUpload(formData: FormData): Promise<DocumentUploadResult> {
   const profile = await requireAuth();
 
   const file          = formData.get('file') as File | null;
@@ -62,24 +67,33 @@ export async function handleDocumentUpload(formData: FormData): Promise<void> {
   const certOtrosText = (formData.get('certificado_otros_texto') as string | null)?.trim() || null;
   const fechaVenc     = (formData.get('fecha_vencimiento') as string | null) || null;
 
-  if (!file || file.size === 0) throw new Error(copy.documentos.errors.archivoRequerido);
+  if (!file || file.size === 0) return { ok: false, error: copy.documentos.errors.archivoRequerido };
 
   if (!ALLOWED_DOCUMENT_TYPES.includes(documentType as DocumentType)) {
-    throw new Error(copy.documentos.errors.tipoNoPermitido);
+    return { ok: false, error: copy.documentos.errors.tipoNoPermitido };
   }
 
   // Validar campos de certificado
   if (documentType === 'certificado') {
-    if (!certTipo) throw new Error(copy.documentos.errors.certificadoTipoRequerido);
-    if (certTipo === 'otros' && !certOtrosText) throw new Error(copy.documentos.errors.descripcionRequerida);
-    if (certOtrosText && certOtrosText.length > 80) throw new Error(copy.documentos.errors.descripcionMaxima);
+    if (!certTipo) return { ok: false, error: copy.documentos.errors.certificadoTipoRequerido };
+    if (certTipo === 'otros' && !certOtrosText) return { ok: false, error: copy.documentos.errors.descripcionRequerida };
+    if (certOtrosText && certOtrosText.length > 80) return { ok: false, error: copy.documentos.errors.descripcionMaxima };
   }
 
-  // Validar archivo
-  validateDocumentFile({ size: file.size, type: file.type });
+  // Validar archivo (tamaño / mime) — mismo criterio de error esperado.
+  try {
+    validateDocumentFile({ size: file.size, type: file.type });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : copy.documentos.messages.uploadError };
+  }
 
   // Subir a Storage (admin client: validación ya hecha, path enforces userId)
-  const { storagePath } = await storageUpload(profile.id, file, documentType);
+  let storagePath: string;
+  try {
+    ({ storagePath } = await storageUpload(profile.id, file, documentType));
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : copy.documentos.messages.uploadError };
+  }
 
   // Insertar en documents vía admin client (server action ya validó identidad y constraints).
   // estado forzado a 'pendiente' en código; el admin client garantiza que el write no falla
@@ -104,10 +118,11 @@ export async function handleDocumentUpload(formData: FormData): Promise<void> {
     // Si el INSERT falla, borrar el objeto de Storage para no dejar huérfanos
     const admin = createAdminClient();
     await admin.storage.from('documents').remove([storagePath]);
-    throw new Error(error.message);
+    return { ok: false, error: error.message };
   }
 
   revalidatePath('/mi-perfil');
+  return { ok: true };
 }
 
 // ─── Generar signed URLs para documentos (servidor) ──────────
@@ -192,7 +207,7 @@ export async function searchEmployees(q: string): Promise<EmployeeSearchResult[]
 export async function uploadDocumentForEmployee(
   formData: FormData,
   employeeId: string
-): Promise<void> {
+): Promise<DocumentUploadResult> {
   const adminProfile = await requireAdmin();
 
   const file          = formData.get('file') as File | null;
@@ -201,21 +216,30 @@ export async function uploadDocumentForEmployee(
   const certOtrosText = (formData.get('certificado_otros_texto') as string | null)?.trim() || null;
   const fechaVenc     = (formData.get('fecha_vencimiento') as string | null) || null;
 
-  if (!file || file.size === 0) throw new Error(copy.documentos.errors.archivoRequerido);
+  if (!file || file.size === 0) return { ok: false, error: copy.documentos.errors.archivoRequerido };
 
   if (!DOCUMENT_TYPES.includes(documentType as DocumentType)) {
-    throw new Error(copy.documentos.errors.tipoNoPermitido);
+    return { ok: false, error: copy.documentos.errors.tipoNoPermitido };
   }
 
   if (documentType === 'certificado') {
-    if (!certTipo) throw new Error(copy.documentos.errors.certificadoTipoRequerido);
-    if (certTipo === 'otros' && !certOtrosText) throw new Error(copy.documentos.errors.descripcionRequerida);
-    if (certOtrosText && certOtrosText.length > 80) throw new Error(copy.documentos.errors.descripcionMaxima);
+    if (!certTipo) return { ok: false, error: copy.documentos.errors.certificadoTipoRequerido };
+    if (certTipo === 'otros' && !certOtrosText) return { ok: false, error: copy.documentos.errors.descripcionRequerida };
+    if (certOtrosText && certOtrosText.length > 80) return { ok: false, error: copy.documentos.errors.descripcionMaxima };
   }
 
-  validateDocumentFile({ size: file.size, type: file.type });
+  try {
+    validateDocumentFile({ size: file.size, type: file.type });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : copy.documentos.messages.uploadError };
+  }
 
-  const { storagePath } = await storageUpload(employeeId, file, documentType);
+  let storagePath: string;
+  try {
+    ({ storagePath } = await storageUpload(employeeId, file, documentType));
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : copy.documentos.messages.uploadError };
+  }
 
   const adminClient = createAdminClient();
   const insertData: DocumentInsert = {
@@ -238,8 +262,9 @@ export async function uploadDocumentForEmployee(
 
   if (error) {
     await adminClient.storage.from('documents').remove([storagePath]);
-    throw new Error(error.message);
+    return { ok: false, error: error.message };
   }
 
   revalidatePath(`/admin/empleado/${employeeId}`);
+  return { ok: true };
 }
