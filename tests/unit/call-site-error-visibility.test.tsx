@@ -100,7 +100,7 @@ describe('SolicitudPasajeForm: {ok:false} de createPasajeRequest se muestra (FB-
       error: copy.solicitudPasaje.errors.empleadoFueraDeEquipo,
     });
 
-    render(<SolicitudPasajeForm team={[]} showEmpleadoSelector={false} />);
+    render(<SolicitudPasajeForm team={[]} showEmpleadoSelector={false} isAdmin={false} />);
 
     fireEvent.change(screen.getByLabelText(copy.solicitudPasaje.fields.motivoViaje, { exact: false }), {
       target: { value: 'traslado_proyectos' },

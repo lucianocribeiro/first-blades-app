@@ -10,6 +10,7 @@ import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { InfoBanner } from '@/components/ui/InfoBanner';
+import { Modal } from '@/components/ui/Modal';
 import { MOTIVO_VIAJE_OPTIONS } from '@/lib/rotation/motivo-viaje-options';
 import { validatePasajeRequestInput } from './logic';
 import { createPasajeRequest } from './actions';
@@ -19,12 +20,16 @@ export type TeamMember = { id: string; full_name: string | null; email: string }
 
 type Props = {
   // Equipo del supervisor (+ sí mismo), para el selector de "para quién".
-  // Vacío y sin usarse cuando showEmpleadoSelector es false (rol empleado).
+  // Vacío y sin usarse cuando showEmpleadoSelector es false (rol empleado o admin).
   team: TeamMember[];
   showEmpleadoSelector: boolean;
+  // FB-ADJ-01: cuando el solicitante es admin, el envío se auto-aprueba
+  // (no pasa por Aprobaciones) — el form pide confirmación antes de enviar
+  // y muestra un mensaje de éxito distinto.
+  isAdmin: boolean;
 };
 
-export function SolicitudPasajeForm({ team, showEmpleadoSelector }: Props) {
+export function SolicitudPasajeForm({ team, showEmpleadoSelector, isAdmin }: Props) {
   const [isPending, startTransition] = useTransition();
   const [empleadoId, setEmpleadoId] = useState('');
   const [motivoViaje, setMotivoViaje] = useState<MotivoViaje | ''>('');
@@ -34,6 +39,8 @@ export function SolicitudPasajeForm({ team, showEmpleadoSelector }: Props) {
   const [nota, setNota] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [showAdminConfirm, setShowAdminConfirm] = useState(false);
+  const [pendingDias, setPendingDias] = useState<string[]>([]);
 
   const teamOptions = team.map((m) => ({ value: m.id, label: m.full_name || m.email }));
 
@@ -56,6 +63,28 @@ export function SolicitudPasajeForm({ team, showEmpleadoSelector }: Props) {
 
   function handleRemoveDia(index: number) {
     setDiasViaje((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
+  function submit(diasCompletos: string[]) {
+    startTransition(async () => {
+      // FB-F4-16: createPasajeRequest devuelve { ok, error } en vez de
+      // tirar — Next.js redacta el mensaje de un throw que cruce el límite
+      // de una Server Action en build de producción.
+      const submitResult = await createPasajeRequest({
+        empleadoId:  showEmpleadoSelector ? empleadoId : undefined,
+        motivoViaje: motivoViaje as MotivoViaje,
+        origen:      origen.trim(),
+        destino:     destino.trim(),
+        diasViaje:   diasCompletos,
+        nota:        nota.trim() || undefined,
+      });
+      if (!submitResult.ok) {
+        setError(submitResult.error);
+        return;
+      }
+      resetForm();
+      setSuccess(true);
+    });
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -84,25 +113,20 @@ export function SolicitudPasajeForm({ team, showEmpleadoSelector }: Props) {
       return;
     }
 
-    startTransition(async () => {
-      // FB-F4-16: createPasajeRequest devuelve { ok, error } en vez de
-      // tirar — Next.js redacta el mensaje de un throw que cruce el límite
-      // de una Server Action en build de producción.
-      const submitResult = await createPasajeRequest({
-        empleadoId:  showEmpleadoSelector ? empleadoId : undefined,
-        motivoViaje: motivoViaje as MotivoViaje,
-        origen:      origen.trim(),
-        destino:     destino.trim(),
-        diasViaje:   diasCompletos,
-        nota:        nota.trim() || undefined,
-      });
-      if (!submitResult.ok) {
-        setError(submitResult.error);
-        return;
-      }
-      resetForm();
-      setSuccess(true);
-    });
+    // FB-ADJ-01: admin ve un diálogo de confirmación antes de enviar — su
+    // solicitud se auto-aprueba, no pasa por revisión.
+    if (isAdmin) {
+      setPendingDias(diasCompletos);
+      setShowAdminConfirm(true);
+      return;
+    }
+
+    submit(diasCompletos);
+  }
+
+  function handleConfirmAdminSubmit() {
+    setShowAdminConfirm(false);
+    submit(pendingDias);
   }
 
   return (
@@ -195,7 +219,7 @@ export function SolicitudPasajeForm({ team, showEmpleadoSelector }: Props) {
         )}
         {success && (
           <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-            {copy.solicitudPasaje.messages.success}
+            {isAdmin ? copy.solicitudPasaje.messages.successAdmin : copy.solicitudPasaje.messages.success}
           </p>
         )}
 
@@ -203,6 +227,26 @@ export function SolicitudPasajeForm({ team, showEmpleadoSelector }: Props) {
           {isPending ? copy.solicitudPasaje.messages.enviando : copy.solicitudPasaje.submitButton}
         </Button>
       </form>
+
+      {isAdmin && (
+        <Modal
+          open={showAdminConfirm}
+          onClose={() => setShowAdminConfirm(false)}
+          title={copy.solicitudPasaje.adminConfirm.title}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setShowAdminConfirm(false)}>
+                {copy.solicitudPasaje.adminConfirm.cancel}
+              </Button>
+              <Button variant="primary" onClick={handleConfirmAdminSubmit} loading={isPending}>
+                {copy.solicitudPasaje.adminConfirm.confirm}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-secondary">{copy.solicitudPasaje.adminConfirm.message}</p>
+        </Modal>
+      )}
     </Card>
   );
 }

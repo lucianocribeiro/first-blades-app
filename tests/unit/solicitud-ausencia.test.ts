@@ -49,12 +49,44 @@ function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
   } as any);
 }
 
-function mockSupabaseInsert(error: { code?: string; message: string } | null = null) {
-  const insertMock = vi.fn().mockResolvedValue({ error });
+// FB-ADJ-01: la action ahora encadena .insert().select('id').single() (el id
+// insertado hace falta para el camino de admin, ver más abajo) — el mock
+// resuelve la cadena completa aunque los tests no-admin solo miren insertMock.
+function mockSupabaseInsert(error: { code?: string; message: string } | null = null, insertedId = 'req-1') {
+  const singleMock = vi.fn().mockResolvedValue({ data: error ? null : { id: insertedId }, error });
+  const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+  const insertMock = vi.fn().mockReturnValue({ select: selectMock });
   const fromMock = vi.fn().mockReturnValue({ insert: insertMock });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from: fromMock } as any);
-  return { insertMock, fromMock };
+  return { insertMock, selectMock, singleMock, fromMock };
+}
+
+// FB-ADJ-01: mock del camino de admin — INSERT + RPC de auto-aprobación +
+// DELETE de limpieza si la RPC falla.
+function mockSupabaseAdminFlow(
+  opts: {
+    insertError?: { code?: string; message: string } | null;
+    insertedId?: string;
+    resolveError?: { message: string } | null;
+    deleteError?: { message: string } | null;
+  } = {}
+) {
+  const { insertError = null, insertedId = 'req-admin-1', resolveError = null, deleteError = null } = opts;
+
+  const singleMock = vi.fn().mockResolvedValue({ data: insertError ? null : { id: insertedId }, error: insertError });
+  const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+  const insertMock = vi.fn().mockReturnValue({ select: selectMock });
+
+  const deleteEqMock = vi.fn().mockResolvedValue({ error: deleteError });
+  const deleteMock = vi.fn().mockReturnValue({ eq: deleteEqMock });
+
+  const fromMock = vi.fn().mockReturnValue({ insert: insertMock, delete: deleteMock });
+  const rpcMock = vi.fn().mockResolvedValue({ error: resolveError });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  vi.mocked(createServerClient).mockResolvedValue({ from: fromMock, rpc: rpcMock } as any);
+  return { insertMock, selectMock, singleMock, rpcMock, deleteMock, deleteEqMock, fromMock };
 }
 
 // Mockea AMBAS queries que arma page.tsx: la de "mis solicitudes"
@@ -94,16 +126,6 @@ const MANANA = '2027-06-16';
 describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('admin: rechazado antes de llamar insert (modo consulta, no envía)', async () => {
-    mockProfile('admin');
-    const { insertMock } = mockSupabaseInsert();
-
-    await expect(
-      createAusenciaRequest({ motivo: 'dia_tramite', fechaInicio: MANANA, fechaFin: MANANA })
-    ).resolves.toEqual({ ok: false, error: copy.errors.unauthorized });
-    expect(insertMock).not.toHaveBeenCalled();
   });
 
   it('empleado: sin motivo rechaza antes de llamar insert', async () => {
@@ -291,6 +313,86 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
   });
 });
 
+// ─── createAusenciaRequest: admin — auto-aprobación (FB-ADJ-01) ───────────
+
+describe('createAusenciaRequest: admin — auto-aprobación (FB-ADJ-01)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: no-retroactiva sigue aplicando — rechaza antes de insertar', async () => {
+    mockProfile('admin', 'admin-1');
+    const { insertMock } = mockSupabaseAdminFlow();
+    const ayerIso = getBusinessToday(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: ayerIso, fechaFin: ayerIso })
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.fechaRetroactiva });
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('admin: crea la solicitud (pendiente, para sí) e invoca resolver_ausencia_request(aprobar) en la misma action', async () => {
+    mockProfile('admin', 'admin-1');
+    const { insertMock, rpcMock } = mockSupabaseAdminFlow({ insertedId: 'req-admin-1' });
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
+    ).resolves.toEqual({ ok: true });
+
+    expect(insertMock).toHaveBeenCalledWith([
+      expect.objectContaining({ user_id: 'admin-1', estado: 'pendiente', motivo_ausencia: 'vacaciones' }),
+    ]);
+    expect(rpcMock).toHaveBeenCalledWith('resolver_ausencia_request', {
+      p_request_id: 'req-admin-1',
+      p_accion:     'aprobar',
+    });
+  });
+
+  it('admin: si falla el insert inicial, nunca invoca la RPC de resolución', async () => {
+    mockProfile('admin', 'admin-1');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { rpcMock } = mockSupabaseAdminFlow({ insertError: { message: 'db error' } });
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
+    expect(rpcMock).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('admin: si falla la resolución (RPC), borra la solicitud recién creada — sin pendientes huérfanos — y devuelve error visible', async () => {
+    mockProfile('admin', 'admin-1');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { rpcMock, deleteMock, deleteEqMock } = mockSupabaseAdminFlow({
+      insertedId:   'req-admin-2',
+      resolveError: { message: 'boom' },
+    });
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
+
+    expect(rpcMock).toHaveBeenCalled();
+    expect(deleteMock).toHaveBeenCalled();
+    expect(deleteEqMock).toHaveBeenCalledWith('id', 'req-admin-2');
+    errorSpy.mockRestore();
+  });
+
+  it('admin: si además falla el DELETE de limpieza, igual devuelve error visible (no lo traga)', async () => {
+    mockProfile('admin', 'admin-1');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockSupabaseAdminFlow({
+      resolveError: { message: 'boom' },
+      deleteError:  { message: 'no se pudo borrar' },
+    });
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
+    errorSpy.mockRestore();
+  });
+});
+
 // ─── validateAusenciaRequestInput (unidad pura) ────────────────────────────
 
 describe('validateAusenciaRequestInput: no-retroactiva, rango y motivo otros', () => {
@@ -392,13 +494,23 @@ describe('SolicitudAusenciaPage: branch por rol', () => {
     vi.clearAllMocks();
   });
 
-  it('admin: modo consulta, sin formulario de envío', async () => {
-    mockProfile('admin');
+  // FB-ADJ-01: admin ahora recibe el mismo formulario que empleado/supervisor
+  // (para sí, con isAdmin=true) en vez de la card de modo consulta.
+  it('admin: recibe el formulario con isAdmin=true y su lista propia filtrada por user_id explícito', async () => {
+    mockProfile('admin', 'admin-1');
+    const rows = [{ id: 'a1', user_id: 'admin-1', estado: 'aprobado' }];
+    const { eqMock } = mockSupabaseSelect({ data: rows, error: null });
 
     const result = await SolicitudAusenciaPage();
 
+    expect(eqMock).toHaveBeenCalledWith('user_id', 'admin-1');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((result as any).type).toBe(Card);
+    const children = (result as any).props.children as any[];
+    const form = children.find((c) => c?.type === SolicitudAusenciaForm);
+    const table = children.find((c) => c?.type === MisSolicitudesTable);
+    expect(form).toBeTruthy();
+    expect(form.props.isAdmin).toBe(true);
+    expect(table.props.requests).toEqual(rows);
   });
 
   it('empleado: recibe el formulario (con su saldo de días de trámite ya calculado) y su lista propia filtrada por user_id explícito', async () => {

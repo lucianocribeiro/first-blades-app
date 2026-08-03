@@ -23,12 +23,10 @@ export type CreateAusenciaResult = { ok: true } | { ok: false; error: string };
 export async function createAusenciaRequest(input: CreateAusenciaInput): Promise<CreateAusenciaResult> {
   const profile = await requireAuth();
 
-  // El formulario no se muestra a admin (modo consulta); doble chequeo en servidor.
-  if (profile.role === 'admin') return { ok: false, error: copy.errors.unauthorized };
-
   // Autoridad server-side: el cliente puede pre-validar para UX, pero acá se
   // re-valida todo (motivo, rango, no-retroactiva, motivo_otros_texto) antes
   // de tocar la base — nunca se confía en que el formulario ya filtró.
+  // No-retroactiva aplica igual para admin — sin excepción.
   const result = validateAusenciaRequestInput({
     motivo:           input.motivo,
     fechaInicio:      input.fechaInicio?.trim() ?? '',
@@ -44,15 +42,52 @@ export async function createAusenciaRequest(input: CreateAusenciaInput): Promise
   // postgrest-js a `never` en .insert() (mismo bug documentado en
   // calendario/actions.ts::upsertRotationAssignment). insertData ya está
   // tipado como AusenciaRequestInsert[] arriba; el cast acá es seguro.
-  const { error } = await supabase.from('ausencia_requests').insert(insertData as never[]);
+  // .select('id').single() trae el id insertado — solo hace falta para el
+  // camino de admin (auto-aprobación de abajo), pero pedirlo siempre evita
+  // duplicar el bloque de INSERT.
+  const { data: inserted, error } = await supabase
+    .from('ausencia_requests')
+    .insert(insertData as never[])
+    .select('id')
+    .single();
 
-  if (error) {
+  if (error || !inserted) {
     const friendly = translateAusenciaInsertError(error);
     if (friendly) return { ok: false, error: friendly };
-    console.error('[createAusenciaRequest] error al insertar:', error.message);
+    console.error('[createAusenciaRequest] error al insertar:', error?.message);
+    return { ok: false, error: copy.errors.generic };
+  }
+
+  if (profile.role !== 'admin') {
+    revalidatePath('/solicitud-ausencia');
+    return { ok: true };
+  }
+
+  // FB-ADJ-01: admin envía para sí → auto-aprobación (única excepción al
+  // purgatorio, ver constitución §4 y "nada se autoactiva"). La solicitud ya
+  // quedó creada como pendiente arriba (misma policy ausencias_insert_admin);
+  // acá se invoca la misma RPC de resolución que usa Aprobaciones, con la
+  // sesión real del admin (createServerClient(), no service_role — su guarda
+  // interna is_admin()/auth.uid() necesita el JWT real). Si la resolución
+  // falla, se borra la fila recién creada (policy ausencias_delete_admin)
+  // para no dejar un pendiente huérfano fuera de la bandeja de Aprobaciones.
+  const requestId = (inserted as { id: string }).id;
+  const { error: resolveError } = await supabase.rpc('resolver_ausencia_request', {
+    p_request_id: requestId,
+    p_accion:     'aprobar',
+  } as never);
+
+  if (resolveError) {
+    console.error('[createAusenciaRequest] error al auto-aprobar (admin):', resolveError.message);
+    const { error: cleanupError } = await supabase.from('ausencia_requests').delete().eq('id', requestId);
+    if (cleanupError) {
+      console.error('[createAusenciaRequest] error al limpiar la solicitud huérfana:', cleanupError.message);
+    }
     return { ok: false, error: copy.errors.generic };
   }
 
   revalidatePath('/solicitud-ausencia');
+  revalidatePath('/aprobaciones');
+  revalidatePath('/calendario');
   return { ok: true };
 }

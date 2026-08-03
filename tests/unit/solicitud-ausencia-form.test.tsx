@@ -50,24 +50,24 @@ describe('SolicitudAusenciaForm: motivo_otros_texto condicional', () => {
   });
 
   it("sin motivo seleccionado, no muestra el campo de detalle del motivo ('otros')", () => {
-    render(<SolicitudAusenciaForm saldo={SALDO} />);
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     expect(screen.queryByLabelText(copy.solicitudAusencia.fields.motivoOtros, { exact: false })).not.toBeInTheDocument();
   });
 
   it("con un motivo distinto de 'otros', no muestra el campo de detalle", () => {
-    render(<SolicitudAusenciaForm saldo={SALDO} />);
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('vacaciones');
     expect(screen.queryByLabelText(copy.solicitudAusencia.fields.motivoOtros, { exact: false })).not.toBeInTheDocument();
   });
 
   it("con motivo 'otros', muestra el campo de detalle del motivo", () => {
-    render(<SolicitudAusenciaForm saldo={SALDO} />);
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('otros');
     expect(screen.getByLabelText(copy.solicitudAusencia.fields.motivoOtros, { exact: false })).toBeInTheDocument();
   });
 
   it("motivo 'otros' sin completar el detalle bloquea el envío y muestra el error", () => {
-    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('otros');
     fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
       target: { value: MANANA },
@@ -82,7 +82,7 @@ describe('SolicitudAusenciaForm: motivo_otros_texto condicional', () => {
   });
 
   it("motivo 'otros' con detalle completo envía motivoOtrosTexto trimeado", async () => {
-    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('otros');
     fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
       target: { value: MANANA },
@@ -108,31 +108,31 @@ describe('SolicitudAusenciaForm: saldo de día de trámite condicional', () => {
   });
 
   it('sin motivo seleccionado, no muestra la card de saldo', () => {
-    render(<SolicitudAusenciaForm saldo={SALDO} />);
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     expect(screen.queryByText(copy.solicitudAusencia.saldo.title)).not.toBeInTheDocument();
   });
 
   it("con un motivo distinto de 'dia_tramite', no muestra la card de saldo", () => {
-    render(<SolicitudAusenciaForm saldo={SALDO} />);
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('vacaciones');
     expect(screen.queryByText(copy.solicitudAusencia.saldo.title)).not.toBeInTheDocument();
   });
 
   it("con motivo 'dia_tramite', muestra la card de saldo con el consumo real", () => {
-    render(<SolicitudAusenciaForm saldo={SALDO} />);
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('dia_tramite');
     expect(screen.getByText(copy.solicitudAusencia.saldo.title)).toBeInTheDocument();
     expect(screen.getByText(`${copy.solicitudAusencia.saldo.restantesPrefix} 2 ${copy.solicitudAusencia.saldo.restantesSufijo}`)).toBeInTheDocument();
   });
 
   it("con motivo 'dia_tramite', no muestra el campo de fecha de fin (fecha_fin sigue a fecha_inicio)", () => {
-    render(<SolicitudAusenciaForm saldo={SALDO} />);
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('dia_tramite');
     expect(screen.queryByLabelText(copy.solicitudAusencia.fields.fechaFin, { exact: false })).not.toBeInTheDocument();
   });
 
   it("motivo 'dia_tramite': envía fecha_fin = fecha_inicio automáticamente", async () => {
-    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('dia_tramite');
     fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
       target: { value: MANANA },
@@ -152,7 +152,7 @@ describe('SolicitudAusenciaForm: validación de cliente (UX, no autoridad)', () 
   });
 
   it('sin motivo seleccionado, bloquea el envío con el error de motivo requerido', () => {
-    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     submitForm(container);
 
     expect(screen.getByText(copy.solicitudAusencia.errors.motivoRequerido)).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe('SolicitudAusenciaForm: validación de cliente (UX, no autoridad)', () 
   });
 
   it('rango con fecha_fin anterior a fecha_inicio bloquea el envío', () => {
-    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('vacaciones');
     fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
       target: { value: '2027-07-10' },
@@ -175,7 +175,7 @@ describe('SolicitudAusenciaForm: validación de cliente (UX, no autoridad)', () 
   });
 
   it('envío válido de un rango (vacaciones) invoca la action con el rango completo y limpia el formulario', async () => {
-    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('vacaciones');
     fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
       target: { value: '2027-07-01' },
@@ -209,7 +209,7 @@ describe('SolicitudAusenciaForm: {ok:false} de createAusenciaRequest se muestra 
       error: copy.solicitudAusencia.errors.pendienteDuplicada,
     });
 
-    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} />);
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
     selectMotivo('vacaciones');
     fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
       target: { value: MANANA },
@@ -223,5 +223,65 @@ describe('SolicitudAusenciaForm: {ok:false} de createAusenciaRequest se muestra 
       expect(screen.getByText(copy.solicitudAusencia.errors.pendienteDuplicada)).toBeInTheDocument()
     );
     expect(screen.queryByText(copy.solicitudAusencia.messages.success)).not.toBeInTheDocument();
+  });
+});
+
+// ─── FB-ADJ-01: admin — diálogo de confirmación antes de auto-aprobación ───
+
+function fillValidVacaciones(container: HTMLElement) {
+  selectMotivo('vacaciones');
+  fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaInicio, { exact: false }), {
+    target: { value: MANANA },
+  });
+  fireEvent.change(screen.getByLabelText(copy.solicitudAusencia.fields.fechaFin, { exact: false }), {
+    target: { value: MANANA },
+  });
+  submitForm(container);
+}
+
+describe('SolicitudAusenciaForm: admin — diálogo de confirmación (FB-ADJ-01)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: el submit no invoca la action de inmediato — primero muestra el diálogo de confirmación', () => {
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={true} />);
+    fillValidVacaciones(container);
+
+    expect(screen.getByText(copy.solicitudAusencia.adminConfirm.message)).toBeInTheDocument();
+    expect(createAusenciaRequest).not.toHaveBeenCalled();
+  });
+
+  it('admin: cancelar el diálogo no envía la solicitud', () => {
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={true} />);
+    fillValidVacaciones(container);
+
+    fireEvent.click(screen.getByRole('button', { name: copy.solicitudAusencia.adminConfirm.cancel }));
+
+    expect(screen.queryByText(copy.solicitudAusencia.adminConfirm.message)).not.toBeInTheDocument();
+    expect(createAusenciaRequest).not.toHaveBeenCalled();
+  });
+
+  it('admin: confirmar el diálogo invoca la action y muestra el mensaje de éxito de auto-aprobación (no el de "queda Pendiente")', async () => {
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={true} />);
+    fillValidVacaciones(container);
+
+    // El título del modal y el botón de confirmar comparten el mismo texto
+    // ("Confirmar envío") — getByRole('button', ...) desambigua del <h2>.
+    fireEvent.click(screen.getByRole('button', { name: copy.solicitudAusencia.adminConfirm.confirm }));
+
+    await waitFor(() => expect(createAusenciaRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByText(copy.solicitudAusencia.messages.successAdmin)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(copy.solicitudAusencia.messages.success)).not.toBeInTheDocument();
+  });
+
+  it('no-admin: nunca muestra el diálogo de confirmación — envía directo', async () => {
+    const { container } = render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
+    fillValidVacaciones(container);
+
+    expect(screen.queryByText(copy.solicitudAusencia.adminConfirm.message)).not.toBeInTheDocument();
+    await waitFor(() => expect(createAusenciaRequest).toHaveBeenCalledTimes(1));
   });
 });

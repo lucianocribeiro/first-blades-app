@@ -81,3 +81,45 @@ test.describe('Empleado: Solicitud de Pasaje', () => {
     await expect(page.getByText('Base Mendoza')).toBeVisible();
   });
 });
+
+// FB-ADJ-01: el admin ahora envía Ausencia/Pasaje para sí mismo, con un
+// diálogo de confirmación previo (única acción del portal que se
+// auto-aprueba) — verifica el diálogo + que la solicitud queda Aprobada de
+// una, no Pendiente, contra el stack efímero real (server action + RPC).
+test.describe('Admin: envío para sí con auto-aprobación (FB-ADJ-01)', () => {
+  test.beforeEach(async ({ page }) => {
+    await login(page, 'admin');
+  });
+
+  test('admin: crea una ausencia, confirma el diálogo, y queda Aprobada — no Pendiente', async ({ page }) => {
+    await page.goto('/solicitud-ausencia');
+
+    await page.getByLabel(exactLabel(copy.solicitudAusencia.fields.motivo)).selectOption('vacaciones');
+    await page.getByLabel(exactLabel(copy.solicitudAusencia.fields.fechaInicio)).fill(futureDate(90));
+    await page.getByLabel(exactLabel(copy.solicitudAusencia.fields.fechaFin)).fill(futureDate(91));
+    await page.getByRole('button', { name: copy.solicitudAusencia.submitButton, exact: true }).click();
+
+    await expect(page.getByText(copy.solicitudAusencia.adminConfirm.message)).toBeVisible();
+    await page.getByRole('button', { name: copy.solicitudAusencia.adminConfirm.confirm, exact: true }).click();
+
+    await expect(page.getByText(copy.solicitudAusencia.messages.successAdmin)).toBeVisible();
+    await expect(page.getByText(copy.solicitudAusencia.estados.aprobado).first()).toBeVisible();
+    await expect(page.getByText(copy.solicitudAusencia.estados.pendiente)).toHaveCount(0);
+  });
+
+  test('admin: cancelar el diálogo no envía la solicitud de pasaje', async ({ page }) => {
+    await page.goto('/solicitud-pasaje');
+
+    await page.getByLabel(exactLabel(copy.solicitudPasaje.fields.motivoViaje)).selectOption('traslado_proyectos');
+    await page.getByLabel(exactLabel(copy.solicitudPasaje.fields.origen)).fill('Base');
+    await page.getByLabel(exactLabel(copy.solicitudPasaje.fields.destino)).fill('Sitio');
+    await page.getByLabel(exactLabel(`${copy.solicitudPasaje.fields.diasViaje} 1`)).fill(futureDate(95));
+    await page.getByRole('button', { name: copy.solicitudPasaje.submitButton, exact: true }).click();
+
+    await expect(page.getByText(copy.solicitudPasaje.adminConfirm.message)).toBeVisible();
+    await page.getByRole('button', { name: copy.solicitudPasaje.adminConfirm.cancel, exact: true }).click();
+
+    await expect(page.getByText(copy.solicitudPasaje.adminConfirm.message)).toHaveCount(0);
+    await expect(page.getByText(copy.solicitudPasaje.messages.successAdmin)).toHaveCount(0);
+  });
+});

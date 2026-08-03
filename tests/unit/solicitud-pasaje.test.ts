@@ -26,8 +26,8 @@ import { validatePasajeRequestInput } from '@/app/(app)/solicitud-pasaje/logic';
 import SolicitudPasajePage from '@/app/(app)/solicitud-pasaje/page';
 import { SolicitudPasajeForm } from '@/app/(app)/solicitud-pasaje/SolicitudPasajeForm';
 import { MisSolicitudesPasajeTable } from '@/app/(app)/solicitud-pasaje/MisSolicitudesPasajeTable';
-import { Card } from '@/components/ui/Card';
 import { copy } from '@/lib/copy';
+import { getBusinessToday } from '@/lib/business-date';
 
 function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,16 +42,22 @@ function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
 // Mockea el cliente para createPasajeRequest: la tabla 'profiles' sirve para
 // la revalidación de equipo del supervisor (.select().eq().eq().maybeSingle()),
 // 'pasaje_requests' para el INSERT final.
+// FB-ADJ-01: la action ahora encadena .insert().select('id').single() (el id
+// insertado hace falta para el camino de admin, ver más abajo) — el mock
+// resuelve la cadena completa aunque los tests no-admin solo miren insertMock.
 function mockSupabaseClient(
   opts: {
     memberExists?: boolean;
     memberError?: { message: string } | null;
     insertError?: { message: string } | null;
+    insertedId?: string;
   } = {}
 ) {
-  const { memberExists = true, memberError = null, insertError = null } = opts;
+  const { memberExists = true, memberError = null, insertError = null, insertedId = 'req-1' } = opts;
 
-  const insertMock = vi.fn().mockResolvedValue({ error: insertError });
+  const singleMock = vi.fn().mockResolvedValue({ data: insertError ? null : { id: insertedId }, error: insertError });
+  const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+  const insertMock = vi.fn().mockReturnValue({ select: selectMock });
   const maybeSingleMock = vi.fn().mockResolvedValue({
     data: memberExists ? { id: 'member-id' } : null,
     error: memberError,
@@ -68,7 +74,34 @@ function mockSupabaseClient(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from: fromMock } as any);
-  return { insertMock, maybeSingleMock, eqSupervisorMock, eqIdMock, fromMock };
+  return { insertMock, selectMock, singleMock, maybeSingleMock, eqSupervisorMock, eqIdMock, fromMock };
+}
+
+// FB-ADJ-01: mock del camino de admin — INSERT + RPC de auto-aprobación +
+// DELETE de limpieza si la RPC falla.
+function mockSupabaseAdminFlow(
+  opts: {
+    insertError?: { message: string } | null;
+    insertedId?: string;
+    resolveError?: { message: string } | null;
+    deleteError?: { message: string } | null;
+  } = {}
+) {
+  const { insertError = null, insertedId = 'req-admin-1', resolveError = null, deleteError = null } = opts;
+
+  const singleMock = vi.fn().mockResolvedValue({ data: insertError ? null : { id: insertedId }, error: insertError });
+  const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+  const insertMock = vi.fn().mockReturnValue({ select: selectMock });
+
+  const deleteEqMock = vi.fn().mockResolvedValue({ error: deleteError });
+  const deleteMock = vi.fn().mockReturnValue({ eq: deleteEqMock });
+
+  const fromMock = vi.fn().mockReturnValue({ insert: insertMock, delete: deleteMock });
+  const rpcMock = vi.fn().mockResolvedValue({ error: resolveError });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  vi.mocked(createServerClient).mockResolvedValue({ from: fromMock, rpc: rpcMock } as any);
+  return { insertMock, selectMock, singleMock, rpcMock, deleteMock, deleteEqMock, fromMock };
 }
 
 const MANANA = '2027-06-16';
@@ -79,21 +112,6 @@ const PASADO_MANANA = '2027-06-17';
 describe('createPasajeRequest: gating e integridad del purgatorio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('admin: rechazado antes de llamar insert (modo consulta, no envía)', async () => {
-    mockProfile('admin');
-    const { insertMock } = mockSupabaseClient();
-
-    await expect(
-      createPasajeRequest({
-        motivoViaje: 'traslado_proyectos',
-        origen: 'Base',
-        destino: 'Sitio',
-        diasViaje: [MANANA],
-      })
-    ).resolves.toEqual({ ok: false, error: copy.errors.unauthorized });
-    expect(insertMock).not.toHaveBeenCalled();
   });
 
   it('empleado: sin motivo rechaza antes de llamar insert', async () => {
@@ -337,6 +355,112 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
   });
 });
 
+// ─── createPasajeRequest: admin — auto-aprobación (FB-ADJ-01) ─────────────
+
+describe('createPasajeRequest: admin — auto-aprobación (FB-ADJ-01)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: siempre para sí mismo — ignora cualquier empleadoId que mande el cliente, sin consultar el equipo', async () => {
+    mockProfile('admin', 'admin-1');
+    const { insertMock, fromMock } = mockSupabaseAdminFlow({ insertedId: 'req-admin-1' });
+
+    await createPasajeRequest({
+      empleadoId:  'otro-cualquiera',
+      motivoViaje: 'traslado_proyectos',
+      origen:      'Base',
+      destino:     'Sitio',
+      diasViaje:   [MANANA],
+    });
+
+    // Nunca consulta 'profiles' (no hay validación de equipo para admin) —
+    // 'pasaje_requests' es la única tabla tocada.
+    expect(fromMock).not.toHaveBeenCalledWith('profiles');
+    expect(insertMock).toHaveBeenCalledWith([
+      expect.objectContaining({ solicitante_id: 'admin-1', empleado_id: 'admin-1', estado: 'pendiente' }),
+    ]);
+  });
+
+  it('admin: no-retroactiva sigue aplicando — rechaza antes de insertar', async () => {
+    mockProfile('admin', 'admin-1');
+    const { insertMock } = mockSupabaseAdminFlow();
+    const ayer = getBusinessToday(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
+    await expect(
+      createPasajeRequest({
+        motivoViaje: 'traslado_proyectos',
+        origen:      'Base',
+        destino:     'Sitio',
+        diasViaje:   [ayer],
+      })
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.diaRetroactivo });
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('admin: crea la solicitud (pendiente, para sí) e invoca resolver_pasaje_request(aprobar) en la misma action', async () => {
+    mockProfile('admin', 'admin-1');
+    const { insertMock, rpcMock } = mockSupabaseAdminFlow({ insertedId: 'req-admin-1' });
+
+    await expect(
+      createPasajeRequest({
+        motivoViaje: 'traslado_proyectos',
+        origen:      'Base',
+        destino:     'Sitio',
+        diasViaje:   [MANANA],
+      })
+    ).resolves.toEqual({ ok: true });
+
+    expect(insertMock).toHaveBeenCalledWith([
+      expect.objectContaining({ solicitante_id: 'admin-1', empleado_id: 'admin-1', estado: 'pendiente' }),
+    ]);
+    expect(rpcMock).toHaveBeenCalledWith('resolver_pasaje_request', {
+      p_request_id: 'req-admin-1',
+      p_accion:     'aprobar',
+    });
+  });
+
+  it('admin: si falla el insert inicial, nunca invoca la RPC de resolución', async () => {
+    mockProfile('admin', 'admin-1');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { rpcMock } = mockSupabaseAdminFlow({ insertError: { message: 'db error' } });
+
+    await expect(
+      createPasajeRequest({
+        motivoViaje: 'traslado_proyectos',
+        origen:      'Base',
+        destino:     'Sitio',
+        diasViaje:   [MANANA],
+      })
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
+    expect(rpcMock).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('admin: si falla la resolución (RPC), borra la solicitud recién creada — sin pendientes huérfanos — y devuelve error visible', async () => {
+    mockProfile('admin', 'admin-1');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { rpcMock, deleteMock, deleteEqMock } = mockSupabaseAdminFlow({
+      insertedId:   'req-admin-2',
+      resolveError: { message: 'boom' },
+    });
+
+    await expect(
+      createPasajeRequest({
+        motivoViaje: 'traslado_proyectos',
+        origen:      'Base',
+        destino:     'Sitio',
+        diasViaje:   [MANANA],
+      })
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
+
+    expect(rpcMock).toHaveBeenCalled();
+    expect(deleteMock).toHaveBeenCalled();
+    expect(deleteEqMock).toHaveBeenCalledWith('id', 'req-admin-2');
+    errorSpy.mockRestore();
+  });
+});
+
 // ─── validatePasajeRequestInput (unidad pura) ──────────────────────────────
 
 describe('validatePasajeRequestInput: motivo, origen/destino, días y no-retroactiva', () => {
@@ -439,14 +563,24 @@ describe('SolicitudPasajePage: branch por rol', () => {
     return { teamEqMock, teamOrMock, requestsOrMock, requestsOrderMock };
   }
 
-  it('admin: modo consulta, sin formulario de envío', async () => {
-    mockProfile('admin');
-    mockPageQueries({});
+  // FB-ADJ-01: admin ahora recibe el mismo formulario que empleado/supervisor
+  // (para sí, sin selector de equipo, con isAdmin=true) en vez de la card de
+  // modo consulta.
+  it('admin: recibe el formulario sin selector de equipo, isAdmin=true, y su lista propia', async () => {
+    mockProfile('admin', 'admin-1');
+    const requests = [{ id: 'p1', solicitante_id: 'admin-1', empleado_id: 'admin-1', estado: 'aprobado' }];
+    const { requestsOrMock } = mockPageQueries({ requests });
 
     const result = await SolicitudPasajePage();
 
+    expect(requestsOrMock).toHaveBeenCalledWith('solicitante_id.eq.admin-1,empleado_id.eq.admin-1');
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((result as any).type).toBe(Card);
+    const children = (result as any).props.children as any[];
+    const form = children.find((c) => c?.type === SolicitudPasajeForm);
+    expect(form.props.showEmpleadoSelector).toBe(false);
+    expect(form.props.isAdmin).toBe(true);
+    expect(form.props.team).toEqual([]);
   });
 
   it('empleado: recibe el formulario sin selector de equipo y su lista propia (solicitante O empleado viajero)', async () => {
