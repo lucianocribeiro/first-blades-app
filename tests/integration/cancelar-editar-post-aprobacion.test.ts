@@ -852,7 +852,17 @@ describe.skipIf(!dbAvailable)('cancelar_editar_ausencia_aprobada / cancelar_edit
       );
       expect(auditTransition).toHaveLength(1);
       expect(auditTransition[0].action).toBe('ausencia_editada_post_aprobacion');
-      expect(auditTransition[0].new_data.calendario_pisado).toEqual([]);
+      // FB-F4-20: ya no lleva calendario_pisado embebido.
+      expect(auditTransition[0].new_data.calendario_pisado).toBeUndefined();
+
+      // FB-F4-20: 1 fila de audit_log por cada día nuevo escrito
+      // (table_name='rotation_assignments'), igual convención que pasaje.
+      const { rows: auditWrites } = await c.query(
+        `SELECT new_data->>'fecha' AS fecha FROM audit_log
+         WHERE table_name = 'rotation_assignments' AND action = 'ausencia_calendario_sobrescrito_post_edicion'
+           AND (new_data->>'fecha') IN ('2027-09-05', '2027-09-06')`
+      );
+      expect(auditWrites.map((r) => r.fecha).sort()).toEqual(['2027-09-05', '2027-09-06']);
     });
   });
 
