@@ -1,0 +1,27 @@
+# FB-F4-AUD-15
+
+## Hallazgos
+
+Ninguno.
+
+## Veredicto
+
+Limpio. PR #35 alinea el `audit_log` de ausencia a granularidad por-dia sin aflojar las reglas de la Constitucion v0.6 §6.1/§12 y queda apto para merge gateado por Luciano. El `db push` queda fuera de alcance para `FB-F4-RUN-05`, con verificacion de catalogo post-push.
+
+Evidencia principal:
+
+- Alcance del diff: solo agrega `docs/prompts/FB-F4-20.md`, `supabase/migrations/0018_ausencia_audit_por_dia.sql`, actualiza tests de ausencia/post-aprobacion y corrige un comentario de pasaje; no toca funciones de pasaje ni archivos de app.
+- `resolver_ausencia_request` redeclara firma, `SECURITY DEFINER` y `SET search_path = public` en [0018_ausencia_audit_por_dia.sql (line 53)](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:53), conserva guarda `auth.uid() IS NULL OR NOT public.is_admin()` en [line 76](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:76) y conserva `SELECT ... FOR UPDATE` en [line 88](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:88).
+- `cancelar_editar_ausencia_aprobada` redeclara `SECURITY DEFINER` y `SET search_path = public` en [line 199](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:199), conserva guarda admin en [line 225](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:225), `FOR UPDATE` en [line 240](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:240), `reviewed_at IS NULL` defensivo en [line 262](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:262) y rango invertido en [line 276](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:276).
+- Grants re-aseverados por firma: `REVOKE` a `PUBLIC`/`anon` y `GRANT EXECUTE` a `authenticated` en [line 447](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:447) y [line 451](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:451). La migracion no altera owner; al usar `CREATE OR REPLACE` sin `ALTER FUNCTION OWNER`, el owner existente se preserva y se verificara en `FB-F4-RUN-05`.
+- La fila de transicion de aprobacion queda sin `calendario_pisado`: `new_data` es solo `{ estado: 'aprobado' }` en [line 115](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:115), y los dias se auditan por fila de `rotation_assignments` con `record_id` real, `old_data` puntual y `actor_id=auth.uid()` en [line 158](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:158).
+- La rama `editar_fechas` de ausencia replica el molde por-dia post-edicion: escribe `ausencia_calendario_sobrescrito_post_edicion` sobre `rotation_assignments` en [line 404](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:404), y la transicion `ausencia_editada_post_aprobacion` queda sin array embebido en [line 432](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:432).
+- La rama cancelar no fue duplicada ni convertida: mantiene el borrado por-dia existente `calendario_liberado_post_cancelacion` en [line 332](/Users/lucianocr/Desktop/Dev/first-blades-app/supabase/migrations/0018_ausencia_audit_por_dia.sql:332).
+- Tests actualizados cubren 1 transicion + N por-dia, ausencia de `calendario_pisado` y `old_data` por celda: aprobar single-day en [resolver-ausencia-request.test.ts (line 193)](/Users/lucianocr/Desktop/Dev/first-blades-app/tests/integration/resolver-ausencia-request.test.ts:193), rango de 5 dias en [line 444](/Users/lucianocr/Desktop/Dev/first-blades-app/tests/integration/resolver-ausencia-request.test.ts:444), sobrescritura con `old_data` en [line 487](/Users/lucianocr/Desktop/Dev/first-blades-app/tests/integration/resolver-ausencia-request.test.ts:487), y `editar_fechas` en [cancelar-editar-post-aprobacion.test.ts (line 849)](/Users/lucianocr/Desktop/Dev/first-blades-app/tests/integration/cancelar-editar-post-aprobacion.test.ts:849).
+- El drift detector sigue siendo suficiente porque inventaria firma, `prosecdef`, `proconfig`, owner y grants, no cuerpo: `resolver_ausencia_request` en [migration.test.ts (line 660)](/Users/lucianocr/Desktop/Dev/first-blades-app/tests/integration/migration.test.ts:660) y `cancelar_editar_ausencia_aprobada` en [line 955](/Users/lucianocr/Desktop/Dev/first-blades-app/tests/integration/migration.test.ts:955) / [line 981](/Users/lucianocr/Desktop/Dev/first-blades-app/tests/integration/migration.test.ts:981).
+- Seguridad §12: `git diff --check main...HEAD` limpio; grep del diff no encontro secretos ni cambios de RLS/policies/tablas fuera de las dos funciones esperadas.
+
+Verificacion:
+
+- Local: `npm run test:integration -- tests/integration/resolver-ausencia-request.test.ts tests/integration/cancelar-editar-post-aprobacion.test.ts tests/integration/migration.test.ts` ejecuto Vitest pero skippeo 117/117 por PostgreSQL local no disponible.
+- CI de PR #35, consultado con `gh pr checks 35`: verdes `Typecheck · Lint · Tests · Build`, `Tests de integracion RLS (Supabase local)`, `E2E Playwright (stack efimero)`, Vercel y Vercel Preview Comments.
