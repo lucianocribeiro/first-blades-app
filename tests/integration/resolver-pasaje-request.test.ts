@@ -17,8 +17,8 @@
  *  3. Sobrescritura: un día con 'trabajando' y otro con 'periodo_fuera_trabajo'
  *     + motivo quedan 'en_viaje' con motivo_ausencia limpiado; el old_data
  *     de CADA día pisado queda en SU PROPIA fila de audit_log (no agrupado
- *     en new_data.calendario_pisado de la transición, a diferencia del
- *     molde de ausencia — divergencia intencional, ver FB-F4-08); el CHECK
+ *     en new_data.calendario_pisado de la transición — molde de FB-F4-08,
+ *     que FB-F4-20 replicó también del lado ausencia); el CHECK
  *     rotation_assignments_motivo_requerido no se viola (en_viaje no exige
  *     motivo).
  *  4. Atomicidad — LOS TRES CASOS bajo asUser(IDS.admin) (rol authenticated

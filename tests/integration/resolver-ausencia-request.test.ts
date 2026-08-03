@@ -187,23 +187,40 @@ describe.skipIf(!dbAvailable)('resolver_ausencia_request: happy path', () => {
       expect(reqRows[0].reviewed_by).toBe(IDS.admin);
       expect(reqRows[0].reviewed_at).not.toBeNull();
 
+      // FB-F4-20: la transición de la request sigue siendo una única fila
+      // (record_id=REQ_PENDIENTE) — el detalle del día pisado ya no va acá,
+      // vive en su propia fila de audit_log (table_name='rotation_assignments').
       const { rows: auditRows } = await c.query(
-        `SELECT action, table_name, record_id, actor_id FROM audit_log WHERE record_id = $1`,
+        `SELECT action, table_name, record_id, actor_id, new_data FROM audit_log WHERE record_id = $1`,
         [REQ_PENDIENTE]
       );
       expect(auditRows).toHaveLength(1);
       expect(auditRows[0].action).toBe('ausencia_approved');
       expect(auditRows[0].table_name).toBe('ausencia_requests');
       expect(auditRows[0].actor_id).toBe(IDS.admin);
+      expect(auditRows[0].new_data).toEqual({ estado: 'aprobado' });
 
       const { rows: calRows } = await c.query(
-        `SELECT estado_dia, motivo_ausencia, es_estimado FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-02-01'`,
+        `SELECT id, estado_dia, motivo_ausencia, es_estimado FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-02-01'`,
         [IDS.employee1]
       );
       expect(calRows).toHaveLength(1);
       expect(calRows[0].estado_dia).toBe('periodo_fuera_trabajo');
       expect(calRows[0].motivo_ausencia).toBe('dia_tramite');
       expect(calRows[0].es_estimado).toBe(false);
+
+      // FB-F4-20: 1 fila de audit_log por día pisado (acá, el único día del
+      // rango), table_name='rotation_assignments', record_id=id real de la
+      // fila de calendario — igual convención que pasaje.
+      const { rows: calAuditRows } = await c.query(
+        `SELECT table_name, old_data, new_data FROM audit_log
+         WHERE action = 'ausencia_calendario_sobrescrito' AND record_id = $1`,
+        [calRows[0].id]
+      );
+      expect(calAuditRows).toHaveLength(1);
+      expect(calAuditRows[0].table_name).toBe('rotation_assignments');
+      expect(calAuditRows[0].old_data).toBeNull();
+      expect(calAuditRows[0].new_data).toMatchObject({ fecha: '2027-02-01', estado_dia: 'periodo_fuera_trabajo', motivo_ausencia: 'dia_tramite' });
     });
   });
 
@@ -246,11 +263,22 @@ describe.skipIf(!dbAvailable)('resolver_ausencia_request: happy path', () => {
       expect(calRows[0].estado_dia).toBe('periodo_fuera_trabajo');
       expect(calRows[0].motivo_ausencia).toBe('dia_tramite');
 
-      const { rows: auditRows } = await c.query(`SELECT new_data FROM audit_log WHERE record_id = $1`, [REQ_COLISION]);
-      expect(auditRows).toHaveLength(1);
-      const calendarioPisado = auditRows[0].new_data.calendario_pisado;
-      expect(calendarioPisado).toHaveLength(1);
-      expect(calendarioPisado[0]).toMatchObject({ fecha: '2027-02-04', estado_dia_previo: 'trabajando' });
+      // FB-F4-20: la transición ya no lleva calendario_pisado embebido.
+      const { rows: transitionRows } = await c.query(`SELECT new_data FROM audit_log WHERE record_id = $1`, [REQ_COLISION]);
+      expect(transitionRows).toHaveLength(1);
+      expect(transitionRows[0].new_data).toEqual({ estado: 'aprobado' });
+
+      // El detalle de la colisión vive en la fila por-día
+      // (table_name='rotation_assignments'), con old_data = la celda previa.
+      const { rows: calAuditRows } = await c.query(
+        `SELECT table_name, old_data FROM audit_log
+         WHERE action = 'ausencia_calendario_sobrescrito'
+           AND record_id IN (SELECT id FROM rotation_assignments WHERE user_id = $1 AND fecha = '2027-02-04')`,
+        [IDS.employee2]
+      );
+      expect(calAuditRows).toHaveLength(1);
+      expect(calAuditRows[0].table_name).toBe('rotation_assignments');
+      expect(calAuditRows[0].old_data).toMatchObject({ estado_dia: 'trabajando' });
     });
   });
 });
@@ -413,9 +441,24 @@ describe.skipIf(!dbAvailable)('resolver_ausencia_request: expansión de rango pe
         expect(row.es_estimado).toBe(false);
       }
 
-      const { rows: auditRows } = await c.query(`SELECT action FROM audit_log WHERE record_id = $1`, [REQ_RANGO_VACACIONES]);
+      const { rows: auditRows } = await c.query(`SELECT action, new_data FROM audit_log WHERE record_id = $1`, [REQ_RANGO_VACACIONES]);
       expect(auditRows).toHaveLength(1);
       expect(auditRows[0].action).toBe('ausencia_approved');
+      expect(auditRows[0].new_data).toEqual({ estado: 'aprobado' });
+
+      // FB-F4-20: 1 fila de audit_log por día del rango (5), no una sola
+      // agrupada — misma convención por-día que resolver_pasaje_request.
+      const { rows: calAuditRows } = await c.query(
+        `SELECT new_data FROM audit_log
+         WHERE action = 'ausencia_calendario_sobrescrito'
+           AND record_id IN (
+             SELECT id FROM rotation_assignments WHERE user_id = $1 AND fecha BETWEEN '2027-03-01' AND '2027-03-05'
+           )`,
+        [IDS.employee1]
+      );
+      expect(calAuditRows).toHaveLength(5);
+      const fechasAuditadas = calAuditRows.map((r) => r.new_data.fecha).sort();
+      expect(fechasAuditadas).toEqual(['2027-03-01', '2027-03-02', '2027-03-03', '2027-03-04', '2027-03-05']);
     });
   });
 
@@ -434,13 +477,26 @@ describe.skipIf(!dbAvailable)('resolver_ausencia_request: expansión de rango pe
         expect(row.motivo_ausencia).toBe('licencia_medica');
       }
 
-      const { rows: auditRows } = await c.query(`SELECT new_data FROM audit_log WHERE record_id = $1`, [REQ_RANGO_SOBRESCRITURA]);
-      expect(auditRows).toHaveLength(1);
-      const calendarioPisado = auditRows[0].new_data.calendario_pisado;
-      // Solo el día 03-11 tenía fila previa (trabajando); 03-10 y 03-12 no
-      // tenían nada, así que no hay nada que reportar como pisado para esos.
-      expect(calendarioPisado).toHaveLength(1);
-      expect(calendarioPisado[0]).toMatchObject({ fecha: '2027-03-11', estado_dia_previo: 'trabajando' });
+      const { rows: transitionRows } = await c.query(`SELECT new_data FROM audit_log WHERE record_id = $1`, [REQ_RANGO_SOBRESCRITURA]);
+      expect(transitionRows).toHaveLength(1);
+      expect(transitionRows[0].new_data).toEqual({ estado: 'aprobado' });
+
+      // FB-F4-20: 1 fila por-día (3), old_data refleja la celda previa
+      // exacta cuando existía (03-11) y NULL cuando el día estaba libre
+      // (03-10, 03-12) — igual que el molde de pasaje.
+      const { rows: calAuditRows } = await c.query(
+        `SELECT old_data, new_data FROM audit_log
+         WHERE action = 'ausencia_calendario_sobrescrito'
+           AND record_id IN (
+             SELECT id FROM rotation_assignments WHERE user_id = $1 AND fecha BETWEEN '2027-03-10' AND '2027-03-12'
+           )`,
+        [IDS.employee2]
+      );
+      expect(calAuditRows).toHaveLength(3);
+      const porFecha = Object.fromEntries(calAuditRows.map((r) => [r.new_data.fecha, r]));
+      expect(porFecha['2027-03-10'].old_data).toBeNull();
+      expect(porFecha['2027-03-11'].old_data).toMatchObject({ estado_dia: 'trabajando' });
+      expect(porFecha['2027-03-12'].old_data).toBeNull();
     });
   });
 
