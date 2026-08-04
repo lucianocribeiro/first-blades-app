@@ -285,3 +285,21 @@ describe('SolicitudAusenciaForm: admin — diálogo de confirmación (FB-ADJ-01)
     await waitFor(() => expect(createAusenciaRequest).toHaveBeenCalledTimes(1));
   });
 });
+
+// ─── FB-ADJ-02 (fix Baja de FB-ADJ-AUD-01): banner de purgatorio condicionado por rol ───
+
+describe('SolicitudAusenciaForm: banner de purgatorio condicionado (FB-ADJ-02)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: NO muestra "será revisada por Administración" — su solicitud se auto-aprueba', () => {
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={true} />);
+    expect(screen.queryByText(copy.purgatorio.infoMessage)).not.toBeInTheDocument();
+  });
+
+  it('no-admin: sí muestra "será revisada por Administración" (sin cambios)', () => {
+    render(<SolicitudAusenciaForm saldo={SALDO} isAdmin={false} />);
+    expect(screen.getByText(copy.purgatorio.infoMessage)).toBeInTheDocument();
+  });
+});

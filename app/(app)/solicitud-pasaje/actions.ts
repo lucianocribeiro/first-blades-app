@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { copy } from '@/lib/copy';
 import type { PasajeRequestInsert } from '@/lib/db-types';
+import { sortDiasViaje } from '@/lib/rotation/pasaje-display';
 import {
   buildPasajeInsertPayload,
   validatePasajeRequestInput,
@@ -26,6 +27,48 @@ export async function createPasajeRequest(input: CreatePasajeFormInput): Promise
 
   const supabase = await createServerClient();
 
+  if (profile.role === 'admin') {
+    // Autoridad server-side — no-retroactiva sigue aplicando al admin, ANTES
+    // de invocar la RPC (misma regla que no-admin, sin excepción).
+    const result = validatePasajeRequestInput({
+      motivoViaje: input.motivoViaje,
+      origen:      input.origen,
+      destino:     input.destino,
+      diasViaje:   input.diasViaje,
+    });
+    if (!result.valid) return { ok: false, error: result.error };
+
+    // dias_viaje ordenado y dedupeado antes de mandarlo a la RPC — mismo
+    // criterio que buildPasajeInsertPayload (camino no-admin) para no
+    // persistir fechas duplicadas ni depender del orden del cliente.
+    const diasOrdenados = sortDiasViaje([...new Set(input.diasViaje)]);
+
+    // FB-ADJ-02: crear+aprobar en UNA sola RPC transaccional (fix del
+    // Hallazgo Alto de FB-ADJ-AUD-01) — reemplaza la secuencia previa de
+    // FB-ADJ-01 (insert(pendiente) → resolver(aprobar) → cleanup si fallaba,
+    // ventana real de solicitud huérfana). Ver
+    // solicitud-ausencia/actions.ts::createAusenciaRequest y migración 0019
+    // para el detalle de por qué es atómica de verdad. Admin siempre para
+    // sí — esta RPC no acepta "para quién" (sin selector de equipo).
+    const { error } = await supabase.rpc('crear_aprobar_pasaje_admin', {
+      p_motivo_viaje: input.motivoViaje,
+      p_origen:       input.origen.trim(),
+      p_destino:      input.destino.trim(),
+      p_dias_viaje:   diasOrdenados,
+      p_nota:         input.nota?.trim() || null,
+    } as never);
+
+    if (error) {
+      console.error('[createPasajeRequest] error al crear+aprobar (admin):', error.message);
+      return { ok: false, error: copy.errors.generic };
+    }
+
+    revalidatePath('/solicitud-pasaje');
+    revalidatePath('/aprobaciones');
+    revalidatePath('/calendario');
+    return { ok: true };
+  }
+
   // Resolución de empleado_id server-side — nunca se confía ciegamente en el
   // input del cliente: un empleado SIEMPRE pide para sí mismo (cualquier
   // empleadoId que mande el cliente se ignora acá, no puede spoofear a otro
@@ -35,12 +78,8 @@ export async function createPasajeRequest(input: CreatePasajeFormInput): Promise
   // amigable ANTES de tocar la base, en vez de propagar el rechazo crudo de
   // Postgres — defensa en profundidad, mismo criterio que el pre-check de
   // scope en aprobaciones/ausencia-actions.ts.
-  //
-  // FB-ADJ-01: admin se resuelve igual que empleado — SIEMPRE para sí mismo,
-  // "admin-para-sí solamente" (no hay selector de equipo para admin en el
-  // form; cualquier empleadoId que mande el cliente se ignora acá).
   let empleadoId: string;
-  if (profile.role === 'empleado' || profile.role === 'admin') {
+  if (profile.role === 'empleado') {
     empleadoId = profile.id;
   } else {
     const candidateId = input.empleadoId?.trim();
@@ -82,49 +121,13 @@ export async function createPasajeRequest(input: CreatePasajeFormInput): Promise
   // postgrest-js a `never` en .insert() (mismo bug documentado en
   // solicitud-ausencia/actions.ts::createAusenciaRequest). insertData ya está
   // tipado como PasajeRequestInsert[] arriba; el cast acá es seguro.
-  // .select('id').single() trae el id insertado — solo hace falta para el
-  // camino de admin (auto-aprobación de abajo), pero pedirlo siempre evita
-  // duplicar el bloque de INSERT.
-  const { data: inserted, error } = await supabase
-    .from('pasaje_requests')
-    .insert(insertData as never[])
-    .select('id')
-    .single();
+  const { error } = await supabase.from('pasaje_requests').insert(insertData as never[]);
 
-  if (error || !inserted) {
-    console.error('[createPasajeRequest] error al insertar:', error?.message);
-    return { ok: false, error: copy.errors.generic };
-  }
-
-  if (profile.role !== 'admin') {
-    revalidatePath('/solicitud-pasaje');
-    return { ok: true };
-  }
-
-  // FB-ADJ-01: admin envía para sí → auto-aprobación (única excepción al
-  // purgatorio, ver constitución §4). Mismo patrón que
-  // solicitud-ausencia/actions.ts::createAusenciaRequest — la solicitud ya
-  // quedó creada como pendiente arriba (policy pasajes_insert_admin); acá se
-  // invoca la RPC de resolución con la sesión real del admin. Si falla, se
-  // borra la fila recién creada (policy pasajes_delete_admin) para no dejar
-  // un pendiente huérfano fuera de Aprobaciones.
-  const requestId = (inserted as { id: string }).id;
-  const { error: resolveError } = await supabase.rpc('resolver_pasaje_request', {
-    p_request_id: requestId,
-    p_accion:     'aprobar',
-  } as never);
-
-  if (resolveError) {
-    console.error('[createPasajeRequest] error al auto-aprobar (admin):', resolveError.message);
-    const { error: cleanupError } = await supabase.from('pasaje_requests').delete().eq('id', requestId);
-    if (cleanupError) {
-      console.error('[createPasajeRequest] error al limpiar la solicitud huérfana:', cleanupError.message);
-    }
+  if (error) {
+    console.error('[createPasajeRequest] error al insertar:', error.message);
     return { ok: false, error: copy.errors.generic };
   }
 
   revalidatePath('/solicitud-pasaje');
-  revalidatePath('/aprobaciones');
-  revalidatePath('/calendario');
   return { ok: true };
 }

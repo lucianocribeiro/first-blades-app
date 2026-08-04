@@ -67,15 +67,15 @@ Sidebar colapsable con hamburguesa. Ítems y visibilidad:
 | Mi Perfil (incluye Carga de Documentos) | ✓ | ✓ | ✓ |
 | Equipo | ✓ | — | — |
 | Calendario | ✓ | ✓ (propio + equipo, lectura) | ✓ (propio, lectura) |
-| Solicitud de Pasaje | ✓ (consulta) | ✓ (envía sí + equipo) | ✓ (envía sí) |
-| Solicitud de Ausencia | ✓ (consulta) | ✓ (envía) | ✓ (envía) |
+| Solicitud de Pasaje | ✓ (envía **para sí**, auto-aprobado) | ✓ (envía sí + equipo) | ✓ (envía sí) |
+| Solicitud de Ausencia | ✓ (envía **para sí**, auto-aprobado) | ✓ (envía) | ✓ (envía) |
 | Aprobaciones (bandeja única de purgatorio) | ✓ | — | — |
 | Procedimientos / Políticas | ✓ (gestiona) | ✓ (lee) | ✓ (lee) |
 | Rendición de Gastos (externo, link) | ✓ | ✓ | ✓ |
-| Formularios (ingreso / precarga) | ✓ (recibidos) | ✓ (ingreso) | ✓ (ingreso) |
+| Ingreso (formularios de ingreso / precarga) | ✓ (recibidos) | ✓ (ingreso) | ✓ (ingreso) |
 | Gestión de Usuarios | ✓ | — | — |
 
-- El admin **ve todos los ítems** del menú. En Solicitud de Pasaje/Ausencia entra en **modo consulta** (no envía); aprueba en **Aprobaciones**.
+- El admin **ve todos los ítems** del menú. En Solicitud de Pasaje/Ausencia **envía para sí mismo** (admin-para-sí solamente, auto-aprobado — ver excepción A5/FB-ADJ-01 más arriba); aprueba las de empleado/supervisor en **Aprobaciones**.
 - En Fase 0 todos los ítems existen en el shell y rutean a un placeholder, **salvo Gestión de Usuarios, que es funcional**.
 
 ## Lenguaje visual

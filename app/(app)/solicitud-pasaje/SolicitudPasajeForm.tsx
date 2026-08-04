@@ -135,7 +135,10 @@ export function SolicitudPasajeForm({ team, showEmpleadoSelector, isAdmin }: Pro
         {copy.solicitudPasaje.formTitle}
       </h3>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <InfoBanner message={copy.purgatorio.infoMessage} />
+        {/* FB-ADJ-02 (fix Baja de FB-ADJ-AUD-01): admin no ve "será revisada
+            por Administración" — su solicitud se auto-aprueba, y el diálogo
+            de confirmación de abajo ya comunica eso. */}
+        {!isAdmin && <InfoBanner message={copy.purgatorio.infoMessage} />}
 
         {showEmpleadoSelector && (
           <Select

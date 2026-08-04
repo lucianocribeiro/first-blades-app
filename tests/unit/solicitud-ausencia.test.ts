@@ -49,44 +49,23 @@ function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
   } as any);
 }
 
-// FB-ADJ-01: la action ahora encadena .insert().select('id').single() (el id
-// insertado hace falta para el camino de admin, ver más abajo) — el mock
-// resuelve la cadena completa aunque los tests no-admin solo miren insertMock.
-function mockSupabaseInsert(error: { code?: string; message: string } | null = null, insertedId = 'req-1') {
-  const singleMock = vi.fn().mockResolvedValue({ data: error ? null : { id: insertedId }, error });
-  const selectMock = vi.fn().mockReturnValue({ single: singleMock });
-  const insertMock = vi.fn().mockReturnValue({ select: selectMock });
+function mockSupabaseInsert(error: { code?: string; message: string } | null = null) {
+  const insertMock = vi.fn().mockResolvedValue({ error });
   const fromMock = vi.fn().mockReturnValue({ insert: insertMock });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from: fromMock } as any);
-  return { insertMock, selectMock, singleMock, fromMock };
+  return { insertMock, fromMock };
 }
 
-// FB-ADJ-01: mock del camino de admin — INSERT + RPC de auto-aprobación +
-// DELETE de limpieza si la RPC falla.
-function mockSupabaseAdminFlow(
-  opts: {
-    insertError?: { code?: string; message: string } | null;
-    insertedId?: string;
-    resolveError?: { message: string } | null;
-    deleteError?: { message: string } | null;
-  } = {}
-) {
-  const { insertError = null, insertedId = 'req-admin-1', resolveError = null, deleteError = null } = opts;
-
-  const singleMock = vi.fn().mockResolvedValue({ data: insertError ? null : { id: insertedId }, error: insertError });
-  const selectMock = vi.fn().mockReturnValue({ single: singleMock });
-  const insertMock = vi.fn().mockReturnValue({ select: selectMock });
-
-  const deleteEqMock = vi.fn().mockResolvedValue({ error: deleteError });
-  const deleteMock = vi.fn().mockReturnValue({ eq: deleteEqMock });
-
-  const fromMock = vi.fn().mockReturnValue({ insert: insertMock, delete: deleteMock });
+// FB-ADJ-02: el camino de admin ya no toca `.from()` — es una sola llamada a
+// la RPC transaccional crear_aprobar_ausencia_admin (migración 0019), sin
+// insert/select/delete de compensación (eso era FB-ADJ-01, ya no existe).
+function mockSupabaseAdminRpc(resolveError: { code?: string; message: string } | null = null) {
+  const fromMock = vi.fn();
   const rpcMock = vi.fn().mockResolvedValue({ error: resolveError });
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from: fromMock, rpc: rpcMock } as any);
-  return { insertMock, selectMock, singleMock, rpcMock, deleteMock, deleteEqMock, fromMock };
+  return { rpcMock, fromMock };
 }
 
 // Mockea AMBAS queries que arma page.tsx: la de "mis solicitudes"
@@ -313,83 +292,87 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
   });
 });
 
-// ─── createAusenciaRequest: admin — auto-aprobación (FB-ADJ-01) ───────────
+// ─── createAusenciaRequest: admin — crear+aprobar atómico (FB-ADJ-02) ─────
 
-describe('createAusenciaRequest: admin — auto-aprobación (FB-ADJ-01)', () => {
+describe('createAusenciaRequest: admin — crear+aprobar atómico vía RPC (FB-ADJ-02)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('admin: no-retroactiva sigue aplicando — rechaza antes de insertar', async () => {
+  it('admin: no-retroactiva sigue aplicando — rechaza antes de invocar la RPC', async () => {
     mockProfile('admin', 'admin-1');
-    const { insertMock } = mockSupabaseAdminFlow();
+    const { rpcMock } = mockSupabaseAdminRpc();
     const ayerIso = getBusinessToday(new Date(Date.now() - 24 * 60 * 60 * 1000));
 
     await expect(
       createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: ayerIso, fechaFin: ayerIso })
     ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.fechaRetroactiva });
-    expect(insertMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 
-  it('admin: crea la solicitud (pendiente, para sí) e invoca resolver_ausencia_request(aprobar) en la misma action', async () => {
+  it('admin: invoca crear_aprobar_ausencia_admin (UNA sola RPC, sin insert/select/delete de compensación)', async () => {
     mockProfile('admin', 'admin-1');
-    const { insertMock, rpcMock } = mockSupabaseAdminFlow({ insertedId: 'req-admin-1' });
+    const { rpcMock, fromMock } = mockSupabaseAdminRpc();
 
     await expect(
-      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
+      createAusenciaRequest({
+        motivo:      'otros',
+        fechaInicio: MANANA,
+        fechaFin:    MANANA,
+        motivoOtrosTexto: '  Trámite médico  ',
+        nota: '  nota admin  ',
+      })
     ).resolves.toEqual({ ok: true });
 
-    expect(insertMock).toHaveBeenCalledWith([
-      expect.objectContaining({ user_id: 'admin-1', estado: 'pendiente', motivo_ausencia: 'vacaciones' }),
-    ]);
-    expect(rpcMock).toHaveBeenCalledWith('resolver_ausencia_request', {
-      p_request_id: 'req-admin-1',
-      p_accion:     'aprobar',
+    expect(rpcMock).toHaveBeenCalledWith('crear_aprobar_ausencia_admin', {
+      p_motivo:             'otros',
+      p_fecha_inicio:       MANANA,
+      p_fecha_fin:          MANANA,
+      p_motivo_otros_texto: 'Trámite médico',
+      p_nota:               'nota admin',
     });
+    // FB-ADJ-02: ya no hay INSERT/DELETE de compensación — la RPC es la
+    // única operación de base para el camino de admin.
+    expect(fromMock).not.toHaveBeenCalled();
   });
 
-  it('admin: si falla el insert inicial, nunca invoca la RPC de resolución', async () => {
+  it('admin: motivo distinto de "otros" nunca manda motivo_otros_texto a la RPC, aunque el input lo traiga', async () => {
     mockProfile('admin', 'admin-1');
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { rpcMock } = mockSupabaseAdminFlow({ insertError: { message: 'db error' } });
+    const { rpcMock } = mockSupabaseAdminRpc();
 
-    await expect(
-      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
-    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
-    expect(rpcMock).not.toHaveBeenCalled();
-    errorSpy.mockRestore();
-  });
-
-  it('admin: si falla la resolución (RPC), borra la solicitud recién creada — sin pendientes huérfanos — y devuelve error visible', async () => {
-    mockProfile('admin', 'admin-1');
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { rpcMock, deleteMock, deleteEqMock } = mockSupabaseAdminFlow({
-      insertedId:   'req-admin-2',
-      resolveError: { message: 'boom' },
+    await createAusenciaRequest({
+      motivo: 'vacaciones',
+      fechaInicio: MANANA,
+      fechaFin: MANANA,
+      motivoOtrosTexto: 'no debería mandarse',
     });
 
-    await expect(
-      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
-    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
-
-    expect(rpcMock).toHaveBeenCalled();
-    expect(deleteMock).toHaveBeenCalled();
-    expect(deleteEqMock).toHaveBeenCalledWith('id', 'req-admin-2');
-    errorSpy.mockRestore();
+    expect(rpcMock).toHaveBeenCalledWith('crear_aprobar_ausencia_admin', expect.objectContaining({
+      p_motivo_otros_texto: null,
+    }));
   });
 
-  it('admin: si además falla el DELETE de limpieza, igual devuelve error visible (no lo traga)', async () => {
+  it('admin: si la RPC falla, devuelve error visible — sin tragarlo', async () => {
     mockProfile('admin', 'admin-1');
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockSupabaseAdminFlow({
-      resolveError: { message: 'boom' },
-      deleteError:  { message: 'no se pudo borrar' },
-    });
+    mockSupabaseAdminRpc({ message: 'boom' });
 
     await expect(
       createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
     ).resolves.toEqual({ ok: false, error: copy.errors.generic });
     errorSpy.mockRestore();
+  });
+
+  it('admin: choque con la exclusion constraint (23P01) vía RPC se traduce a copy amigable, igual que el camino no-admin', async () => {
+    mockProfile('admin', 'admin-1');
+    mockSupabaseAdminRpc({
+      code: '23P01',
+      message: 'conflicting key value violates exclusion constraint "ausencia_requests_no_solapamiento_pendiente"',
+    });
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.pendienteDuplicada });
   });
 });
 

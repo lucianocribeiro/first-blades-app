@@ -41,23 +41,17 @@ function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
 
 // Mockea el cliente para createPasajeRequest: la tabla 'profiles' sirve para
 // la revalidación de equipo del supervisor (.select().eq().eq().maybeSingle()),
-// 'pasaje_requests' para el INSERT final.
-// FB-ADJ-01: la action ahora encadena .insert().select('id').single() (el id
-// insertado hace falta para el camino de admin, ver más abajo) — el mock
-// resuelve la cadena completa aunque los tests no-admin solo miren insertMock.
+// 'pasaje_requests' para el INSERT final (camino no-admin).
 function mockSupabaseClient(
   opts: {
     memberExists?: boolean;
     memberError?: { message: string } | null;
     insertError?: { message: string } | null;
-    insertedId?: string;
   } = {}
 ) {
-  const { memberExists = true, memberError = null, insertError = null, insertedId = 'req-1' } = opts;
+  const { memberExists = true, memberError = null, insertError = null } = opts;
 
-  const singleMock = vi.fn().mockResolvedValue({ data: insertError ? null : { id: insertedId }, error: insertError });
-  const selectMock = vi.fn().mockReturnValue({ single: singleMock });
-  const insertMock = vi.fn().mockReturnValue({ select: selectMock });
+  const insertMock = vi.fn().mockResolvedValue({ error: insertError });
   const maybeSingleMock = vi.fn().mockResolvedValue({
     data: memberExists ? { id: 'member-id' } : null,
     error: memberError,
@@ -74,34 +68,18 @@ function mockSupabaseClient(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from: fromMock } as any);
-  return { insertMock, selectMock, singleMock, maybeSingleMock, eqSupervisorMock, eqIdMock, fromMock };
+  return { insertMock, maybeSingleMock, eqSupervisorMock, eqIdMock, fromMock };
 }
 
-// FB-ADJ-01: mock del camino de admin — INSERT + RPC de auto-aprobación +
-// DELETE de limpieza si la RPC falla.
-function mockSupabaseAdminFlow(
-  opts: {
-    insertError?: { message: string } | null;
-    insertedId?: string;
-    resolveError?: { message: string } | null;
-    deleteError?: { message: string } | null;
-  } = {}
-) {
-  const { insertError = null, insertedId = 'req-admin-1', resolveError = null, deleteError = null } = opts;
-
-  const singleMock = vi.fn().mockResolvedValue({ data: insertError ? null : { id: insertedId }, error: insertError });
-  const selectMock = vi.fn().mockReturnValue({ single: singleMock });
-  const insertMock = vi.fn().mockReturnValue({ select: selectMock });
-
-  const deleteEqMock = vi.fn().mockResolvedValue({ error: deleteError });
-  const deleteMock = vi.fn().mockReturnValue({ eq: deleteEqMock });
-
-  const fromMock = vi.fn().mockReturnValue({ insert: insertMock, delete: deleteMock });
+// FB-ADJ-02: el camino de admin ya no toca `.from()` — es una sola llamada a
+// la RPC transaccional crear_aprobar_pasaje_admin (migración 0019), sin
+// insert/select/delete de compensación (eso era FB-ADJ-01, ya no existe).
+function mockSupabaseAdminRpc(resolveError: { message: string } | null = null) {
+  const fromMock = vi.fn();
   const rpcMock = vi.fn().mockResolvedValue({ error: resolveError });
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue({ from: fromMock, rpc: rpcMock } as any);
-  return { insertMock, selectMock, singleMock, rpcMock, deleteMock, deleteEqMock, fromMock };
+  return { rpcMock, fromMock };
 }
 
 const MANANA = '2027-06-16';
@@ -355,16 +333,16 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
   });
 });
 
-// ─── createPasajeRequest: admin — auto-aprobación (FB-ADJ-01) ─────────────
+// ─── createPasajeRequest: admin — crear+aprobar atómico (FB-ADJ-02) ───────
 
-describe('createPasajeRequest: admin — auto-aprobación (FB-ADJ-01)', () => {
+describe('createPasajeRequest: admin — crear+aprobar atómico vía RPC (FB-ADJ-02)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('admin: siempre para sí mismo — ignora cualquier empleadoId que mande el cliente, sin consultar el equipo', async () => {
     mockProfile('admin', 'admin-1');
-    const { insertMock, fromMock } = mockSupabaseAdminFlow({ insertedId: 'req-admin-1' });
+    const { rpcMock, fromMock } = mockSupabaseAdminRpc();
 
     await createPasajeRequest({
       empleadoId:  'otro-cualquiera',
@@ -374,17 +352,15 @@ describe('createPasajeRequest: admin — auto-aprobación (FB-ADJ-01)', () => {
       diasViaje:   [MANANA],
     });
 
-    // Nunca consulta 'profiles' (no hay validación de equipo para admin) —
-    // 'pasaje_requests' es la única tabla tocada.
-    expect(fromMock).not.toHaveBeenCalledWith('profiles');
-    expect(insertMock).toHaveBeenCalledWith([
-      expect.objectContaining({ solicitante_id: 'admin-1', empleado_id: 'admin-1', estado: 'pendiente' }),
-    ]);
+    // Nunca toca `.from()` (ni 'profiles' ni 'pasaje_requests') — la RPC es
+    // la única operación de base para el camino de admin.
+    expect(fromMock).not.toHaveBeenCalled();
+    expect(rpcMock).toHaveBeenCalledWith('crear_aprobar_pasaje_admin', expect.any(Object));
   });
 
-  it('admin: no-retroactiva sigue aplicando — rechaza antes de insertar', async () => {
+  it('admin: no-retroactiva sigue aplicando — rechaza antes de invocar la RPC', async () => {
     mockProfile('admin', 'admin-1');
-    const { insertMock } = mockSupabaseAdminFlow();
+    const { rpcMock } = mockSupabaseAdminRpc();
     const ayer = getBusinessToday(new Date(Date.now() - 24 * 60 * 60 * 1000));
 
     await expect(
@@ -395,35 +371,36 @@ describe('createPasajeRequest: admin — auto-aprobación (FB-ADJ-01)', () => {
         diasViaje:   [ayer],
       })
     ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.diaRetroactivo });
-    expect(insertMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 
-  it('admin: crea la solicitud (pendiente, para sí) e invoca resolver_pasaje_request(aprobar) en la misma action', async () => {
+  it('admin: invoca crear_aprobar_pasaje_admin (UNA sola RPC) con los días ordenados y dedupeados', async () => {
     mockProfile('admin', 'admin-1');
-    const { insertMock, rpcMock } = mockSupabaseAdminFlow({ insertedId: 'req-admin-1' });
+    const { rpcMock } = mockSupabaseAdminRpc();
 
     await expect(
       createPasajeRequest({
         motivoViaje: 'traslado_proyectos',
-        origen:      'Base',
-        destino:     'Sitio',
-        diasViaje:   [MANANA],
+        origen:      '  Base  ',
+        destino:     '  Sitio  ',
+        diasViaje:   [PASADO_MANANA, MANANA, MANANA],
+        nota:        '  nota admin  ',
       })
     ).resolves.toEqual({ ok: true });
 
-    expect(insertMock).toHaveBeenCalledWith([
-      expect.objectContaining({ solicitante_id: 'admin-1', empleado_id: 'admin-1', estado: 'pendiente' }),
-    ]);
-    expect(rpcMock).toHaveBeenCalledWith('resolver_pasaje_request', {
-      p_request_id: 'req-admin-1',
-      p_accion:     'aprobar',
+    expect(rpcMock).toHaveBeenCalledWith('crear_aprobar_pasaje_admin', {
+      p_motivo_viaje: 'traslado_proyectos',
+      p_origen:       'Base',
+      p_destino:      'Sitio',
+      p_dias_viaje:   [MANANA, PASADO_MANANA],
+      p_nota:         'nota admin',
     });
   });
 
-  it('admin: si falla el insert inicial, nunca invoca la RPC de resolución', async () => {
+  it('admin: si la RPC falla, devuelve error visible — sin tragarlo', async () => {
     mockProfile('admin', 'admin-1');
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { rpcMock } = mockSupabaseAdminFlow({ insertError: { message: 'db error' } });
+    mockSupabaseAdminRpc({ message: 'boom' });
 
     await expect(
       createPasajeRequest({
@@ -433,30 +410,6 @@ describe('createPasajeRequest: admin — auto-aprobación (FB-ADJ-01)', () => {
         diasViaje:   [MANANA],
       })
     ).resolves.toEqual({ ok: false, error: copy.errors.generic });
-    expect(rpcMock).not.toHaveBeenCalled();
-    errorSpy.mockRestore();
-  });
-
-  it('admin: si falla la resolución (RPC), borra la solicitud recién creada — sin pendientes huérfanos — y devuelve error visible', async () => {
-    mockProfile('admin', 'admin-1');
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { rpcMock, deleteMock, deleteEqMock } = mockSupabaseAdminFlow({
-      insertedId:   'req-admin-2',
-      resolveError: { message: 'boom' },
-    });
-
-    await expect(
-      createPasajeRequest({
-        motivoViaje: 'traslado_proyectos',
-        origen:      'Base',
-        destino:     'Sitio',
-        diasViaje:   [MANANA],
-      })
-    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
-
-    expect(rpcMock).toHaveBeenCalled();
-    expect(deleteMock).toHaveBeenCalled();
-    expect(deleteEqMock).toHaveBeenCalledWith('id', 'req-admin-2');
     errorSpy.mockRestore();
   });
 });
