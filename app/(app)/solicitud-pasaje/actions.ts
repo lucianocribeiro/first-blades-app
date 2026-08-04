@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { copy } from '@/lib/copy';
 import type { PasajeRequestInsert } from '@/lib/db-types';
+import { sortDiasViaje } from '@/lib/rotation/pasaje-display';
 import {
   buildPasajeInsertPayload,
   validatePasajeRequestInput,
@@ -24,10 +25,49 @@ export type CreatePasajeResult = { ok: true } | { ok: false; error: string };
 export async function createPasajeRequest(input: CreatePasajeFormInput): Promise<CreatePasajeResult> {
   const profile = await requireAuth();
 
-  // El formulario no se muestra a admin (modo consulta); doble chequeo en servidor.
-  if (profile.role === 'admin') return { ok: false, error: copy.errors.unauthorized };
-
   const supabase = await createServerClient();
+
+  if (profile.role === 'admin') {
+    // Autoridad server-side — no-retroactiva sigue aplicando al admin, ANTES
+    // de invocar la RPC (misma regla que no-admin, sin excepción).
+    const result = validatePasajeRequestInput({
+      motivoViaje: input.motivoViaje,
+      origen:      input.origen,
+      destino:     input.destino,
+      diasViaje:   input.diasViaje,
+    });
+    if (!result.valid) return { ok: false, error: result.error };
+
+    // dias_viaje ordenado y dedupeado antes de mandarlo a la RPC — mismo
+    // criterio que buildPasajeInsertPayload (camino no-admin) para no
+    // persistir fechas duplicadas ni depender del orden del cliente.
+    const diasOrdenados = sortDiasViaje([...new Set(input.diasViaje)]);
+
+    // FB-ADJ-02: crear+aprobar en UNA sola RPC transaccional (fix del
+    // Hallazgo Alto de FB-ADJ-AUD-01) — reemplaza la secuencia previa de
+    // FB-ADJ-01 (insert(pendiente) → resolver(aprobar) → cleanup si fallaba,
+    // ventana real de solicitud huérfana). Ver
+    // solicitud-ausencia/actions.ts::createAusenciaRequest y migración 0019
+    // para el detalle de por qué es atómica de verdad. Admin siempre para
+    // sí — esta RPC no acepta "para quién" (sin selector de equipo).
+    const { error } = await supabase.rpc('crear_aprobar_pasaje_admin', {
+      p_motivo_viaje: input.motivoViaje,
+      p_origen:       input.origen.trim(),
+      p_destino:      input.destino.trim(),
+      p_dias_viaje:   diasOrdenados,
+      p_nota:         input.nota?.trim() || null,
+    } as never);
+
+    if (error) {
+      console.error('[createPasajeRequest] error al crear+aprobar (admin):', error.message);
+      return { ok: false, error: copy.errors.generic };
+    }
+
+    revalidatePath('/solicitud-pasaje');
+    revalidatePath('/aprobaciones');
+    revalidatePath('/calendario');
+    return { ok: true };
+  }
 
   // Resolución de empleado_id server-side — nunca se confía ciegamente en el
   // input del cliente: un empleado SIEMPRE pide para sí mismo (cualquier

@@ -615,6 +615,26 @@ export type Database = {
         }
         Returns: undefined
       }
+      crear_aprobar_ausencia_admin: {
+        Args: {
+          p_fecha_fin: string
+          p_fecha_inicio: string
+          p_motivo: Database["public"]["Enums"]["motivo_ausencia"]
+          p_motivo_otros_texto?: string
+          p_nota?: string
+        }
+        Returns: string
+      }
+      crear_aprobar_pasaje_admin: {
+        Args: {
+          p_destino: string
+          p_dias_viaje: string[]
+          p_motivo_viaje: Database["public"]["Enums"]["motivo_viaje"]
+          p_nota?: string
+          p_origen: string
+        }
+        Returns: string
+      }
       is_admin: { Args: never; Returns: boolean }
       log_audit: {
         Args: {

@@ -1,9 +1,7 @@
-import Link from 'next/link';
 import { requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { copy } from '@/lib/copy';
 import { Card } from '@/components/ui/Card';
-import { InfoBanner } from '@/components/ui/InfoBanner';
 import { SolicitudPasajeForm, type TeamMember } from './SolicitudPasajeForm';
 import { MisSolicitudesPasajeTable } from './MisSolicitudesPasajeTable';
 import type { PasajeRequest, Profile } from '@/lib/db-types';
@@ -17,19 +15,10 @@ export type PasajeRequestWithEmpleado = PasajeRequest & {
 export default async function SolicitudPasajePage() {
   const profile = await requireAuth();
 
-  // Admin entra en modo consulta (no envía); gestiona estas solicitudes desde /aprobaciones.
-  if (profile.role === 'admin') {
-    return (
-      <Card>
-        <InfoBanner message={copy.solicitudPasaje.adminConsulta.message} />
-        <div className="mt-4">
-          <Link href="/aprobaciones" className="text-sm font-medium text-primary hover:underline">
-            {copy.solicitudPasaje.adminConsulta.linkLabel}
-          </Link>
-        </div>
-      </Card>
-    );
-  }
+  // FB-ADJ-01: admin ahora envía para sí (auto-aprobación) en vez de entrar
+  // en modo consulta — mismo formulario y lista propia que empleado/
+  // supervisor. Sigue gestionando las solicitudes de otros desde /aprobaciones.
+  const isAdmin = profile.role === 'admin';
 
   const supabase = await createServerClient();
 
@@ -88,7 +77,11 @@ export default async function SolicitudPasajePage() {
 
   return (
     <div className="space-y-6">
-      <SolicitudPasajeForm team={team} showEmpleadoSelector={profile.role === 'supervisor'} />
+      <SolicitudPasajeForm
+        team={team}
+        showEmpleadoSelector={profile.role === 'supervisor'}
+        isAdmin={isAdmin}
+      />
       <MisSolicitudesPasajeTable requests={requests} viewerId={profile.id} />
     </div>
   );

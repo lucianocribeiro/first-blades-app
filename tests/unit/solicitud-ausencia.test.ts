@@ -57,6 +57,17 @@ function mockSupabaseInsert(error: { code?: string; message: string } | null = n
   return { insertMock, fromMock };
 }
 
+// FB-ADJ-02: el camino de admin ya no toca `.from()` — es una sola llamada a
+// la RPC transaccional crear_aprobar_ausencia_admin (migración 0019), sin
+// insert/select/delete de compensación (eso era FB-ADJ-01, ya no existe).
+function mockSupabaseAdminRpc(resolveError: { code?: string; message: string } | null = null) {
+  const fromMock = vi.fn();
+  const rpcMock = vi.fn().mockResolvedValue({ error: resolveError });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  vi.mocked(createServerClient).mockResolvedValue({ from: fromMock, rpc: rpcMock } as any);
+  return { rpcMock, fromMock };
+}
+
 // Mockea AMBAS queries que arma page.tsx: la de "mis solicitudes"
 // (ausencia_requests) y la del saldo de días de trámite (rotation_assignments,
 // FB-F3-21). Rutea por nombre de tabla — cada una tiene una forma de cadena
@@ -94,16 +105,6 @@ const MANANA = '2027-06-16';
 describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('admin: rechazado antes de llamar insert (modo consulta, no envía)', async () => {
-    mockProfile('admin');
-    const { insertMock } = mockSupabaseInsert();
-
-    await expect(
-      createAusenciaRequest({ motivo: 'dia_tramite', fechaInicio: MANANA, fechaFin: MANANA })
-    ).resolves.toEqual({ ok: false, error: copy.errors.unauthorized });
-    expect(insertMock).not.toHaveBeenCalled();
   });
 
   it('empleado: sin motivo rechaza antes de llamar insert', async () => {
@@ -291,6 +292,90 @@ describe('createAusenciaRequest: gating e integridad del purgatorio', () => {
   });
 });
 
+// ─── createAusenciaRequest: admin — crear+aprobar atómico (FB-ADJ-02) ─────
+
+describe('createAusenciaRequest: admin — crear+aprobar atómico vía RPC (FB-ADJ-02)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: no-retroactiva sigue aplicando — rechaza antes de invocar la RPC', async () => {
+    mockProfile('admin', 'admin-1');
+    const { rpcMock } = mockSupabaseAdminRpc();
+    const ayerIso = getBusinessToday(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: ayerIso, fechaFin: ayerIso })
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.fechaRetroactiva });
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it('admin: invoca crear_aprobar_ausencia_admin (UNA sola RPC, sin insert/select/delete de compensación)', async () => {
+    mockProfile('admin', 'admin-1');
+    const { rpcMock, fromMock } = mockSupabaseAdminRpc();
+
+    await expect(
+      createAusenciaRequest({
+        motivo:      'otros',
+        fechaInicio: MANANA,
+        fechaFin:    MANANA,
+        motivoOtrosTexto: '  Trámite médico  ',
+        nota: '  nota admin  ',
+      })
+    ).resolves.toEqual({ ok: true });
+
+    expect(rpcMock).toHaveBeenCalledWith('crear_aprobar_ausencia_admin', {
+      p_motivo:             'otros',
+      p_fecha_inicio:       MANANA,
+      p_fecha_fin:          MANANA,
+      p_motivo_otros_texto: 'Trámite médico',
+      p_nota:               'nota admin',
+    });
+    // FB-ADJ-02: ya no hay INSERT/DELETE de compensación — la RPC es la
+    // única operación de base para el camino de admin.
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  it('admin: motivo distinto de "otros" nunca manda motivo_otros_texto a la RPC, aunque el input lo traiga', async () => {
+    mockProfile('admin', 'admin-1');
+    const { rpcMock } = mockSupabaseAdminRpc();
+
+    await createAusenciaRequest({
+      motivo: 'vacaciones',
+      fechaInicio: MANANA,
+      fechaFin: MANANA,
+      motivoOtrosTexto: 'no debería mandarse',
+    });
+
+    expect(rpcMock).toHaveBeenCalledWith('crear_aprobar_ausencia_admin', expect.objectContaining({
+      p_motivo_otros_texto: null,
+    }));
+  });
+
+  it('admin: si la RPC falla, devuelve error visible — sin tragarlo', async () => {
+    mockProfile('admin', 'admin-1');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockSupabaseAdminRpc({ message: 'boom' });
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
+    errorSpy.mockRestore();
+  });
+
+  it('admin: choque con la exclusion constraint (23P01) vía RPC se traduce a copy amigable, igual que el camino no-admin', async () => {
+    mockProfile('admin', 'admin-1');
+    mockSupabaseAdminRpc({
+      code: '23P01',
+      message: 'conflicting key value violates exclusion constraint "ausencia_requests_no_solapamiento_pendiente"',
+    });
+
+    await expect(
+      createAusenciaRequest({ motivo: 'vacaciones', fechaInicio: MANANA, fechaFin: MANANA })
+    ).resolves.toEqual({ ok: false, error: copy.solicitudAusencia.errors.pendienteDuplicada });
+  });
+});
+
 // ─── validateAusenciaRequestInput (unidad pura) ────────────────────────────
 
 describe('validateAusenciaRequestInput: no-retroactiva, rango y motivo otros', () => {
@@ -392,13 +477,23 @@ describe('SolicitudAusenciaPage: branch por rol', () => {
     vi.clearAllMocks();
   });
 
-  it('admin: modo consulta, sin formulario de envío', async () => {
-    mockProfile('admin');
+  // FB-ADJ-01: admin ahora recibe el mismo formulario que empleado/supervisor
+  // (para sí, con isAdmin=true) en vez de la card de modo consulta.
+  it('admin: recibe el formulario con isAdmin=true y su lista propia filtrada por user_id explícito', async () => {
+    mockProfile('admin', 'admin-1');
+    const rows = [{ id: 'a1', user_id: 'admin-1', estado: 'aprobado' }];
+    const { eqMock } = mockSupabaseSelect({ data: rows, error: null });
 
     const result = await SolicitudAusenciaPage();
 
+    expect(eqMock).toHaveBeenCalledWith('user_id', 'admin-1');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((result as any).type).toBe(Card);
+    const children = (result as any).props.children as any[];
+    const form = children.find((c) => c?.type === SolicitudAusenciaForm);
+    const table = children.find((c) => c?.type === MisSolicitudesTable);
+    expect(form).toBeTruthy();
+    expect(form.props.isAdmin).toBe(true);
+    expect(table.props.requests).toEqual(rows);
   });
 
   it('empleado: recibe el formulario (con su saldo de días de trámite ya calculado) y su lista propia filtrada por user_id explícito', async () => {

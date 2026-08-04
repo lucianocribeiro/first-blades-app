@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { InfoBanner } from '@/components/ui/InfoBanner';
+import { Modal } from '@/components/ui/Modal';
 import { MOTIVO_OPTIONS } from '@/lib/rotation/motivo-options';
 import { SaldoDiasTramiteCard } from './SaldoDiasTramiteCard';
 import { validateAusenciaRequestInput } from './logic';
@@ -18,9 +19,13 @@ import type { SaldoDiasTramite } from '@/lib/rotation/saldo-dias-tramite';
 
 type Props = {
   saldo: SaldoDiasTramite;
+  // FB-ADJ-01: cuando el solicitante es admin, el envío se auto-aprueba
+  // (no pasa por Aprobaciones) — el form pide confirmación antes de enviar
+  // y muestra un mensaje de éxito distinto.
+  isAdmin: boolean;
 };
 
-export function SolicitudAusenciaForm({ saldo }: Props) {
+export function SolicitudAusenciaForm({ saldo, isAdmin }: Props) {
   const [isPending, startTransition] = useTransition();
   const [motivo, setMotivo] = useState<MotivoAusencia | ''>('');
   const [fechaInicio, setFechaInicio] = useState('');
@@ -29,6 +34,7 @@ export function SolicitudAusenciaForm({ saldo }: Props) {
   const [nota, setNota] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [showAdminConfirm, setShowAdminConfirm] = useState(false);
 
   const isDiaTramite = motivo === 'dia_tramite';
   const isOtros = motivo === 'otros';
@@ -48,23 +54,7 @@ export function SolicitudAusenciaForm({ saldo }: Props) {
     setNota('');
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError('');
-    setSuccess(false);
-
-    const result = validateAusenciaRequestInput({
-      motivo,
-      fechaInicio,
-      fechaFin: fechaFinEfectiva,
-      motivoOtrosTexto,
-    });
-
-    if (!result.valid) {
-      setError(result.error);
-      return;
-    }
-
+  function submit() {
     startTransition(async () => {
       // FB-F4-16: createAusenciaRequest devuelve { ok, error } en vez de
       // tirar — Next.js redacta el mensaje de un throw que cruce el límite
@@ -85,6 +75,38 @@ export function SolicitudAusenciaForm({ saldo }: Props) {
     });
   }
 
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    setSuccess(false);
+
+    const result = validateAusenciaRequestInput({
+      motivo,
+      fechaInicio,
+      fechaFin: fechaFinEfectiva,
+      motivoOtrosTexto,
+    });
+
+    if (!result.valid) {
+      setError(result.error);
+      return;
+    }
+
+    // FB-ADJ-01: admin ve un diálogo de confirmación antes de enviar — su
+    // solicitud se auto-aprueba, no pasa por revisión.
+    if (isAdmin) {
+      setShowAdminConfirm(true);
+      return;
+    }
+
+    submit();
+  }
+
+  function handleConfirmAdminSubmit() {
+    setShowAdminConfirm(false);
+    submit();
+  }
+
   return (
     <>
       <Card>
@@ -92,7 +114,10 @@ export function SolicitudAusenciaForm({ saldo }: Props) {
           {copy.solicitudAusencia.formTitle}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <InfoBanner message={copy.purgatorio.infoMessage} />
+          {/* FB-ADJ-02 (fix Baja de FB-ADJ-AUD-01): admin no ve "será revisada
+              por Administración" — su solicitud se auto-aprueba, y el diálogo
+              de confirmación de abajo ya comunica eso. */}
+          {!isAdmin && <InfoBanner message={copy.purgatorio.infoMessage} />}
 
           <Select
             label={copy.solicitudAusencia.fields.motivo}
@@ -145,7 +170,7 @@ export function SolicitudAusenciaForm({ saldo }: Props) {
           )}
           {success && (
             <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-              {copy.solicitudAusencia.messages.success}
+              {isAdmin ? copy.solicitudAusencia.messages.successAdmin : copy.solicitudAusencia.messages.success}
             </p>
           )}
 
@@ -156,6 +181,26 @@ export function SolicitudAusenciaForm({ saldo }: Props) {
       </Card>
 
       {isDiaTramite && <SaldoDiasTramiteCard saldo={saldo} />}
+
+      {isAdmin && (
+        <Modal
+          open={showAdminConfirm}
+          onClose={() => setShowAdminConfirm(false)}
+          title={copy.solicitudAusencia.adminConfirm.title}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setShowAdminConfirm(false)}>
+                {copy.solicitudAusencia.adminConfirm.cancel}
+              </Button>
+              <Button variant="primary" onClick={handleConfirmAdminSubmit} loading={isPending}>
+                {copy.solicitudAusencia.adminConfirm.confirm}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-secondary">{copy.solicitudAusencia.adminConfirm.message}</p>
+        </Modal>
+      )}
     </>
   );
 }

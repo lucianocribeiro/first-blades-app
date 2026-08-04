@@ -26,8 +26,8 @@ import { validatePasajeRequestInput } from '@/app/(app)/solicitud-pasaje/logic';
 import SolicitudPasajePage from '@/app/(app)/solicitud-pasaje/page';
 import { SolicitudPasajeForm } from '@/app/(app)/solicitud-pasaje/SolicitudPasajeForm';
 import { MisSolicitudesPasajeTable } from '@/app/(app)/solicitud-pasaje/MisSolicitudesPasajeTable';
-import { Card } from '@/components/ui/Card';
 import { copy } from '@/lib/copy';
+import { getBusinessToday } from '@/lib/business-date';
 
 function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,7 +41,7 @@ function mockProfile(role: 'admin' | 'supervisor' | 'empleado', id = 'user-1') {
 
 // Mockea el cliente para createPasajeRequest: la tabla 'profiles' sirve para
 // la revalidación de equipo del supervisor (.select().eq().eq().maybeSingle()),
-// 'pasaje_requests' para el INSERT final.
+// 'pasaje_requests' para el INSERT final (camino no-admin).
 function mockSupabaseClient(
   opts: {
     memberExists?: boolean;
@@ -71,6 +71,17 @@ function mockSupabaseClient(
   return { insertMock, maybeSingleMock, eqSupervisorMock, eqIdMock, fromMock };
 }
 
+// FB-ADJ-02: el camino de admin ya no toca `.from()` — es una sola llamada a
+// la RPC transaccional crear_aprobar_pasaje_admin (migración 0019), sin
+// insert/select/delete de compensación (eso era FB-ADJ-01, ya no existe).
+function mockSupabaseAdminRpc(resolveError: { message: string } | null = null) {
+  const fromMock = vi.fn();
+  const rpcMock = vi.fn().mockResolvedValue({ error: resolveError });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  vi.mocked(createServerClient).mockResolvedValue({ from: fromMock, rpc: rpcMock } as any);
+  return { rpcMock, fromMock };
+}
+
 const MANANA = '2027-06-16';
 const PASADO_MANANA = '2027-06-17';
 
@@ -79,21 +90,6 @@ const PASADO_MANANA = '2027-06-17';
 describe('createPasajeRequest: gating e integridad del purgatorio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('admin: rechazado antes de llamar insert (modo consulta, no envía)', async () => {
-    mockProfile('admin');
-    const { insertMock } = mockSupabaseClient();
-
-    await expect(
-      createPasajeRequest({
-        motivoViaje: 'traslado_proyectos',
-        origen: 'Base',
-        destino: 'Sitio',
-        diasViaje: [MANANA],
-      })
-    ).resolves.toEqual({ ok: false, error: copy.errors.unauthorized });
-    expect(insertMock).not.toHaveBeenCalled();
   });
 
   it('empleado: sin motivo rechaza antes de llamar insert', async () => {
@@ -337,6 +333,87 @@ describe('createPasajeRequest: gating e integridad del purgatorio', () => {
   });
 });
 
+// ─── createPasajeRequest: admin — crear+aprobar atómico (FB-ADJ-02) ───────
+
+describe('createPasajeRequest: admin — crear+aprobar atómico vía RPC (FB-ADJ-02)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: siempre para sí mismo — ignora cualquier empleadoId que mande el cliente, sin consultar el equipo', async () => {
+    mockProfile('admin', 'admin-1');
+    const { rpcMock, fromMock } = mockSupabaseAdminRpc();
+
+    await createPasajeRequest({
+      empleadoId:  'otro-cualquiera',
+      motivoViaje: 'traslado_proyectos',
+      origen:      'Base',
+      destino:     'Sitio',
+      diasViaje:   [MANANA],
+    });
+
+    // Nunca toca `.from()` (ni 'profiles' ni 'pasaje_requests') — la RPC es
+    // la única operación de base para el camino de admin.
+    expect(fromMock).not.toHaveBeenCalled();
+    expect(rpcMock).toHaveBeenCalledWith('crear_aprobar_pasaje_admin', expect.any(Object));
+  });
+
+  it('admin: no-retroactiva sigue aplicando — rechaza antes de invocar la RPC', async () => {
+    mockProfile('admin', 'admin-1');
+    const { rpcMock } = mockSupabaseAdminRpc();
+    const ayer = getBusinessToday(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
+    await expect(
+      createPasajeRequest({
+        motivoViaje: 'traslado_proyectos',
+        origen:      'Base',
+        destino:     'Sitio',
+        diasViaje:   [ayer],
+      })
+    ).resolves.toEqual({ ok: false, error: copy.solicitudPasaje.errors.diaRetroactivo });
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it('admin: invoca crear_aprobar_pasaje_admin (UNA sola RPC) con los días ordenados y dedupeados', async () => {
+    mockProfile('admin', 'admin-1');
+    const { rpcMock } = mockSupabaseAdminRpc();
+
+    await expect(
+      createPasajeRequest({
+        motivoViaje: 'traslado_proyectos',
+        origen:      '  Base  ',
+        destino:     '  Sitio  ',
+        diasViaje:   [PASADO_MANANA, MANANA, MANANA],
+        nota:        '  nota admin  ',
+      })
+    ).resolves.toEqual({ ok: true });
+
+    expect(rpcMock).toHaveBeenCalledWith('crear_aprobar_pasaje_admin', {
+      p_motivo_viaje: 'traslado_proyectos',
+      p_origen:       'Base',
+      p_destino:      'Sitio',
+      p_dias_viaje:   [MANANA, PASADO_MANANA],
+      p_nota:         'nota admin',
+    });
+  });
+
+  it('admin: si la RPC falla, devuelve error visible — sin tragarlo', async () => {
+    mockProfile('admin', 'admin-1');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockSupabaseAdminRpc({ message: 'boom' });
+
+    await expect(
+      createPasajeRequest({
+        motivoViaje: 'traslado_proyectos',
+        origen:      'Base',
+        destino:     'Sitio',
+        diasViaje:   [MANANA],
+      })
+    ).resolves.toEqual({ ok: false, error: copy.errors.generic });
+    errorSpy.mockRestore();
+  });
+});
+
 // ─── validatePasajeRequestInput (unidad pura) ──────────────────────────────
 
 describe('validatePasajeRequestInput: motivo, origen/destino, días y no-retroactiva', () => {
@@ -439,14 +516,24 @@ describe('SolicitudPasajePage: branch por rol', () => {
     return { teamEqMock, teamOrMock, requestsOrMock, requestsOrderMock };
   }
 
-  it('admin: modo consulta, sin formulario de envío', async () => {
-    mockProfile('admin');
-    mockPageQueries({});
+  // FB-ADJ-01: admin ahora recibe el mismo formulario que empleado/supervisor
+  // (para sí, sin selector de equipo, con isAdmin=true) en vez de la card de
+  // modo consulta.
+  it('admin: recibe el formulario sin selector de equipo, isAdmin=true, y su lista propia', async () => {
+    mockProfile('admin', 'admin-1');
+    const requests = [{ id: 'p1', solicitante_id: 'admin-1', empleado_id: 'admin-1', estado: 'aprobado' }];
+    const { requestsOrMock } = mockPageQueries({ requests });
 
     const result = await SolicitudPasajePage();
 
+    expect(requestsOrMock).toHaveBeenCalledWith('solicitante_id.eq.admin-1,empleado_id.eq.admin-1');
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((result as any).type).toBe(Card);
+    const children = (result as any).props.children as any[];
+    const form = children.find((c) => c?.type === SolicitudPasajeForm);
+    expect(form.props.showEmpleadoSelector).toBe(false);
+    expect(form.props.isAdmin).toBe(true);
+    expect(form.props.team).toEqual([]);
   });
 
   it('empleado: recibe el formulario sin selector de equipo y su lista propia (solicitante O empleado viajero)', async () => {

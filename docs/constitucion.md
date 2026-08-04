@@ -1,6 +1,6 @@
-# First Blades — Constitución del Portal (v0.7)
+# First Blades — Constitución del Portal (v0.7.1)
 
-> **Estado:** Fases 0, 1, 2, 3 y 4 cerradas. v0.6 incorporó aprendizajes de Fase 3 (ver más abajo). v0.7 incorpora los deltas de Fase 4: pasajes con días discretos (`dias_viaje`), no-solapamiento de pendientes por exclusion constraint, edición/cancelación post-aprobación admin-directo con guarda LIFO, `audit_log` de calendario por-día parejo en ausencia y pasaje (sin divergencia), contrato return-based de Server Actions, y e2e Playwright cableado como tercer job de CI.
+> **Estado:** Fases 0, 1, 2, 3 y 4 cerradas. v0.6 incorporó aprendizajes de Fase 3 (ver más abajo). v0.7 incorpora los deltas de Fase 4: pasajes con días discretos (`dias_viaje`), no-solapamiento de pendientes por exclusion constraint, edición/cancelación post-aprobación admin-directo con guarda LIFO, `audit_log` de calendario por-día parejo en ausencia y pasaje (sin divergencia), contrato return-based de Server Actions, y e2e Playwright cableado como tercer job de CI. v0.7.1 (FB-ADJ-01, ajuste inter-fase) incorpora: admin envía Solicitud de Ausencia/Pasaje para sí con auto-aprobación (excepción explícita a "nada se autoactiva"), y el renombre de etiqueta "Formularios" → "Ingreso".
 > **Propósito:** Fuente única de verdad del portal de First Blades. El chat PM la sostiene y la adjudica. Claude Code construye *según* ella. Codex la audita *contra* ella. Cada chat de módulo la hereda.
 > **Idioma:** Documento en español (es-AR). Todo el producto en español (es-AR).
 
@@ -80,12 +80,12 @@ Tres roles: **Administrador**, **Supervisor**, **Empleado**.
 | Mi Perfil | Ve + edita el propio | Ve el propio (lectura; edita por formularios) | Ve el propio (lectura; edita por formularios) |
 | Equipo (datos completos) | Ve todos + alertas de vencimiento | — | — |
 | Calendario | Gestiona rotaciones del equipo | Ve su calendario + el de su equipo (lectura) | Ve su calendario (lectura) |
-| Solicitud de Pasaje | (aprueba en Aprobaciones) | Envía para sí y para su equipo | Envía para sí |
-| Solicitud de Ausencia (Período fuera del trabajo) | (aprueba en Aprobaciones) | Envía para sí | Envía para sí |
+| Solicitud de Pasaje | Envía para sí (auto-aprobado) + aprueba en Aprobaciones | Envía para sí y para su equipo | Envía para sí |
+| Solicitud de Ausencia (Período fuera del trabajo) | Envía para sí (auto-aprobado) + aprueba en Aprobaciones | Envía para sí | Envía para sí |
 | Carga de Documentos | Carga + (aprueba en Aprobaciones) | Envía propios (→ Pendiente) | Envía propios (→ Pendiente) |
 | **Aprobaciones** | **Bandeja única: pasajes, ausencias, documentos, onboarding** | — | — |
 | Gestión (usuarios) | Crea usuarios, asigna rol + supervisor | — | — |
-| Formularios (ingreso / precarga) | Ve formularios recibidos | Acceso al formulario de ingreso | Acceso al formulario de ingreso |
+| Ingreso (formularios de ingreso / precarga) | Ve formularios recibidos | Acceso al formulario de ingreso | Acceso al formulario de ingreso |
 | Rendición de Gastos (Google Form, externo) | Revisa (en Sheets) | Carga comprobantes (link) | Carga comprobantes (link) |
 | Procedimientos / Políticas | Gestiona documentos | Lectura | Lectura |
 
@@ -94,6 +94,7 @@ Notas:
 - "Empleados a cargo" se define por `supervisor_id` en `profiles`.
 - Empleado y Supervisor **nunca** editan su perfil directamente: todo cambio pasa por formularios → Pendiente → Aprobaciones (admin).
 - Permisos aplicados a **nivel de base de datos vía RLS**, no solo en la UI.
+- **FB-ADJ-01 (v0.7.1):** el Administrador puede enviar Solicitud de Ausencia y Solicitud de Pasaje **para sí mismo** (admin-para-sí solamente, no por otros); esa solicitud se **auto-aprueba** al enviarla (con diálogo de confirmación previo), sin pasar por la bandeja Aprobaciones — ver la excepción explícita en §7.
 
 ---
 
@@ -187,6 +188,8 @@ Empleado/Supervisor envía (formulario nativo)
 ```
 > Todas las solicitudes confluyen en **una sola bandeja Aprobaciones**, no se aprueban dentro de cada módulo. **Viáticos NO usa este patrón** (vive en Google Sheets).
 
+> **Excepción explícita (FB-ADJ-01, v0.7.1):** una solicitud de Ausencia o de Pasaje que un **Administrador envía para sí mismo** se **auto-aprueba** al enviarla (con diálogo de confirmación previo) — no entra a la bandeja Aprobaciones. El registro queda completo (`reviewed_by`/`reviewed_at` = el propio admin, `audit_log` legible como auto-aprobación: el solicitante es también el aprobador). Es la **única** excepción a "nada se autoactiva"; todo lo demás (envíos de empleado o supervisor, y cualquier solicitud de un admin para otra persona — fuera de alcance) sigue pasando por el purgatorio sin excepción.
+
 ---
 
 ## 8. Ciclo de vida del empleado y onboarding
@@ -247,3 +250,6 @@ Supabase fuente de verdad · **3 roles con RLS** · `supervisor_id` · pasajes c
 
 ### Decisiones cerradas (v0.7) — 2026-08-03
 **Pasajes con días discretos:** `pasaje_requests.dias_viaje` (`date[]`, CHECK no-vacío) cubre viajes con días sueltos (ej. ida y vuelta con días intermedios sin franco), sin reemplazar la fecha única legacy (`fecha_viaje`); `resolver_pasaje_request` expande cada fecha de `dias_viaje` en `en_viaje` per-día sobre el calendario de `empleado_id` (§5/§6.1) · **no-solapamiento sólo entre pendientes:** exclusion constraint `ausencia_requests_no_solapamiento_pendiente` (`btree_gist`) reemplaza el índice de duplicados exactos; contra aprobadas se permite con alerta de sobrescritura no bloqueante (§5/§6.2) · **edición/cancelación post-aprobación admin-directo:** `cancelar_editar_ausencia_aprobada` / `cancelar_editar_pasaje_aprobado`, comentario obligatorio, guarda LIFO cruzando ausencia/pasaje por `reviewed_at` (§6.1/§6.2) · **`audit_log` de calendario por-día parejo en todo el sistema:** ausencia se alineó a la convención de pasaje (0018) — sin divergencia de granularidad (§6.1) · **contrato return-based de Server Actions:** las actions devuelven `{ ok, error }` en vez de tirar, para no depender de mensajes de `throw` redactados por Next.js en prod (§2.5) · **e2e Playwright cableado como tercer job de CI** (§14) · Fase 4 cerrada.
+
+### Decisiones cerradas (v0.7.1 — FB-ADJ-01/02, ajuste inter-fase) — 2026-08-04
+**Renombre de etiqueta:** "Formularios" → "Ingreso" en el menú (sidebar + título de página); ruta (`/formularios`) y contenido "próximamente" sin cambios (§4) · **Admin envía Ausencia/Pasaje para sí:** admin-para-sí solamente (por otros queda fuera de alcance, decisión aparte) — **con migración** (0019, FB-ADJ-02, reemplaza el diseño no-atómico inicial de FB-ADJ-01): dos funciones `SECURITY DEFINER` transaccionales, `crear_aprobar_ausencia_admin`/`crear_aprobar_pasaje_admin`, que insertan la solicitud `pendiente` para el propio admin e invocan por `PERFORM` la resolver existente (`resolver_ausencia_request`/`resolver_pasaje_request`, `p_accion='aprobar'`) **dentro de la misma transacción** — reutilizan su lógica de calendario/`audit_log` sin duplicarla, sin abrir su propia `BEGIN/COMMIT` (corren en la transacción del llamador). **Atómico, sin solicitudes huérfanas:** un fallo en cualquier punto (guarda de admin, exclusion constraint de no-solapamiento, colisión de calendario) revierte todo — la request, el calendario y el audit_log completos, nunca a medias; la Server Action llama a una única RPC, **sin lógica de compensación/borrado** (§4/§6.1/§7) · **excepción explícita a "nada se autoactiva":** admin-para-sí es la única excepción, junto a la ya existente de `uploadDocumentForEmployee` (CLAUDE.md, carga de documentos en nombre del empleado) (§7) · **diálogo de confirmación previo**, solo para admin, antes de enviar.

@@ -54,7 +54,9 @@ export const copy = {
     aprobaciones:     'Aprobaciones',
     procedimientos:   'Procedimientos / Políticas',
     rendicionGastos:  'Rendición de Gastos',
-    formularios:      'Formularios',
+    // FB-ADJ-01: renombre de etiqueta únicamente — la ruta (/formularios) y
+    // el contenido "próximamente" no cambian.
+    formularios:      'Ingreso',
     gestionUsuarios:  'Gestión de Usuarios',
   },
 
@@ -268,8 +270,19 @@ export const copy = {
       nota:        'Agregá una aclaración (opcional).',
     },
     messages: {
-      success:  'Solicitud enviada. Quedará Pendiente hasta que Administración la apruebe.',
-      enviando: 'Enviando...',
+      success:      'Solicitud enviada. Quedará Pendiente hasta que Administración la apruebe.',
+      // FB-ADJ-01: éxito distinto para admin — su envío se auto-aprueba, no
+      // pasa por la bandeja de Aprobaciones.
+      successAdmin: 'Solicitud enviada y aprobada automáticamente.',
+      enviando:     'Enviando...',
+    },
+    // FB-ADJ-01: diálogo de confirmación previo al envío, solo para admin
+    // (su solicitud se auto-aprueba, no pasa por revisión).
+    adminConfirm: {
+      title:   'Confirmar envío',
+      message: 'Como administrador, esta solicitud se aprueba automáticamente y no pasa por revisión. ¿Confirmás el envío?',
+      confirm: 'Confirmar envío',
+      cancel:  'Cancelar',
     },
     errors: {
       motivoRequerido:          'Seleccioná un motivo.',
@@ -294,10 +307,6 @@ export const copy = {
       pendiente: 'Pendiente',
       aprobado:  'Aprobada',
       rechazado: 'Rechazada',
-    },
-    adminConsulta: {
-      message:   'Como administrador, gestionás estas solicitudes desde Aprobaciones.',
-      linkLabel: 'Ir a Aprobaciones',
     },
     saldo: {
       title:           'Días de trámite',
@@ -338,8 +347,19 @@ export const copy = {
       quitarDia:  'Quitar',
     },
     messages: {
-      success:  'Solicitud enviada. Quedará Pendiente hasta que Administración la apruebe.',
-      enviando: 'Enviando...',
+      success:      'Solicitud enviada. Quedará Pendiente hasta que Administración la apruebe.',
+      // FB-ADJ-01: éxito distinto para admin — su envío se auto-aprueba, no
+      // pasa por la bandeja de Aprobaciones.
+      successAdmin: 'Solicitud enviada y aprobada automáticamente.',
+      enviando:     'Enviando...',
+    },
+    // FB-ADJ-01: diálogo de confirmación previo al envío, solo para admin
+    // (su solicitud se auto-aprueba, no pasa por revisión).
+    adminConfirm: {
+      title:   'Confirmar envío',
+      message: 'Como administrador, esta solicitud se aprueba automáticamente y no pasa por revisión. ¿Confirmás el envío?',
+      confirm: 'Confirmar envío',
+      cancel:  'Cancelar',
     },
     errors: {
       empleadoRequerido:     'Seleccioná para quién es el pasaje.',
@@ -366,10 +386,6 @@ export const copy = {
       pendiente: 'Pendiente',
       aprobado:  'Aprobada',
       rechazado: 'Rechazada',
-    },
-    adminConsulta: {
-      message:   'Como administrador, gestionás estas solicitudes desde Aprobaciones.',
-      linkLabel: 'Ir a Aprobaciones',
     },
     // FB-F4-15: "Mis solicitudes" ahora incluye pasajes donde el usuario es
     // solicitante O empleado viajero — dos perspectivas posibles sobre la
@@ -880,7 +896,7 @@ export const copy = {
       subtitle: 'Acceso externo a Google Workspace',
     },
     formularios: {
-      title:    'Formularios',
+      title:    'Ingreso',
       subtitle: 'Formularios de ingreso y precarga',
     },
     gestionUsuarios: {
