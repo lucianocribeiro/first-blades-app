@@ -1051,7 +1051,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     expect(rows[0].column_default).toBe("'vigente'::procedure_estado");
   });
 
-  it('CHECK procedures_contenido_presente exige contenido_texto no vacío o file_path (0020)', async () => {
+  it('CHECK procedures_contenido_presente exige contenido_texto O file_path no vacíos, con el MISMO criterio simétrico para los dos (0020, fix FB-F5-AUD-02 Hallazgo 1)', async () => {
     const { rows } = await client.query(`
       SELECT pg_get_constraintdef(oid) AS def
       FROM pg_constraint
@@ -1061,12 +1061,17 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     `);
     expect(rows).toHaveLength(1);
     // Componentes semánticos, no el string completo — mismo criterio que el
-    // resto del archivo para expresiones normalizadas por Postgres.
+    // resto del archivo para expresiones normalizadas por Postgres. Antes
+    // del fix, file_path solo pedía IS NOT NULL (un '' pasaba) — este test
+    // exige explícitamente el btrim de las DOS ramas, no solo la de
+    // contenido_texto, para que una regresión a la versión asimétrica lo
+    // rompa.
     const def: string = rows[0].def;
     expect(def).toMatch(/contenido_texto IS NOT NULL/);
     expect(def).toMatch(/btrim\(contenido_texto\) <> ''::text/);
     expect(def).toMatch(/OR/);
     expect(def).toMatch(/file_path IS NOT NULL/);
+    expect(def).toMatch(/btrim\(file_path\) <> ''::text/);
   });
 
   it('procedures: inventario EXACTO de policies — procedures_select (renombrada de procedures_select_all) + procedures_write_admin (0020)', async () => {
@@ -1117,9 +1122,13 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       expect(rows[0].ret).toBe(ret);
     });
 
-    it(`${fn}: SECURITY DEFINER con search_path fijo y owner consistente con is_admin()/auth_role() (0020, §6.1)`, async () => {
+    it(`${fn}: SECURITY DEFINER con search_path fijo, owner literal 'postgres' y ACL exacta (0020, fix FB-F5-AUD-02 Hallazgo 2)`, async () => {
       const { rows } = await client.query(`
-        SELECT p.prosecdef, p.proconfig, r.rolname AS owner
+        SELECT
+          p.prosecdef,
+          p.proconfig,
+          r.rolname AS owner,
+          array_to_string(ARRAY(SELECT unnest(p.proacl)::text ORDER BY 1), ', ') AS acl
         FROM pg_proc p
         JOIN pg_roles r ON r.oid = p.proowner
         WHERE p.proname = $1 AND p.pronamespace = 'public'::regnamespace
@@ -1127,7 +1136,25 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       expect(rows).toHaveLength(1);
       expect(rows[0].prosecdef).toBe(true);
       expect(rows[0].proconfig).toContain('search_path=public');
-      expect(['authenticated', 'anon', 'public']).not.toContain(rows[0].owner);
+
+      // Owner LITERAL, no solo "no es un rol de app": verificado contra
+      // producción (proyecto simfemdkrkdbumefcxei) vía MCP de solo lectura
+      // antes de este fix — is_admin/auth_role/log_audit/
+      // resolver_ausencia_request/crear_aprobar_ausencia_admin son TODAS
+      // owner=postgres ahí. El Postgres local de CI (supabase start) aplica
+      // las migraciones con ese mismo rol, así que no hay divergencia real
+      // entre CI y prod para esta aserción (FB-F5-AUD-02 Hallazgo 2).
+      expect(rows[0].owner).toBe('postgres');
+
+      // ACL EXACTA, no "no contiene anon/authenticated/public": el patrón
+      // REVOKE ALL FROM PUBLIC/anon + GRANT EXECUTE TO authenticated deja
+      // authenticated + postgres (el owner siempre queda listado). No hay
+      // GRANT explícito a service_role en esta migración — aparece igual
+      // por un ALTER DEFAULT PRIVILEGES de plataforma (mismo patrón ya
+      // confirmado en resolver_ausencia_request/crear_aprobar_ausencia_admin,
+      // que tampoco lo otorgan explícitamente y lo tienen). Cualquier grant
+      // extra (ej. alguien vuelve a otorgarle a anon) rompe este test.
+      expect(rows[0].acl).toBe('authenticated=X/postgres, postgres=X/postgres, service_role=X/postgres');
 
       const { rows: helperOwners } = await client.query(`
         SELECT p.proname, r.rolname AS owner
@@ -1138,58 +1165,29 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       `);
       expect(helperOwners).toHaveLength(2);
       for (const helper of helperOwners) {
-        expect(helper.owner).toBe(rows[0].owner);
+        expect(helper.owner).toBe('postgres');
       }
     });
   }
 
-  it('crear_procedimiento: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0020)', async () => {
+  it("log_audit: cerrada — owner literal 'postgres' y ACL exacta (solo postgres + service_role, sin anon/authenticated/PUBLIC) (0020, fix FB-F5-AUD-02 Hallazgo 2)", async () => {
     const { rows } = await client.query(`
       SELECT
-        has_function_privilege('authenticated', 'public.crear_procedimiento(text,text,text,text)', 'EXECUTE') AS authenticated_can,
-        has_function_privilege('anon', 'public.crear_procedimiento(text,text,text,text)', 'EXECUTE') AS anon_can,
-        has_function_privilege('public', 'public.crear_procedimiento(text,text,text,text)', 'EXECUTE') AS public_can
+        r.rolname AS owner,
+        array_to_string(ARRAY(SELECT unnest(p.proacl)::text ORDER BY 1), ', ') AS acl
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname = 'log_audit' AND p.pronamespace = 'public'::regnamespace
     `);
-    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
-  });
-
-  it('actualizar_procedimiento: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0020)', async () => {
-    const { rows } = await client.query(`
-      SELECT
-        has_function_privilege('authenticated', 'public.actualizar_procedimiento(uuid,text,text,text,text)', 'EXECUTE') AS authenticated_can,
-        has_function_privilege('anon', 'public.actualizar_procedimiento(uuid,text,text,text,text)', 'EXECUTE') AS anon_can,
-        has_function_privilege('public', 'public.actualizar_procedimiento(uuid,text,text,text,text)', 'EXECUTE') AS public_can
-    `);
-    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
-  });
-
-  it('archivar_procedimiento: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0020)', async () => {
-    const { rows } = await client.query(`
-      SELECT
-        has_function_privilege('authenticated', 'public.archivar_procedimiento(uuid,procedure_estado)', 'EXECUTE') AS authenticated_can,
-        has_function_privilege('anon', 'public.archivar_procedimiento(uuid,procedure_estado)', 'EXECUTE') AS anon_can,
-        has_function_privilege('public', 'public.archivar_procedimiento(uuid,procedure_estado)', 'EXECUTE') AS public_can
-    `);
-    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
-  });
-
-  it('log_audit: cerrada — EXECUTE negado a anon, authenticated y PUBLIC; service_role conserva el suyo (0020, cierre del hallazgo de FB-F5-01-INSPECT)', async () => {
-    const { rows } = await client.query(`
-      SELECT
-        has_function_privilege('authenticated', 'public.log_audit(text,text,uuid,jsonb,jsonb)', 'EXECUTE') AS authenticated_can,
-        has_function_privilege('anon', 'public.log_audit(text,text,uuid,jsonb,jsonb)', 'EXECUTE') AS anon_can,
-        has_function_privilege('public', 'public.log_audit(text,text,uuid,jsonb,jsonb)', 'EXECUTE') AS public_can,
-        has_function_privilege('service_role', 'public.log_audit(text,text,uuid,jsonb,jsonb)', 'EXECUTE') AS service_role_can
-    `);
-    // Este es el test que tiene que fallar si alguien vuelve a otorgarle
-    // EXECUTE a authenticated/anon (regresión del hallazgo de seguridad de
-    // FB-F5-01-INSPECT-REPORT.md, bloque C.3).
-    expect(rows[0]).toEqual({
-      authenticated_can: false,
-      anon_can: false,
-      public_can: false,
-      service_role_can: true,
-    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].owner).toBe('postgres');
+    // service_role viene del GRANT explícito original de 0001 (no de
+    // default privileges, a diferencia de las RPCs nuevas de arriba);
+    // postgres queda porque el owner siempre aparece listado en el ACL.
+    // anon/authenticated NO deben aparecer — este es el test que tiene que
+    // fallar si alguien les vuelve a otorgar EXECUTE (regresión del
+    // hallazgo de seguridad de FB-F5-01-INSPECT-REPORT.md, bloque C.3).
+    expect(rows[0].acl).toBe('postgres=X/postgres, service_role=X/postgres');
   });
 
   it("storage.buckets: bucket 'procedimientos' privado, mismo límite de tamaño que 'documents', MIME ampliado a PDF/Word/texto plano (0020)", async () => {

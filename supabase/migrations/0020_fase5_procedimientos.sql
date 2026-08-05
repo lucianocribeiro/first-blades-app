@@ -63,14 +63,18 @@ ALTER TABLE public.procedures
 
 -- ============================================================
 -- 3. CHECK DE CONTENIDO (delta §3)
--- Al menos uno de contenido_texto (no vacío/no solo espacios) o file_path.
+-- Al menos uno de contenido_texto o file_path, con el MISMO criterio de
+-- "presente" para los dos: no NULL y no blanco (solo espacios). Antes del
+-- fix de FB-F5-AUD-02 Hallazgo 1, la rama de file_path solo pedía
+-- IS NOT NULL (asimétrica con contenido_texto), así que un file_path=''
+-- pasaba el CHECK sin contenido real.
 -- ============================================================
 
 ALTER TABLE public.procedures
   ADD CONSTRAINT procedures_contenido_presente
   CHECK (
     (contenido_texto IS NOT NULL AND btrim(contenido_texto) <> '')
-    OR file_path IS NOT NULL
+    OR (file_path IS NOT NULL AND btrim(file_path) <> '')
   );
 
 -- ============================================================

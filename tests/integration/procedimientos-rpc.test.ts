@@ -377,7 +377,43 @@ describe.skipIf(!dbAvailable)('procedures: CHECK procedures_contenido_presente (
     ).rejects.toThrow();
   });
 
-  it('acepta un INSERT con solo contenido_texto', async () => {
+  // FB-F5-AUD-02 Hallazgo 1: antes del fix, la rama de file_path solo
+  // pedía IS NOT NULL — un '' pasaba el CHECK. Estos tres casos son los
+  // que el fix (btrim simétrico en las dos ramas) tiene que rechazar.
+  it("rechaza un INSERT con file_path = '' (string vacío) y contenido_texto NULL", async () => {
+    await expect(
+      asServiceRole(async (client) => {
+        await client.query(
+          `INSERT INTO procedures (titulo, file_path, created_by) VALUES ('file_path vacío', '', $1)`,
+          [IDS.admin]
+        );
+      })
+    ).rejects.toThrow();
+  });
+
+  it("rechaza un INSERT con file_path = '   ' (solo espacios) y contenido_texto NULL", async () => {
+    await expect(
+      asServiceRole(async (client) => {
+        await client.query(
+          `INSERT INTO procedures (titulo, file_path, created_by) VALUES ('file_path blanco', '   ', $1)`,
+          [IDS.admin]
+        );
+      })
+    ).rejects.toThrow();
+  });
+
+  it('rechaza un INSERT con contenido_texto Y file_path ambos en blanco (combinados)', async () => {
+    await expect(
+      asServiceRole(async (client) => {
+        await client.query(
+          `INSERT INTO procedures (titulo, contenido_texto, file_path, created_by) VALUES ('Ambos en blanco', '   ', '', $1)`,
+          [IDS.admin]
+        );
+      })
+    ).rejects.toThrow();
+  });
+
+  it('acepta un INSERT con solo contenido_texto (file_path NULL)', async () => {
     await asServiceRole(async (client) => {
       const res = await client.query(
         `INSERT INTO procedures (titulo, contenido_texto, created_by) VALUES ('Con texto', 'Contenido real', $1) RETURNING id`,
@@ -387,10 +423,20 @@ describe.skipIf(!dbAvailable)('procedures: CHECK procedures_contenido_presente (
     });
   });
 
-  it('acepta un INSERT con solo file_path', async () => {
+  it('acepta un INSERT con solo file_path (contenido_texto NULL)', async () => {
     await asServiceRole(async (client) => {
       const res = await client.query(
         `INSERT INTO procedures (titulo, file_path, created_by) VALUES ('Con archivo', 'proc-id/manual.pdf', $1) RETURNING id`,
+        [IDS.admin]
+      );
+      expect(res.rows).toHaveLength(1);
+    });
+  });
+
+  it('acepta un INSERT con contenido_texto Y file_path, los dos válidos', async () => {
+    await asServiceRole(async (client) => {
+      const res = await client.query(
+        `INSERT INTO procedures (titulo, contenido_texto, file_path, created_by) VALUES ('Con los dos', 'Contenido real', 'proc-id/manual.pdf', $1) RETURNING id`,
         [IDS.admin]
       );
       expect(res.rows).toHaveLength(1);
