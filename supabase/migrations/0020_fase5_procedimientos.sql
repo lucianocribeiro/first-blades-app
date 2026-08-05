@@ -116,6 +116,9 @@ BEGIN
   -- correspondiente falla si esta línea desaparece. Se restaura en el
   -- siguiente commit.
   IF FALSE THEN
+    RAISE EXCEPTION 'Solo un administrador puede crear un procedimiento'
+      USING ERRCODE = '42501';
+  END IF;
 
   INSERT INTO public.procedures
     (titulo, categoria, contenido_texto, file_path, created_by, updated_by)
