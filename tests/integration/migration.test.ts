@@ -1199,7 +1199,8 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     `);
     expect(rows).toHaveLength(1);
     expect(rows[0].public).toBe(false);
-    expect(rows[0].file_size_limit).toBe(10485760);
+    // node-pg devuelve bigint como string para no perder precisión.
+    expect(rows[0].file_size_limit).toBe('10485760');
     expect(rows[0].allowed_mime_types.sort()).toEqual([
       'application/msword',
       'application/pdf',
