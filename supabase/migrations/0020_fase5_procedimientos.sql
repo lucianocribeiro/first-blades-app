@@ -111,11 +111,9 @@ AS $$
 DECLARE
   v_id UUID;
 BEGIN
-  -- SABOTAJE TEMPORAL FB-F5-02 (item 7 del prompt) — NO COMMITEAR:
-  -- guarda deshabilitada a propósito para confirmar que el test de guarda
-  -- correspondiente falla si esta línea desaparece. Se restaura en el
-  -- siguiente commit.
-  IF FALSE THEN
+  -- auth.uid() IS NULL se chequea explícito: is_admin() da NULL (no false)
+  -- sin sesión, y `IF NOT NULL` no dispara el RAISE en plpgsql.
+  IF auth.uid() IS NULL OR NOT public.is_admin() THEN
     RAISE EXCEPTION 'Solo un administrador puede crear un procedimiento'
       USING ERRCODE = '42501';
   END IF;
