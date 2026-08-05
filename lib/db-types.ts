@@ -13,6 +13,7 @@ export type MotivoViaje    = Enums<'motivo_viaje'>;
 export type CertificadoTipo = Enums<'certificado_tipo'>;
 export type NotificationType = Enums<'notification_type'>;
 export type PostAprobacionTipo = Enums<'post_aprobacion_tipo'>;
+export type ProcedureEstado = Enums<'procedure_estado'>;
 
 // Row aliases para las tablas principales
 export type Profile              = Tables<'profiles'>;
