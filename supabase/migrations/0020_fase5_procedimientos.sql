@@ -284,6 +284,11 @@ GRANT EXECUTE ON FUNCTION public.archivar_procedimiento(UUID, public.procedure_e
 
 REVOKE EXECUTE ON FUNCTION public.log_audit(TEXT, TEXT, UUID, JSONB, JSONB) FROM anon, authenticated, PUBLIC;
 
+-- SABOTAJE TEMPORAL FB-F5-03 (Hallazgo 2, verificación de que el test de
+-- ACL exacta no es trivial) — NO COMMITEAR: re-otorga lo que la línea de
+-- arriba acaba de revocar. Se revierte en el siguiente commit.
+GRANT EXECUTE ON FUNCTION public.log_audit(TEXT, TEXT, UUID, JSONB, JSONB) TO authenticated;
+
 -- ============================================================
 -- 7. BUCKET DE STORAGE PARA PROCEDIMIENTOS (delta §7)
 -- Privado, sin {userId}: un procedimiento no tiene dueño individual.
