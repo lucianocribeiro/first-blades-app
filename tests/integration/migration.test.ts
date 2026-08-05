@@ -1051,7 +1051,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     expect(rows[0].column_default).toBe("'vigente'::procedure_estado");
   });
 
-  it('CHECK procedures_contenido_presente exige contenido_texto O file_path no vacíos, con el MISMO criterio simétrico para los dos (0020, fix FB-F5-AUD-02 Hallazgo 1)', async () => {
+  it('CHECK procedures_contenido_presente exige contenido_texto O file_path no compuestos solo de whitespace ([[:space:]], no solo btrim), simétrico para los dos (0020, fix FB-F5-AUD-03 Hallazgo 1)', async () => {
     const { rows } = await client.query(`
       SELECT pg_get_constraintdef(oid) AS def
       FROM pg_constraint
@@ -1061,17 +1061,18 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     `);
     expect(rows).toHaveLength(1);
     // Componentes semánticos, no el string completo — mismo criterio que el
-    // resto del archivo para expresiones normalizadas por Postgres. Antes
-    // del fix, file_path solo pedía IS NOT NULL (un '' pasaba) — este test
-    // exige explícitamente el btrim de las DOS ramas, no solo la de
-    // contenido_texto, para que una regresión a la versión asimétrica lo
-    // rompa.
+    // resto del archivo para expresiones normalizadas por Postgres.
+    // FB-F5-AUD-03 Hallazgo 1: btrim() sin segundo argumento no recorta
+    // tabs ni saltos de línea — este test exige explícitamente el operador
+    // de regex [[:space:]] en las DOS ramas (no el btrim() del fix
+    // anterior), para que una regresión a esa versión más débil lo rompa.
     const def: string = rows[0].def;
     expect(def).toMatch(/contenido_texto IS NOT NULL/);
-    expect(def).toMatch(/btrim\(contenido_texto\) <> ''::text/);
+    expect(def).toContain("contenido_texto !~ '^[[:space:]]*$'");
+    expect(def).not.toContain('btrim');
     expect(def).toMatch(/OR/);
     expect(def).toMatch(/file_path IS NOT NULL/);
-    expect(def).toMatch(/btrim\(file_path\) <> ''::text/);
+    expect(def).toContain("file_path !~ '^[[:space:]]*$'");
   });
 
   it('procedures: inventario EXACTO de policies — procedures_select (renombrada de procedures_select_all) + procedures_write_admin (0020)', async () => {

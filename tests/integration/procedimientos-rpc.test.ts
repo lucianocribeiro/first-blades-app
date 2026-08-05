@@ -413,6 +413,65 @@ describe.skipIf(!dbAvailable)('procedures: CHECK procedures_contenido_presente (
     ).rejects.toThrow();
   });
 
+  // FB-F5-AUD-03 Hallazgo 1: btrim() sin segundo argumento no recorta tabs
+  // ni saltos de línea — estos 5 casos son los que el fix (regex
+  // [[:space:]]) tiene que rechazar, y que la versión anterior (btrim)
+  // dejaba pasar.
+  it("rechaza un INSERT con contenido_texto = tab (E'\\t') y file_path NULL", async () => {
+    await expect(
+      asServiceRole(async (client) => {
+        await client.query(
+          `INSERT INTO procedures (titulo, contenido_texto, created_by) VALUES ('Tab', E'\t', $1)`,
+          [IDS.admin]
+        );
+      })
+    ).rejects.toThrow();
+  });
+
+  it("rechaza un INSERT con contenido_texto = salto de línea (E'\\n') y file_path NULL", async () => {
+    await expect(
+      asServiceRole(async (client) => {
+        await client.query(
+          `INSERT INTO procedures (titulo, contenido_texto, created_by) VALUES ('Salto', E'\n', $1)`,
+          [IDS.admin]
+        );
+      })
+    ).rejects.toThrow();
+  });
+
+  it("rechaza un INSERT con file_path = tab (E'\\t') y contenido_texto NULL", async () => {
+    await expect(
+      asServiceRole(async (client) => {
+        await client.query(
+          `INSERT INTO procedures (titulo, file_path, created_by) VALUES ('Tab archivo', E'\t', $1)`,
+          [IDS.admin]
+        );
+      })
+    ).rejects.toThrow();
+  });
+
+  it("rechaza un INSERT con file_path = salto de línea (E'\\n') y contenido_texto NULL", async () => {
+    await expect(
+      asServiceRole(async (client) => {
+        await client.query(
+          `INSERT INTO procedures (titulo, file_path, created_by) VALUES ('Salto archivo', E'\n', $1)`,
+          [IDS.admin]
+        );
+      })
+    ).rejects.toThrow();
+  });
+
+  it("rechaza un INSERT con whitespace mixto (E' \\t\\n ') en contenido_texto Y en file_path (combinados)", async () => {
+    await expect(
+      asServiceRole(async (client) => {
+        await client.query(
+          `INSERT INTO procedures (titulo, contenido_texto, file_path, created_by) VALUES ('Mixto', E' \t\n ', E' \t\n ', $1)`,
+          [IDS.admin]
+        );
+      })
+    ).rejects.toThrow();
+  });
+
   it('acepta un INSERT con solo contenido_texto (file_path NULL)', async () => {
     await asServiceRole(async (client) => {
       const res = await client.query(
@@ -440,6 +499,25 @@ describe.skipIf(!dbAvailable)('procedures: CHECK procedures_contenido_presente (
         [IDS.admin]
       );
       expect(res.rows).toHaveLength(1);
+    });
+  });
+
+  // FB-F5-AUD-03 Hallazgo 1: el caso que confirma que el fix no rompió lo
+  // que tenía que seguir andando — un procedimiento real, escrito en
+  // párrafos, TIENE tabs/saltos de línea en el medio del contenido. La
+  // regex ^[[:space:]]*$ solo rechaza cuando el string ENTERO es
+  // whitespace; un contenido con caracteres no-whitespace en cualquier
+  // parte no matchea el patrón (ancla ^...$ sobre el string completo) y
+  // pasa el CHECK sin problema.
+  it('acepta contenido_texto multilínea legítimo (con tabs y saltos de línea en el medio, no solo al borde)', async () => {
+    await asServiceRole(async (client) => {
+      const contenidoReal = 'Paso 1: Verificar el torque.\n\tSubpaso: usar la llave calibrada.\n\nPaso 2: Registrar el resultado.';
+      const res = await client.query(
+        `INSERT INTO procedures (titulo, contenido_texto, created_by) VALUES ('Manual con párrafos', $1, $2) RETURNING id, contenido_texto`,
+        [contenidoReal, IDS.admin]
+      );
+      expect(res.rows).toHaveLength(1);
+      expect(res.rows[0].contenido_texto).toBe(contenidoReal);
     });
   });
 });

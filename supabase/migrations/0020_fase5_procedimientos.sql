@@ -64,17 +64,27 @@ ALTER TABLE public.procedures
 -- ============================================================
 -- 3. CHECK DE CONTENIDO (delta §3)
 -- Al menos uno de contenido_texto o file_path, con el MISMO criterio de
--- "presente" para los dos: no NULL y no blanco (solo espacios). Antes del
--- fix de FB-F5-AUD-02 Hallazgo 1, la rama de file_path solo pedía
--- IS NOT NULL (asimétrica con contenido_texto), así que un file_path=''
--- pasaba el CHECK sin contenido real.
+-- "presente" para los dos: no NULL y no compuesto solo de whitespace.
+--
+-- Historial del criterio (dos fixes de auditoría sobre este mismo CHECK):
+--   - FB-F5-AUD-02 Hallazgo 1: la rama de file_path solo pedía
+--     IS NOT NULL (asimétrica con contenido_texto), así que un
+--     file_path='' pasaba el CHECK sin contenido real. Fix: btrim(...) <> ''
+--     simétrico en las dos ramas.
+--   - FB-F5-AUD-03 Hallazgo 1: btrim() sin segundo argumento solo recorta
+--     espacios comunes, no tabs ni saltos de línea — un valor como E'\t' o
+--     E'\n' seguía pasando como "contenido". Fix (este): reemplazar btrim
+--     por la clase POSIX [[:space:]] vía regex, que cubre todo carácter de
+--     whitespace (espacio, tab, salto de línea, etc.), no solo el espacio
+--     simple. El operador de regex con patrón constante es IMMUTABLE en
+--     Postgres, válido dentro de un CHECK.
 -- ============================================================
 
 ALTER TABLE public.procedures
   ADD CONSTRAINT procedures_contenido_presente
   CHECK (
-    (contenido_texto IS NOT NULL AND btrim(contenido_texto) <> '')
-    OR (file_path IS NOT NULL AND btrim(file_path) <> '')
+    (contenido_texto IS NOT NULL AND contenido_texto !~ '^[[:space:]]*$')
+    OR (file_path IS NOT NULL AND file_path !~ '^[[:space:]]*$')
   );
 
 -- ============================================================
