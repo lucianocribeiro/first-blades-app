@@ -103,6 +103,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_viaje',
       'notification_type',
       'post_aprobacion_tipo',
+      'procedure_estado',
       'user_role',
     ]);
   });
@@ -455,6 +456,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_viaje',
       'notification_type',
       'post_aprobacion_tipo',
+      'procedure_estado',
       'user_role',
     ]);
   });
@@ -620,6 +622,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_viaje',
       'notification_type',
       'post_aprobacion_tipo',
+      'procedure_estado',
       'user_role',
     ]);
   });
@@ -760,6 +763,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_viaje',
       'notification_type',
       'post_aprobacion_tipo',
+      'procedure_estado',
       'user_role',
     ]);
   });
@@ -875,6 +879,7 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       'motivo_viaje',
       'notification_type',
       'post_aprobacion_tipo',
+      'procedure_estado',
       'user_role',
     ]);
   });
@@ -996,5 +1001,229 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
         has_function_privilege('public', 'public.cancelar_editar_pasaje_aprobado(uuid,text,text,date[])', 'EXECUTE') AS public_can
     `);
     expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
+  });
+
+  // ─── FB-F5-02: procedures renombrado + estado + CHECK + RPCs (0020) ───
+
+  it('procedures: columnas viejas (title/content/storage_path/category) ya no existen (0020)', async () => {
+    const { rows } = await client.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'procedures'
+        AND column_name IN ('title', 'content', 'storage_path', 'category')
+    `);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('procedures: columnas nuevas en español — titulo (NOT NULL), contenido_texto, file_path, categoria (nullable) (0020)', async () => {
+    const { rows } = await client.query(`
+      SELECT column_name, is_nullable, data_type
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'procedures'
+        AND column_name IN ('titulo', 'contenido_texto', 'file_path', 'categoria')
+    `);
+    const byName = Object.fromEntries(rows.map((r) => [r.column_name, r]));
+    expect(byName.titulo.is_nullable).toBe('NO');
+    expect(byName.titulo.data_type).toBe('text');
+    expect(byName.contenido_texto.is_nullable).toBe('YES');
+    expect(byName.file_path.is_nullable).toBe('YES');
+    expect(byName.categoria.is_nullable).toBe('YES');
+  });
+
+  it('enum procedure_estado tiene EXACTAMENTE 2 valores: vigente, archivado (0020)', async () => {
+    const { rows } = await client.query(`
+      SELECT enumlabel FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'procedure_estado'
+      ORDER BY enumsortorder
+    `);
+    expect(rows.map((r: { enumlabel: string }) => r.enumlabel)).toEqual(['vigente', 'archivado']);
+  });
+
+  it('procedures.estado: procedure_estado NOT NULL DEFAULT vigente (0020)', async () => {
+    const { rows } = await client.query(`
+      SELECT is_nullable, column_default, udt_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'procedures' AND column_name = 'estado'
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].is_nullable).toBe('NO');
+    expect(rows[0].udt_name).toBe('procedure_estado');
+    expect(rows[0].column_default).toBe("'vigente'::procedure_estado");
+  });
+
+  it('CHECK procedures_contenido_presente exige contenido_texto O file_path no compuestos solo de whitespace ([[:space:]], no solo btrim), simétrico para los dos (0020, fix FB-F5-AUD-03 Hallazgo 1)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_constraintdef(oid) AS def
+      FROM pg_constraint
+      WHERE conrelid = 'public.procedures'::regclass
+        AND conname = 'procedures_contenido_presente'
+        AND contype = 'c'
+    `);
+    expect(rows).toHaveLength(1);
+    // Componentes semánticos, no el string completo — mismo criterio que el
+    // resto del archivo para expresiones normalizadas por Postgres.
+    // FB-F5-AUD-03 Hallazgo 1: btrim() sin segundo argumento no recorta
+    // tabs ni saltos de línea — este test exige explícitamente el operador
+    // de regex [[:space:]] en las DOS ramas (no el btrim() del fix
+    // anterior), para que una regresión a esa versión más débil lo rompa.
+    const def: string = rows[0].def;
+    expect(def).toMatch(/contenido_texto IS NOT NULL/);
+    expect(def).toContain("contenido_texto !~ '^[[:space:]]*$'");
+    expect(def).not.toContain('btrim');
+    expect(def).toMatch(/OR/);
+    expect(def).toMatch(/file_path IS NOT NULL/);
+    expect(def).toContain("file_path !~ '^[[:space:]]*$'");
+  });
+
+  it('procedures: inventario EXACTO de policies — procedures_select (renombrada de procedures_select_all) + procedures_write_admin (0020)', async () => {
+    const { rows } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'procedures'
+    `);
+    expect(rows.map((r) => r.policyname).sort()).toEqual(['procedures_select', 'procedures_write_admin']);
+  });
+
+  it('profiles: motivo_baja (text, nullable) y fecha_baja (date, nullable) existen, sin backfill (0020)', async () => {
+    const { rows } = await client.query(`
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'profiles'
+        AND column_name IN ('motivo_baja', 'fecha_baja')
+    `);
+    const byName = Object.fromEntries(rows.map((r) => [r.column_name, r]));
+    expect(byName.motivo_baja.data_type).toBe('text');
+    expect(byName.motivo_baja.is_nullable).toBe('YES');
+    expect(byName.fecha_baja.data_type).toBe('date');
+    expect(byName.fecha_baja.is_nullable).toBe('YES');
+  });
+
+  for (const [fn, argTypes, ret] of [
+    ['crear_procedimiento', ['text', 'text', 'text', 'text'], 'uuid'],
+    ['actualizar_procedimiento', ['uuid', 'text', 'text', 'text', 'text'], 'void'],
+    ['archivar_procedimiento', ['uuid', 'procedure_estado'], 'void'],
+  ] as const) {
+    it(`función ${fn}() existe con la firma esperada, sin defaults, retorna ${ret} (0020)`, async () => {
+      const { rows } = await client.query(`
+        SELECT
+          p.pronargs,
+          p.pronargdefaults,
+          pg_get_function_result(p.oid) AS ret,
+          (
+            SELECT array_agg(t.typname::text ORDER BY u.ord)
+            FROM unnest(p.proargtypes) WITH ORDINALITY AS u(oid, ord)
+            JOIN pg_type t ON t.oid = u.oid
+          ) AS arg_types
+        FROM pg_proc p
+        WHERE p.proname = $1 AND p.pronamespace = 'public'::regnamespace
+      `, [fn]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].arg_types).toEqual([...argTypes]);
+      expect(rows[0].pronargs).toBe(argTypes.length);
+      expect(rows[0].pronargdefaults).toBe(0);
+      expect(rows[0].ret).toBe(ret);
+    });
+
+    it(`${fn}: SECURITY DEFINER con search_path fijo, owner literal 'postgres' y ACL exacta (0020, fix FB-F5-AUD-02 Hallazgo 2)`, async () => {
+      const { rows } = await client.query(`
+        SELECT
+          p.prosecdef,
+          p.proconfig,
+          r.rolname AS owner,
+          array_to_string(ARRAY(SELECT unnest(p.proacl)::text ORDER BY 1), ', ') AS acl
+        FROM pg_proc p
+        JOIN pg_roles r ON r.oid = p.proowner
+        WHERE p.proname = $1 AND p.pronamespace = 'public'::regnamespace
+      `, [fn]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].prosecdef).toBe(true);
+      expect(rows[0].proconfig).toContain('search_path=public');
+
+      // Owner LITERAL, no solo "no es un rol de app": verificado contra
+      // producción (proyecto simfemdkrkdbumefcxei) vía MCP de solo lectura
+      // antes de este fix — is_admin/auth_role/log_audit/
+      // resolver_ausencia_request/crear_aprobar_ausencia_admin son TODAS
+      // owner=postgres ahí. El Postgres local de CI (supabase start) aplica
+      // las migraciones con ese mismo rol, así que no hay divergencia real
+      // entre CI y prod para esta aserción (FB-F5-AUD-02 Hallazgo 2).
+      expect(rows[0].owner).toBe('postgres');
+
+      // ACL EXACTA, no "no contiene anon/authenticated/public": el patrón
+      // REVOKE ALL FROM PUBLIC/anon + GRANT EXECUTE TO authenticated deja
+      // authenticated + postgres (el owner siempre queda listado). No hay
+      // GRANT explícito a service_role en esta migración — aparece igual
+      // por un ALTER DEFAULT PRIVILEGES de plataforma (mismo patrón ya
+      // confirmado en resolver_ausencia_request/crear_aprobar_ausencia_admin,
+      // que tampoco lo otorgan explícitamente y lo tienen). Cualquier grant
+      // extra (ej. alguien vuelve a otorgarle a anon) rompe este test.
+      expect(rows[0].acl).toBe('authenticated=X/postgres, postgres=X/postgres, service_role=X/postgres');
+
+      const { rows: helperOwners } = await client.query(`
+        SELECT p.proname, r.rolname AS owner
+        FROM pg_proc p
+        JOIN pg_roles r ON r.oid = p.proowner
+        WHERE p.proname IN ('is_admin', 'auth_role') AND p.pronamespace = 'public'::regnamespace
+        ORDER BY p.proname
+      `);
+      expect(helperOwners).toHaveLength(2);
+      for (const helper of helperOwners) {
+        expect(helper.owner).toBe('postgres');
+      }
+    });
+  }
+
+  it("log_audit: cerrada — owner literal 'postgres' y ACL exacta (solo postgres + service_role, sin anon/authenticated/PUBLIC) (0020, fix FB-F5-AUD-02 Hallazgo 2)", async () => {
+    const { rows } = await client.query(`
+      SELECT
+        r.rolname AS owner,
+        array_to_string(ARRAY(SELECT unnest(p.proacl)::text ORDER BY 1), ', ') AS acl
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname = 'log_audit' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].owner).toBe('postgres');
+    // service_role viene del GRANT explícito original de 0001 (no de
+    // default privileges, a diferencia de las RPCs nuevas de arriba);
+    // postgres queda porque el owner siempre aparece listado en el ACL.
+    // anon/authenticated NO deben aparecer — este es el test que tiene que
+    // fallar si alguien les vuelve a otorgar EXECUTE (regresión del
+    // hallazgo de seguridad de FB-F5-01-INSPECT-REPORT.md, bloque C.3).
+    expect(rows[0].acl).toBe('postgres=X/postgres, service_role=X/postgres');
+  });
+
+  it("storage.buckets: bucket 'procedimientos' privado, mismo límite de tamaño que 'documents', MIME ampliado a PDF/Word/texto plano (0020)", async () => {
+    const { rows } = await client.query(`
+      SELECT public, file_size_limit, allowed_mime_types
+      FROM storage.buckets WHERE id = 'procedimientos'
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].public).toBe(false);
+    // node-pg devuelve bigint como string para no perder precisión.
+    expect(rows[0].file_size_limit).toBe('10485760');
+    expect(rows[0].allowed_mime_types.sort()).toEqual([
+      'application/msword',
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain',
+    ].sort());
+  });
+
+  it("storage.objects: políticas del bucket 'procedimientos' existen — SELECT abierta a autenticado, INSERT/UPDATE/DELETE solo admin (0020)", async () => {
+    const { rows } = await client.query(`
+      SELECT policyname, cmd, qual, with_check FROM pg_policies
+      WHERE schemaname = 'storage' AND tablename = 'objects'
+        AND policyname LIKE 'storage_procedimientos_%'
+    `);
+    const byName = Object.fromEntries(rows.map((r) => [r.policyname, r]));
+    expect(Object.keys(byName).sort()).toEqual([
+      'storage_procedimientos_delete',
+      'storage_procedimientos_insert',
+      'storage_procedimientos_select',
+      'storage_procedimientos_update',
+    ]);
+    expect(byName.storage_procedimientos_select.qual).toMatch(/auth\.uid\(\) IS NOT NULL/);
+    expect(byName.storage_procedimientos_insert.with_check).toMatch(/is_admin/);
+    expect(byName.storage_procedimientos_update.qual).toMatch(/is_admin/);
+    expect(byName.storage_procedimientos_delete.qual).toMatch(/is_admin/);
   });
 });

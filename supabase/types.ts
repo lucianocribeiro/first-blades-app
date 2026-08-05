@@ -397,35 +397,38 @@ export type Database = {
       }
       procedures: {
         Row: {
-          category: string | null
-          content: string | null
+          categoria: string | null
+          contenido_texto: string | null
           created_at: string
           created_by: string
+          estado: Database["public"]["Enums"]["procedure_estado"]
+          file_path: string | null
           id: string
-          storage_path: string | null
-          title: string
+          titulo: string
           updated_at: string
           updated_by: string | null
         }
         Insert: {
-          category?: string | null
-          content?: string | null
+          categoria?: string | null
+          contenido_texto?: string | null
           created_at?: string
           created_by: string
+          estado?: Database["public"]["Enums"]["procedure_estado"]
+          file_path?: string | null
           id?: string
-          storage_path?: string | null
-          title: string
+          titulo: string
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
-          category?: string | null
-          content?: string | null
+          categoria?: string | null
+          contenido_texto?: string | null
           created_at?: string
           created_by?: string
+          estado?: Database["public"]["Enums"]["procedure_estado"]
+          file_path?: string | null
           id?: string
-          storage_path?: string | null
-          title?: string
+          titulo?: string
           updated_at?: string
           updated_by?: string | null
         }
@@ -453,9 +456,11 @@ export type Database = {
           dni: string | null
           email: string
           entrevista_tecnica: Json | null
+          fecha_baja: string | null
           fecha_ingreso: string | null
           full_name: string | null
           id: string
+          motivo_baja: string | null
           phone: string | null
           role: Database["public"]["Enums"]["user_role"]
           status: Database["public"]["Enums"]["employee_status"]
@@ -469,9 +474,11 @@ export type Database = {
           dni?: string | null
           email: string
           entrevista_tecnica?: Json | null
+          fecha_baja?: string | null
           fecha_ingreso?: string | null
           full_name?: string | null
           id: string
+          motivo_baja?: string | null
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           status?: Database["public"]["Enums"]["employee_status"]
@@ -485,9 +492,11 @@ export type Database = {
           dni?: string | null
           email?: string
           entrevista_tecnica?: Json | null
+          fecha_baja?: string | null
           fecha_ingreso?: string | null
           full_name?: string | null
           id?: string
+          motivo_baja?: string | null
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           status?: Database["public"]["Enums"]["employee_status"]
@@ -592,6 +601,23 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      actualizar_procedimiento: {
+        Args: {
+          p_categoria: string | null
+          p_contenido_texto: string | null
+          p_file_path: string | null
+          p_id: string
+          p_titulo: string
+        }
+        Returns: undefined
+      }
+      archivar_procedimiento: {
+        Args: {
+          p_estado: Database["public"]["Enums"]["procedure_estado"]
+          p_id: string
+        }
+        Returns: undefined
+      }
       auth_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
@@ -632,6 +658,15 @@ export type Database = {
           p_motivo_viaje: Database["public"]["Enums"]["motivo_viaje"]
           p_nota?: string
           p_origen: string
+        }
+        Returns: string
+      }
+      crear_procedimiento: {
+        Args: {
+          p_categoria: string | null
+          p_contenido_texto: string | null
+          p_file_path: string | null
+          p_titulo: string
         }
         Returns: string
       }
@@ -691,6 +726,7 @@ export type Database = {
         | "sin_franco"
         | "franco_excedido"
       post_aprobacion_tipo: "editada" | "cancelada"
+      procedure_estado: "vigente" | "archivado"
       user_role: "admin" | "supervisor" | "empleado"
     }
     CompositeTypes: {
@@ -853,6 +889,7 @@ export const Constants = {
         "franco_excedido",
       ],
       post_aprobacion_tipo: ["editada", "cancelada"],
+      procedure_estado: ["vigente", "archivado"],
       user_role: ["admin", "supervisor", "empleado"],
     },
   },

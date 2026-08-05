@@ -43,6 +43,7 @@ const ROT_GROUP_ID   = 'e0000000-0000-0000-0001-000000000001';
 const ROT_ASSIGN_ID  = 'f0000000-0000-0000-0001-000000000001';
 const ROT_ASSIGN_SUPERVISOR_ID = 'f0000000-0000-0000-0001-000000000002'; // fila propia del supervisor (FB-F3-03)
 const PROCEDURE_ID   = 'f1000000-0000-0000-0001-000000000001';
+const PROCEDURE_ARCHIVED_ID = 'f1000000-0000-0000-0001-000000000002'; // FB-F5-02: fixture 'archivado', para probar que se oculta a no-admin
 const AUDIT_LOG_ID   = 'a1000000-0000-0000-0001-000000000001'; // fila conocida para assert real
 
 beforeAll(async () => {
@@ -85,9 +86,14 @@ beforeAll(async () => {
   `, [ROT_ASSIGN_SUPERVISOR_ID, IDS.supervisor]);
 
   await db.query(`
-    INSERT INTO procedures (id, title, content, created_by)
-    VALUES ($1, 'Manual de Seguridad', 'Contenido...', $2) ON CONFLICT DO NOTHING
+    INSERT INTO procedures (id, titulo, contenido_texto, created_by, estado)
+    VALUES ($1, 'Manual de Seguridad', 'Contenido...', $2, 'vigente') ON CONFLICT DO NOTHING
   `, [PROCEDURE_ID, IDS.admin]);
+
+  await db.query(`
+    INSERT INTO procedures (id, titulo, contenido_texto, created_by, estado)
+    VALUES ($1, 'Manual Archivado', 'Contenido archivado...', $2, 'archivado') ON CONFLICT DO NOTHING
+  `, [PROCEDURE_ARCHIVED_ID, IDS.admin]);
 
   // Fila conocida en audit_log para tests de lectura real (servicio superuser, bypass RLS)
   await db.query(`
@@ -784,21 +790,39 @@ describe.skipIf(!dbAvailable)('RLS: rotation_assignments', () => {
 // ============================================================
 
 describe.skipIf(!dbAvailable)('RLS: procedures', () => {
-  it('empleado puede leer procedimientos (SELECT)', async () => {
-    const n = await asUser(IDS.employee1, (c) => countRows(c, 'procedures'));
-    expect(n).toBeGreaterThanOrEqual(1);
+  it('empleado ve procedimientos vigentes pero NO ve los archivados (FB-F5-02)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      const { rows } = await c.query(`SELECT id, estado FROM procedures`);
+      const ids = rows.map((r) => r.id);
+      expect(ids).toContain(PROCEDURE_ID);
+      expect(ids).not.toContain(PROCEDURE_ARCHIVED_ID);
+      expect(rows.every((r) => r.estado === 'vigente')).toBe(true);
+    });
   });
 
-  it('supervisor puede leer procedimientos (SELECT)', async () => {
-    const n = await asUser(IDS.supervisor, (c) => countRows(c, 'procedures'));
-    expect(n).toBeGreaterThanOrEqual(1);
+  it('supervisor ve procedimientos vigentes pero NO ve los archivados (FB-F5-02)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      const { rows } = await c.query(`SELECT id, estado FROM procedures`);
+      const ids = rows.map((r) => r.id);
+      expect(ids).toContain(PROCEDURE_ID);
+      expect(ids).not.toContain(PROCEDURE_ARCHIVED_ID);
+    });
+  });
+
+  it('admin ve procedimientos vigentes Y archivados (FB-F5-02)', async () => {
+    await asUser(IDS.admin, async (c) => {
+      const { rows } = await c.query(`SELECT id, estado FROM procedures`);
+      const ids = rows.map((r) => r.id);
+      expect(ids).toContain(PROCEDURE_ID);
+      expect(ids).toContain(PROCEDURE_ARCHIVED_ID);
+    });
   });
 
   it('empleado NO puede INSERT procedimientos (INSERT deniega con error)', async () => {
     await asUser(IDS.employee1, async (c) => {
       await expectPermissionError(
         c,
-        `INSERT INTO procedures (title, created_by) VALUES ('Hack', $1)`,
+        `INSERT INTO procedures (titulo, created_by) VALUES ('Hack', $1)`,
         [IDS.employee1]
       );
     });
@@ -808,9 +832,23 @@ describe.skipIf(!dbAvailable)('RLS: procedures', () => {
     await asUser(IDS.supervisor, async (c) => {
       await expectPermissionError(
         c,
-        `INSERT INTO procedures (title, created_by) VALUES ('Hack', $1)`,
+        `INSERT INTO procedures (titulo, created_by) VALUES ('Hack', $1)`,
         [IDS.supervisor]
       );
+    });
+  });
+
+  it('empleado NO puede UPDATE ni DELETE procedimientos (filtrado silenciosamente por USING, FB-F5-02)', async () => {
+    await asUser(IDS.employee1, async (c) => {
+      await expectDeniedSilently(c, `UPDATE procedures SET titulo = 'Hack' WHERE id = $1`, [PROCEDURE_ID]);
+      await expectDeniedSilently(c, `DELETE FROM procedures WHERE id = $1`, [PROCEDURE_ID]);
+    });
+  });
+
+  it('supervisor NO puede UPDATE ni DELETE procedimientos (filtrado silenciosamente por USING, FB-F5-02)', async () => {
+    await asUser(IDS.supervisor, async (c) => {
+      await expectDeniedSilently(c, `UPDATE procedures SET titulo = 'Hack' WHERE id = $1`, [PROCEDURE_ID]);
+      await expectDeniedSilently(c, `DELETE FROM procedures WHERE id = $1`, [PROCEDURE_ID]);
     });
   });
 
@@ -818,7 +856,7 @@ describe.skipIf(!dbAvailable)('RLS: procedures', () => {
     await asUser(IDS.admin, async (c) => {
       await expect(
         c.query(
-          `INSERT INTO procedures (title, content, created_by) VALUES ('Test Proc', 'Contenido', $1)`,
+          `INSERT INTO procedures (titulo, contenido_texto, created_by) VALUES ('Test Proc', 'Contenido', $1)`,
           [IDS.admin]
         )
       ).resolves.toBeDefined();
@@ -828,7 +866,7 @@ describe.skipIf(!dbAvailable)('RLS: procedures', () => {
   it('admin puede UPDATE procedimientos', async () => {
     await asUser(IDS.admin, async (c) => {
       const { rowCount } = await c.query(
-        `UPDATE procedures SET title = 'Manual Actualizado' WHERE id = $1`, [PROCEDURE_ID]
+        `UPDATE procedures SET titulo = 'Manual Actualizado' WHERE id = $1`, [PROCEDURE_ID]
       );
       expect(rowCount).toBeGreaterThanOrEqual(1);
     });
