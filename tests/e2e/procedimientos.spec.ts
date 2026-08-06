@@ -15,6 +15,7 @@
 import { test, expect } from '@playwright/test';
 import { login } from './helpers';
 import { copy } from '../../lib/copy';
+import { createAdminClient } from '../../lib/supabase/admin';
 
 test.describe('Admin: Procedimientos — crear, editar, archivar, restaurar', () => {
   test.beforeEach(async ({ page }) => {
@@ -22,12 +23,17 @@ test.describe('Admin: Procedimientos — crear, editar, archivar, restaurar', ()
   });
 
   test('recorrido completo de un procedimiento de texto', async ({ page }) => {
-    const titulo = `E2E Nuevo Procedimiento ${Date.now()}`;
+    // Deliberadamente NO empieza con "Nuevo procedimiento" — ese es el
+    // texto exacto del botón de alta (copy.procedimientos.newButton), y un
+    // getByRole no-exact en OTRO test (el de empleado) matchea por
+    // substring: un título que arrancara así rompía esa aserción con un
+    // falso positivo real (encontrado en CI).
+    const titulo = `E2E Manual Temporal ${Date.now()}`;
     const tituloEditado = `${titulo} (editado)`;
 
     // ─── Crear ───────────────────────────────────────────────
     await page.goto('/procedimientos');
-    await page.getByRole('link', { name: copy.procedimientos.newButton }).click();
+    await page.getByRole('link', { name: copy.procedimientos.newButton, exact: true }).click();
     await expect(page.getByRole('heading', { name: copy.procedimientos.form.crearTitle })).toBeVisible();
 
     await page.getByRole('textbox', { name: copy.procedimientos.form.titulo, exact: false }).fill(titulo);
@@ -84,6 +90,10 @@ test.describe('Admin: Procedimientos — crear, editar, archivar, restaurar', ()
     await mostrarArchivadosCheckbox.click();
     await expect(mostrarArchivadosCheckbox).not.toBeChecked();
     await expect(page.getByRole('row', { name: new RegExp(tituloEditado.replace(/[()]/g, '\\$&')) })).toBeVisible();
+
+    // Cleanup: no dejar el procedimiento de este test colgado en la base —
+    // afecta reruns y a otros specs que listan/cuentan procedimientos.
+    await createAdminClient().from('procedures').delete().eq('titulo', tituloEditado);
   });
 });
 
@@ -95,7 +105,7 @@ test.describe('Empleado: Procedimientos — ve y busca, sin acciones de admin ni
   test('ve el procedimiento sembrado vigente, no ve el archivado ni acciones de admin', async ({ page }) => {
     await page.goto('/procedimientos');
 
-    await expect(page.getByRole('link', { name: copy.procedimientos.newButton })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: copy.procedimientos.newButton, exact: true })).toHaveCount(0);
     await expect(page.getByLabel(copy.procedimientos.search.mostrarArchivados, { exact: true })).toHaveCount(0);
 
     await expect(page.getByRole('link', { name: 'E2E Procedimiento Vigente', exact: true })).toBeVisible();
