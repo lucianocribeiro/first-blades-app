@@ -13,6 +13,30 @@ import type { ProcedureEstado } from '@/lib/db-types';
 export type ProcedimientoActionResult = { ok: true } | { ok: false; error: string };
 export type CrearProcedimientoResult = { ok: true; id: string } | { ok: false; error: string };
 
+// ─── Excepción documentada: el guard de rol NO usa el contrato { ok } ──
+// (FB-F5-AUD-05 Hallazgo 3 — decisión tomada, no re-abrir)
+//
+// Las tres actions de abajo empiezan con `await requireAdmin()`, que corta
+// con `redirect('/dashboard')` si quien llama no es admin — no devuelve
+// `{ ok: false }`. Es intencional:
+//
+//   - El contrato return-based existe porque un `throw new Error(...)` que
+//     cruza el límite de una Server Action llega REDACTADO al cliente en
+//     build de producción (el motivo original de §2.5). `redirect()` no es
+//     eso: es un mecanismo propio de Next.js que funciona igual en
+//     producción — no hay nada que redactar ni que envolver.
+//   - Un no-admin invocando estas RPCs no es un error de negocio que haya
+//     que explicarle con un mensaje: es alguien fuera de lugar. Redirigirlo
+//     es la respuesta correcta, y de paso no le confirma ni le niega nada
+//     sobre lo que existe del otro lado (a diferencia de un `{ ok: false,
+//     error: "..." }` con detalle).
+//   - `requireAdmin()` es un helper compartido por todo el portal — no se
+//     lo toca acá para "prolijizar" esta pieza puntual.
+//
+// El contrato `{ ok }` aplica a partir de este punto: a los errores de
+// negocio de una llamada YA AUTORIZADA (RPC que falla, archivo inválido,
+// fila no encontrada). Ver docs/constitucion.md §2.5.
+
 // ─── Exclusividad de contenido (regla de aplicación, no de la base) ────
 // La base acepta que contenido_texto y file_path estén los dos a la vez
 // (el CHECK de la migración 0020 pide "al menos uno"); la exclusividad
@@ -43,6 +67,8 @@ function extraerContenido(formData: FormData): { ok: true; value: ContenidoExtra
 // ─── Crear (solo admin) ─────────────────────────────────────────
 
 export async function crearProcedimiento(formData: FormData): Promise<CrearProcedimientoResult> {
+  // Guard de rol: corta por redirect(), no por el contrato { ok } — ver
+  // "Excepción documentada" arriba.
   await requireAdmin();
 
   const titulo = ((formData.get('titulo') as string | null) ?? '').trim();
@@ -103,6 +129,8 @@ export async function actualizarProcedimiento(
   id: string,
   formData: FormData
 ): Promise<ProcedimientoActionResult> {
+  // Guard de rol: corta por redirect(), no por el contrato { ok } — ver
+  // "Excepción documentada" al principio del archivo.
   await requireAdmin();
 
   const titulo = ((formData.get('titulo') as string | null) ?? '').trim();
@@ -201,6 +229,8 @@ export async function cambiarEstadoProcedimiento(
   id: string,
   estado: ProcedureEstado
 ): Promise<ProcedimientoActionResult> {
+  // Guard de rol: corta por redirect(), no por el contrato { ok } — ver
+  // "Excepción documentada" al principio del archivo.
   await requireAdmin();
   const supabase = await createServerClient();
 

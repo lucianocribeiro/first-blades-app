@@ -395,9 +395,16 @@ describe('cambiarEstadoProcedimiento', () => {
 });
 
 // ─── Límite de rol ─────────────────────────────────────────────────
+//
+// FB-F5-AUD-05 Hallazgo 3: estas aserciones NO son un vacío de cobertura
+// del contrato { ok } — son la prueba de la excepción documentada al
+// principio de actions.ts. Un no-admin que llama cualquiera de las tres
+// actions tiene que terminar en redirect('/dashboard'), nunca en
+// { ok: false, error: '...' }: el guard de rol corta antes de llegar al
+// contrato return-based, a propósito.
 
-describe('límite de rol (admin / supervisor / empleado)', () => {
-  it('admin: NO redirige a /dashboard en ninguna de las tres actions', async () => {
+describe('límite de rol (admin / supervisor / empleado) — redirect() es el comportamiento esperado, no un throw a envolver', () => {
+  it('admin: pasa el guard, NO redirige a /dashboard en ninguna de las tres actions', async () => {
     mockClient({ role: 'admin', userId: 'admin-id' });
 
     await crearProcedimiento(textFormData({ titulo: 'X', contenido_texto: 'y' }));
@@ -414,7 +421,7 @@ describe('límite de rol (admin / supervisor / empleado)', () => {
     expect(redirect).not.toHaveBeenCalledWith('/dashboard');
   });
 
-  it('supervisor: redirige a /dashboard en las tres actions (bloqueado)', async () => {
+  it('supervisor: el guard de rol corta por redirect() — comportamiento correcto, no un error de negocio a devolver como { ok:false }', async () => {
     mockClient({ role: 'supervisor', userId: 'sup-id' });
     await crearProcedimiento(textFormData({ titulo: 'X', contenido_texto: 'y' }));
     expect(redirect).toHaveBeenCalledWith('/dashboard');
@@ -430,7 +437,7 @@ describe('límite de rol (admin / supervisor / empleado)', () => {
     expect(redirect).toHaveBeenCalledWith('/dashboard');
   });
 
-  it('empleado: redirige a /dashboard en las tres actions (bloqueado)', async () => {
+  it('empleado: el guard de rol corta por redirect() — comportamiento correcto, no un error de negocio a devolver como { ok:false }', async () => {
     mockClient({ role: 'empleado', userId: 'emp-id' });
     await crearProcedimiento(textFormData({ titulo: 'X', contenido_texto: 'y' }));
     expect(redirect).toHaveBeenCalledWith('/dashboard');

@@ -14,7 +14,13 @@ export type ProcedimientoFormInitial = {
   titulo: string;
   categoria: string | null;
   contenidoTexto: string | null;
-  filePath: string | null;
+  // Booleano, NUNCA el file_path real (FB-F5-AUD-05 Hallazgo 2): este
+  // componente es 'use client' — cualquier prop que le pases viaja
+  // serializada al bundle/payload del navegador. El path de Storage no
+  // tiene por qué salir del server; acá solo hace falta saber si YA había
+  // un archivo, para arrancar el form en modo "archivo" sin pedir que se
+  // vuelva a subir.
+  tieneArchivo: boolean;
 };
 
 type ProcedimientoFormProps =
@@ -31,7 +37,7 @@ export function ProcedimientoForm(props: ProcedimientoFormProps) {
   const [titulo, setTitulo] = useState(initial?.titulo ?? '');
   const [categoria, setCategoria] = useState(initial?.categoria ?? '');
   const [tipoContenido, setTipoContenido] = useState<TipoContenido>(
-    initial?.filePath ? 'archivo' : 'texto'
+    initial?.tieneArchivo ? 'archivo' : 'texto'
   );
   const [contenidoTexto, setContenidoTexto] = useState(initial?.contenidoTexto ?? '');
   const fileRef = useRef<HTMLInputElement>(null);

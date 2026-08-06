@@ -21,11 +21,20 @@ export default async function ProcedimientoViewPage({
 
   const supabase = await createServerClient();
 
-  // RLS ya oculta un archivado a no-admin (procedures_select); si la fila no
-  // aparece, no hay forma de distinguir "no existe" de "está archivado y no
-  // es admin" desde acá — y no hace falta: el resultado visible es el mismo
-  // (notFound), sin filtrar cuál de los dos casos es.
-  const { data, error } = await supabase.from('procedures').select('*').eq('id', id).maybeSingle();
+  // Filtro de aplicación SUPERPUESTO a la RLS (FB-F5-AUD-05 Hallazgo 1) — no
+  // es la defensa principal, la RLS (procedures_select) ya bloquea que un
+  // no-admin lea un archivado. Es la segunda capa que las reglas técnicas
+  // de FB-F5-06 piden explícitamente: si algún día la policy cambia o
+  // alguien la rompe sin querer, esta línea sigue cortando acá también. No
+  // borrar por "redundante" — es a propósito.
+  let query = supabase.from('procedures').select('*').eq('id', id);
+  if (!isAdmin) query = query.eq('estado', 'vigente');
+  const { data, error } = await query.maybeSingle();
+
+  // Mismo resultado (notFound) tanto si la fila no existe como si existe
+  // pero está archivada y quien mira no es admin — no hay rama que
+  // distinga los dos casos, así que no hay forma de deducir por el
+  // mensaje si un id archivado existe.
 
   if (error) {
     console.error('[ProcedimientoViewPage] error al cargar procedimiento:', error.message);

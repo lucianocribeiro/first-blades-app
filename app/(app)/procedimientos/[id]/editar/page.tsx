@@ -51,7 +51,11 @@ export default async function EditarProcedimientoPage({
             titulo: procedimiento.titulo,
             categoria: procedimiento.categoria,
             contenidoTexto: procedimiento.contenido_texto,
-            filePath: procedimiento.file_path,
+            // Booleano, no el file_path real (FB-F5-AUD-05 Hallazgo 2) — el
+            // path de Storage no tiene motivo para viajar al cliente vía
+            // props de un componente 'use client'. Ver el comentario en
+            // ProcedimientoForm.tsx.
+            tieneArchivo: !!procedimiento.file_path,
           }}
         />
       </Card>
