@@ -19,6 +19,11 @@ type MarkdownEditorProps = {
 // nunca acá.
 export function MarkdownEditor({ value, onChange, label, required }: MarkdownEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Asocia el <label> externo (arriba del toolbar) con el <textarea> de
+  // abajo — Textarea ya sabe generar su propio label+htmlFor internamente,
+  // pero acá el label vive afuera (por el toolbar en el medio), así que la
+  // asociación se arma a mano con el mismo criterio (slug del texto).
+  const textareaId = label ? label.toLowerCase().replace(/\s+/g, '-') : undefined;
 
   function applyWrap(prefix: string, suffix: string, placeholder: string) {
     const el = textareaRef.current;
@@ -60,7 +65,7 @@ export function MarkdownEditor({ value, onChange, label, required }: MarkdownEdi
   return (
     <div className="flex flex-col gap-1">
       {label && (
-        <label className="text-sm font-medium text-secondary">
+        <label htmlFor={textareaId} className="text-sm font-medium text-secondary">
           {label}
           {required && <span className="text-error ml-1">*</span>}
         </label>
@@ -96,6 +101,7 @@ export function MarkdownEditor({ value, onChange, label, required }: MarkdownEdi
       </div>
       <Textarea
         ref={textareaRef}
+        id={textareaId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}

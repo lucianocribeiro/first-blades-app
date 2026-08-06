@@ -161,12 +161,13 @@ export function ProcedimientoForm(props: ProcedimientoFormProps) {
         />
       ) : (
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-secondary">
+          <label htmlFor="procedimiento-archivo" className="text-sm font-medium text-secondary">
             {copy.procedimientos.form.archivo}
             {props.mode === 'crear' && <span className="text-error ml-1">*</span>}
           </label>
           <input
             ref={fileRef}
+            id="procedimiento-archivo"
             type="file"
             accept=".pdf,.doc,.docx,.txt"
             className="text-sm text-secondary file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary file:text-white hover:file:bg-primary/90 file:cursor-pointer"
