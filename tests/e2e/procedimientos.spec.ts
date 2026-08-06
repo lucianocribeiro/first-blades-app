@@ -30,8 +30,8 @@ test.describe('Admin: Procedimientos — crear, editar, archivar, restaurar', ()
     await page.getByRole('link', { name: copy.procedimientos.newButton }).click();
     await expect(page.getByRole('heading', { name: copy.procedimientos.form.crearTitle })).toBeVisible();
 
-    await page.getByLabel(copy.procedimientos.form.titulo, { exact: false }).fill(titulo);
-    await page.getByLabel(copy.procedimientos.form.contenidoTexto, { exact: false }).fill('Contenido de prueba e2e.\n\n## Sección\n\nTexto.');
+    await page.getByRole('textbox', { name: copy.procedimientos.form.titulo, exact: false }).fill(titulo);
+    await page.getByRole('textbox', { name: copy.procedimientos.form.contenidoTexto, exact: false }).fill('Contenido de prueba e2e.\n\n## Sección\n\nTexto.');
     await page.getByRole('button', { name: copy.procedimientos.form.guardar, exact: true }).click();
 
     await expect(page.getByRole('heading', { name: titulo })).toBeVisible();
@@ -44,7 +44,7 @@ test.describe('Admin: Procedimientos — crear, editar, archivar, restaurar', ()
     await row.getByRole('link', { name: copy.procedimientos.editButton, exact: true }).click();
     await expect(page.getByRole('heading', { name: copy.procedimientos.form.editarTitle })).toBeVisible();
 
-    const tituloInput = page.getByLabel(copy.procedimientos.form.titulo, { exact: false });
+    const tituloInput = page.getByRole('textbox', { name: copy.procedimientos.form.titulo, exact: false });
     await tituloInput.fill(tituloEditado);
     await page.getByRole('button', { name: copy.procedimientos.form.guardar, exact: true }).click();
 
