@@ -603,9 +603,9 @@ export type Database = {
     Functions: {
       actualizar_procedimiento: {
         Args: {
-          p_categoria: string | null
-          p_contenido_texto: string | null
-          p_file_path: string | null
+          p_categoria: string
+          p_contenido_texto: string
+          p_file_path: string
           p_id: string
           p_titulo: string
         }
@@ -663,9 +663,9 @@ export type Database = {
       }
       crear_procedimiento: {
         Args: {
-          p_categoria: string | null
-          p_contenido_texto: string | null
-          p_file_path: string | null
+          p_categoria: string
+          p_contenido_texto: string
+          p_file_path: string
           p_titulo: string
         }
         Returns: string

@@ -251,3 +251,11 @@ Corrido con el CLI real (`supabase gen types typescript --linked`), linkeado al 
 Los 6 bloques que verifican el **catálogo real de producción** (bloques 1–6) están **100% limpios**: el `REVOKE` de `log_audit()` es el único cambio en esa función, las 3 RPCs nuevas calzan con el molde esperado en owner/seguridad/ACL, `procedures`/`profiles`/Storage quedaron exactamente como diseñó `0020`, y no apareció ni desapareció nada fuera de lo declarado en la migración.
 
 La única divergencia (bloque 7) es en `supabase/types.ts`, un artefacto del repo, no del catálogo de la base — y es exactamente el tipo de cosa para la que existía la nota de tooling desde `FB-F5-02`: la edición a mano sin Docker local tenía un margen de error, y el regen real lo encontró. **No es el escenario de "frenar y no tocar nada" de una función `SECURITY DEFINER`** (eso dio limpio) — es una corrección de tipos pendiente, de bajo riesgo, para un prompt de build aparte.
+
+---
+
+## Nota de cierre (FB-F5-05)
+
+La divergencia del bloque 7 se resolvió en `FB-F5-05`: `supabase/types.ts` fue **reemplazado por completo por la salida real** de `supabase gen types typescript --linked` (mismo CLI v2.75 que corrió el push, sin actualizar) — no un edit a mano del diff. Un segundo regen inmediato confirmó **diff cero** contra el archivo commiteado. `npm run typecheck` pasó en verde; ningún otro archivo del repo dependía de las firmas viejas de `crear_procedimiento`/`actualizar_procedimiento` (todavía no tienen caller — eso es `FB-F5-06`), así que no hubo efectos colaterales.
+
+La migración `0020` queda cerrada sin ninguna divergencia pendiente, ni de catálogo ni de tooling.
