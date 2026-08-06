@@ -31,6 +31,12 @@ export function ProcedimientosSearchBar({
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
   const [q, setQ] = useState(initialQuery);
+  // Espejo local de categoría/archivados: sin esto, el <select>/checkbox
+  // quedan controlados 100% por el prop que viene del server (vía la URL)
+  // y no se ven marcados hasta que router.push() termine de resolver —
+  // sensación de que el click "no hizo nada" por uno o dos frames.
+  const [categoriaLocal, setCategoriaLocal] = useState(initialCategoria);
+  const [archivadosLocal, setArchivadosLocal] = useState(initialMostrarArchivados);
 
   function pushParams(next: { q?: string; categoria?: string; archivados?: boolean }) {
     const params = new URLSearchParams(searchParams.toString());
@@ -69,8 +75,11 @@ export function ProcedimientosSearchBar({
       <div className="w-full sm:w-56">
         <Select
           label={copy.procedimientos.search.categoriaLabel}
-          value={initialCategoria}
-          onChange={(e) => pushParams({ categoria: e.target.value })}
+          value={categoriaLocal}
+          onChange={(e) => {
+            setCategoriaLocal(e.target.value);
+            pushParams({ categoria: e.target.value });
+          }}
           options={[
             { value: '', label: copy.procedimientos.search.categoriaTodas },
             ...categorias.map((c) => ({ value: c, label: c })),
@@ -81,8 +90,11 @@ export function ProcedimientosSearchBar({
         <label className="flex items-center gap-2 text-sm text-secondary whitespace-nowrap pb-2 cursor-pointer">
           <input
             type="checkbox"
-            checked={initialMostrarArchivados}
-            onChange={(e) => pushParams({ archivados: e.target.checked })}
+            checked={archivadosLocal}
+            onChange={(e) => {
+              setArchivadosLocal(e.target.checked);
+              pushParams({ archivados: e.target.checked });
+            }}
           />
           {copy.procedimientos.search.mostrarArchivados}
         </label>

@@ -62,8 +62,15 @@ test.describe('Admin: Procedimientos — crear, editar, archivar, restaurar', ()
     // Desaparece del listado por default (solo vigentes).
     await expect(page.getByRole('row', { name: new RegExp(tituloEditado.replace(/[()]/g, '\\$&')) })).toHaveCount(0);
 
-    // Con "mostrar archivados" reaparece, etiquetado.
-    await page.getByLabel(copy.procedimientos.search.mostrarArchivados, { exact: true }).check();
+    // Con "mostrar archivados" reaparece, etiquetado. El checkbox está
+    // controlado por el query param de la URL (no por estado local) — el
+    // cambio se ve recién después de que router.push() resuelve la
+    // navegación, así que se usa click() + una assertion con auto-retry
+    // (toBeChecked) en vez de check(), que verifica el cambio de estado
+    // de forma inmediata y sin reintentos.
+    const mostrarArchivadosCheckbox = page.getByLabel(copy.procedimientos.search.mostrarArchivados, { exact: true });
+    await mostrarArchivadosCheckbox.click();
+    await expect(mostrarArchivadosCheckbox).toBeChecked();
     const rowArchivado = page.getByRole('row', { name: new RegExp(tituloEditado.replace(/[()]/g, '\\$&')) });
     await expect(rowArchivado).toBeVisible();
     await expect(rowArchivado.getByText(copy.status.archivado, { exact: true })).toBeVisible();
@@ -74,7 +81,8 @@ test.describe('Admin: Procedimientos — crear, editar, archivar, restaurar', ()
     await expect(restoreDialog.getByRole('heading', { name: copy.procedimientos.confirmRestaurar.title })).toBeVisible();
     await restoreDialog.getByRole('button', { name: copy.procedimientos.confirmRestaurar.confirm, exact: true }).click();
 
-    await page.getByLabel(copy.procedimientos.search.mostrarArchivados, { exact: true }).uncheck();
+    await mostrarArchivadosCheckbox.click();
+    await expect(mostrarArchivadosCheckbox).not.toBeChecked();
     await expect(page.getByRole('row', { name: new RegExp(tituloEditado.replace(/[()]/g, '\\$&')) })).toBeVisible();
   });
 });
