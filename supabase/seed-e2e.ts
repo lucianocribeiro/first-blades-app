@@ -90,7 +90,34 @@ async function main() {
     .eq('id', empleadoId);
   if (empleadoErr) throw empleadoErr;
 
-  console.log('✓ Seed e2e: admin, supervisor y empleado a cargo sembrados.');
+  // Procedimientos (FB-F5-06): un vigente y un archivado, sembrados por
+  // INSERT directo (no por la RPC — no hay sesión de usuario en un script
+  // de seed) para que el spec de empleado tenga algo que ver/buscar sin
+  // depender de que el spec de admin haya corrido antes.
+  await admin.from('procedures').delete().eq('titulo', 'E2E Procedimiento Vigente');
+  await admin.from('procedures').delete().eq('titulo', 'E2E Procedimiento Archivado');
+
+  const { error: procVigenteErr } = await admin.from('procedures').insert({
+    titulo: 'E2E Procedimiento Vigente',
+    categoria: 'E2E Seguridad',
+    contenido_texto: 'Contenido de prueba del procedimiento vigente sembrado para e2e.',
+    created_by: adminId,
+    updated_by: adminId,
+    estado: 'vigente',
+  });
+  if (procVigenteErr) throw procVigenteErr;
+
+  const { error: procArchivadoErr } = await admin.from('procedures').insert({
+    titulo: 'E2E Procedimiento Archivado',
+    categoria: 'E2E Seguridad',
+    contenido_texto: 'Contenido de prueba del procedimiento archivado sembrado para e2e.',
+    created_by: adminId,
+    updated_by: adminId,
+    estado: 'archivado',
+  });
+  if (procArchivadoErr) throw procArchivadoErr;
+
+  console.log('✓ Seed e2e: admin, supervisor, empleado a cargo, y procedimientos (vigente + archivado) sembrados.');
 }
 
 main().catch((err) => {

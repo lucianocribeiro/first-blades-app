@@ -1,4 +1,4 @@
-import { Clock, CheckCircle, XCircle, UserCheck, UserX, Pencil } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, UserCheck, UserX, Pencil, Archive } from 'lucide-react';
 import { copy } from '@/lib/copy';
 import type { Enums } from '@/supabase/types';
 
@@ -6,7 +6,8 @@ type Status =
   | Enums<'approval_status'>
   | Enums<'employee_status'>
   | Enums<'estado_dia'>
-  | Enums<'post_aprobacion_tipo'>;
+  | Enums<'post_aprobacion_tipo'>
+  | Enums<'procedure_estado'>;
 
 type StatusBadgeProps = {
   status: Status;
@@ -29,6 +30,8 @@ const config: Record<
   periodo_fuera_trabajo: { label: copy.status.periodo_fuera_trabajo, icon: XCircle,     className: 'bg-orange-50 text-orange-700 border-orange-200' },
   editada:               { label: copy.status.editada,               icon: Pencil,      className: 'bg-blue-50 text-blue-700 border-blue-200' },
   cancelada:             { label: copy.status.cancelada,              icon: XCircle,     className: 'bg-gray-100 text-gray-600 border-gray-200' },
+  vigente:               { label: copy.status.vigente,                icon: CheckCircle, className: 'bg-green-50 text-green-700 border-green-200' },
+  archivado:             { label: copy.status.archivado,              icon: Archive,     className: 'bg-gray-100 text-gray-600 border-gray-200' },
 };
 
 export function StatusBadge({ status, label }: StatusBadgeProps) {
