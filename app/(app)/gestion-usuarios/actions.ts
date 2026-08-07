@@ -100,13 +100,37 @@ export type DeactivateUserInput = {
 export async function deactivateUser(input: DeactivateUserInput): Promise<UserActionResult> {
   const adminProfile = await requireAdmin();
 
+  // Hardening del usuario objetivo (FB-F5-09, Hallazgo 3, bloqueante): un
+  // admin no puede desactivarse a sí mismo. Si fuera el único admin, quedaría
+  // sin acceso en el acto y sin nadie que pueda reactivarlo desde la app —
+  // estado irrecuperable. Comparación server-side contra el id de la sesión
+  // YA verificada por requireAdmin(), nunca contra algo que venga del
+  // cliente. Desactivar a OTRO admin sigue permitido: es una operación
+  // legítima, el único caso irrecuperable es este.
+  if (input.id === adminProfile.id) {
+    return { ok: false, error: copy.gestionUsuarios.errors.cannotDeactivateSelf };
+  }
+
   const motivo = input.motivo.trim();
   if (!motivo) return { ok: false, error: copy.gestionUsuarios.bajaModal.motivoRequired };
   if (!input.fecha) return { ok: false, error: copy.gestionUsuarios.bajaModal.fechaRequired };
 
   const admin = createAdminClient();
 
-  const { error } = await admin
+  // Releer el perfil objetivo del lado del server (Hallazgo 3): un id
+  // inexistente no debe devolver { ok: true } ni escribir en audit_log sobre
+  // un record_id que nunca existió.
+  const { data: targetProfile } = await admin
+    .from('profiles')
+    .select('id')
+    .eq('id', input.id)
+    .maybeSingle();
+
+  if (!targetProfile) {
+    return { ok: false, error: copy.gestionUsuarios.errors.userNotFound };
+  }
+
+  const { data: updated, error } = await admin
     .from('profiles')
     .update({
       status: 'inactivo',
@@ -114,22 +138,33 @@ export async function deactivateUser(input: DeactivateUserInput): Promise<UserAc
       fecha_baja: input.fecha,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', input.id);
+    .eq('id', input.id)
+    .select('id');
 
   if (error) return { ok: false, error: error.message };
 
-  // Registrar en audit_log (no bloqueante: si falla, la baja ya se aplicó) —
-  // mismo patrón que aprobaciones/actions.ts.
-  try {
-    await admin.from('audit_log').insert({
-      actor_id:   adminProfile.id,
-      action:     'user_deactivated',
-      table_name: 'profiles',
-      record_id:  input.id,
-      new_data:   { status: 'inactivo', motivo_baja: motivo, fecha_baja: input.fecha },
+  // Cero filas afectadas es un error, no un éxito silencioso (Hallazgo 3).
+  if (!updated || updated.length === 0) {
+    return { ok: false, error: copy.gestionUsuarios.errors.updateFailed };
+  }
+
+  // Registrar en audit_log (no bloqueante: si falla, la baja ya se aplicó).
+  // FB-F5-09 Hallazgo 2: leer el resultado — insert() de PostgREST no
+  // throwea por un fallo de query, lo devuelve como { error }. Un try/catch
+  // acá nunca lo agarra; antes esto tragaba el fallo sin dejar rastro.
+  const { error: auditError } = await admin.from('audit_log').insert({
+    actor_id:   adminProfile.id,
+    action:     'user_deactivated',
+    table_name: 'profiles',
+    record_id:  input.id,
+    new_data:   { status: 'inactivo', motivo_baja: motivo, fecha_baja: input.fecha },
+  });
+  if (auditError) {
+    console.error('[audit] fallo al registrar baja de usuario:', {
+      actorId: adminProfile.id,
+      targetId: input.id,
+      error: auditError,
     });
-  } catch (auditErr) {
-    console.error('[audit] fallo al registrar baja de usuario:', auditErr);
   }
 
   revalidatePath('/gestion-usuarios');
@@ -140,11 +175,23 @@ export async function activateUser(userId: string): Promise<UserActionResult> {
   const adminProfile = await requireAdmin();
   const admin = createAdminClient();
 
+  // Releer el perfil objetivo del lado del server (Hallazgo 3, FB-F5-09): un
+  // id inexistente no debe devolver { ok: true } ni escribir en audit_log.
+  const { data: targetProfile } = await admin
+    .from('profiles')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!targetProfile) {
+    return { ok: false, error: copy.gestionUsuarios.errors.userNotFound };
+  }
+
   // Reactivar limpia motivo_baja/fecha_baja (decisión documentada,
   // FB-F5-08): sin versionado de historial de bajas, un motivo viejo
   // colgado en la ficha después de reactivar confunde más de lo que aporta.
   // La baja anterior queda igual en audit_log si hace falta reconstruirla.
-  const { error } = await admin
+  const { data: updated, error } = await admin
     .from('profiles')
     .update({
       status: 'activo',
@@ -152,20 +199,31 @@ export async function activateUser(userId: string): Promise<UserActionResult> {
       fecha_baja: null,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', userId);
+    .eq('id', userId)
+    .select('id');
 
   if (error) return { ok: false, error: error.message };
 
-  try {
-    await admin.from('audit_log').insert({
-      actor_id:   adminProfile.id,
-      action:     'user_activated',
-      table_name: 'profiles',
-      record_id:  userId,
-      new_data:   { status: 'activo' },
+  // Cero filas afectadas es un error, no un éxito silencioso (Hallazgo 3).
+  if (!updated || updated.length === 0) {
+    return { ok: false, error: copy.gestionUsuarios.errors.updateFailed };
+  }
+
+  // FB-F5-09 Hallazgo 2: leer el resultado del insert, no un try/catch — ver
+  // el comentario equivalente en deactivateUser.
+  const { error: auditError } = await admin.from('audit_log').insert({
+    actor_id:   adminProfile.id,
+    action:     'user_activated',
+    table_name: 'profiles',
+    record_id:  userId,
+    new_data:   { status: 'activo' },
+  });
+  if (auditError) {
+    console.error('[audit] fallo al registrar reactivación de usuario:', {
+      actorId: adminProfile.id,
+      targetId: userId,
+      error: auditError,
     });
-  } catch (auditErr) {
-    console.error('[audit] fallo al registrar reactivación de usuario:', auditErr);
   }
 
   revalidatePath('/gestion-usuarios');
@@ -179,6 +237,20 @@ export async function resetPassword(userId: string, newPassword: string): Promis
   if (!passwordCheck.valid) return { ok: false, error: passwordCheck.error! };
 
   const admin = createAdminClient();
+
+  // Confirmar que userId corresponde a un perfil gestionado por la app
+  // (Hallazgo 3, FB-F5-09) — antes de tocar Supabase Auth. Evita resetear la
+  // contraseña de un usuario de Auth que no tiene fila en `profiles` (o que
+  // ya no la tiene) a través de esta pantalla.
+  const { data: targetProfile } = await admin
+    .from('profiles')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!targetProfile) {
+    return { ok: false, error: copy.gestionUsuarios.errors.userNotFound };
+  }
 
   // ─── Excepción documentada: admin client fuera de un job de sistema ───
   // Cambiar la contraseña de otro usuario SOLO se puede hacer con
@@ -200,15 +272,21 @@ export async function resetPassword(userId: string, newPassword: string): Promis
   const { error } = await admin.auth.admin.updateUserById(userId, { password: newPassword });
   if (error) return { ok: false, error: error.message };
 
-  try {
-    await admin.from('audit_log').insert({
-      actor_id:   adminProfile.id,
-      action:     'password_reset',
-      table_name: 'profiles',
-      record_id:  userId,
+  // FB-F5-09 Hallazgo 2: leer el resultado del insert, no un try/catch — el
+  // insert() de PostgREST no throwea por un fallo de query, lo devuelve como
+  // { error }; antes esto tragaba el fallo sin dejar rastro.
+  const { error: auditError } = await admin.from('audit_log').insert({
+    actor_id:   adminProfile.id,
+    action:     'password_reset',
+    table_name: 'profiles',
+    record_id:  userId,
+  });
+  if (auditError) {
+    console.error('[audit] fallo al registrar reseteo de contraseña:', {
+      actorId: adminProfile.id,
+      targetId: userId,
+      error: auditError,
     });
-  } catch (auditErr) {
-    console.error('[audit] fallo al registrar reseteo de contraseña:', auditErr);
   }
 
   revalidatePath('/gestion-usuarios');

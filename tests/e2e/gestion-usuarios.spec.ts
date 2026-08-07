@@ -89,19 +89,22 @@ test.describe('Admin: Gestión de Usuarios — reseteo, baja y gate de acceso', 
     // ─── Gate de acceso: la sesión YA abierta se corta en el siguiente
     // request — no sigue "adentro" con la sesión vieja, y no queda un loop
     // /login↔/dashboard (requireAuth() revoca la sesión server-side antes
-    // de redirigir; ver lib/auth.ts).
+    // de redirigir; ver lib/auth.ts). El mensaje es el MISMO que el de
+    // credencial inválida (FB-F5-09, Hallazgo 1) — no el genérico de sesión
+    // expirada, que sí sería distinguible de un intento con contraseña
+    // equivocada.
     await employeePage.goto('/mi-perfil');
     await expect(employeePage).toHaveURL(/\/login/);
-    await expect(employeePage.getByText(copy.errors.sessionExpired)).toBeVisible();
+    await expect(employeePage.getByText(copy.auth.login.invalidCredentials)).toBeVisible();
 
     // Tampoco puede volver a entrar con la contraseña (correcta) tras la
-    // baja — mismo mensaje genérico que credenciales inválidas, sin
+    // baja — mismo mensaje que credenciales inválidas, indistinguible, sin
     // revelar que la cuenta existe ni que fue dada de baja.
     await employeePage.getByLabel(exactLabel(copy.auth.login.email)).fill(email);
     await employeePage.getByLabel(exactLabel(copy.auth.login.password)).fill(newPassword);
     await employeePage.getByRole('button', { name: copy.auth.login.submit, exact: true }).click();
     await expect(employeePage).toHaveURL(/\/login/);
-    await expect(employeePage.getByText(copy.errors.sessionExpired)).toBeVisible();
+    await expect(employeePage.getByText(copy.auth.login.invalidCredentials)).toBeVisible();
 
     await employeeContext.close();
   });

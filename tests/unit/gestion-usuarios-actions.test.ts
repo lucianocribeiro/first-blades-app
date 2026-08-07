@@ -60,6 +60,10 @@ type AdminOptions = {
   updateUserByIdError?: { message: string } | null;
   profileUpdateError?: { message: string } | null;
   auditInsertError?: { message: string } | null;
+  // FB-F5-09 Hallazgo 3: existencia del perfil objetivo y filas afectadas
+  // por el update — ambos simulables para probar el hardening.
+  targetProfileExists?: boolean;
+  updatedRows?: number;
 };
 
 function mockAdminClient(opts: AdminOptions = {}) {
@@ -68,11 +72,39 @@ function mockAdminClient(opts: AdminOptions = {}) {
     updateUserByIdError = null,
     profileUpdateError = null,
     auditInsertError = null,
+    targetProfileExists = true,
+    updatedRows = 1,
   } = opts;
 
-  const profileUpdateMock = vi.fn().mockReturnValue({
-    eq: vi.fn().mockResolvedValue({ error: profileUpdateError }),
+  // El código real encadena `.update(...).eq(...)` sin `.select()` en
+  // createUser/updateUser (fuera de alcance de FB-F5-09) y también
+  // `.update(...).eq(...).select('id')` en deactivateUser/activateUser
+  // (Hallazgo 3, para poder contar filas afectadas). El resultado de
+  // `.eq()` es "thenable" (awaitable directo, como en el primer caso) y
+  // además expone `.select()` (como en el segundo).
+  const updatedRowsPayload = Array.from({ length: updatedRows }, (_, i) => ({ id: `row-${i}` }));
+  const selectAfterUpdateMock = vi.fn().mockResolvedValue({
+    data: profileUpdateError ? null : updatedRowsPayload,
+    error: profileUpdateError,
   });
+  const eqAfterUpdateResult = {
+    then: (resolve: (v: { error: { message: string } | null }) => void) =>
+      resolve({ error: profileUpdateError }),
+    select: selectAfterUpdateMock,
+  };
+  const profileUpdateMock = vi.fn().mockReturnValue({
+    eq: vi.fn().mockReturnValue(eqAfterUpdateResult),
+  });
+
+  // Releer el perfil objetivo (Hallazgo 3): `.select('id').eq('id', x).maybeSingle()`.
+  const profileSelectMock = vi.fn().mockReturnValue({
+    eq: vi.fn().mockReturnValue({
+      maybeSingle: vi.fn().mockResolvedValue(
+        targetProfileExists ? { data: { id: 'target-id' }, error: null } : { data: null, error: null }
+      ),
+    }),
+  });
+
   const auditInsertMock = vi.fn().mockResolvedValue({ error: auditInsertError });
   const createUserMock = vi.fn().mockResolvedValue(
     createUserError ? { data: null, error: createUserError } : { data: { user: { id: 'new-user-id' } }, error: null }
@@ -82,10 +114,11 @@ function mockAdminClient(opts: AdminOptions = {}) {
   const client = {
     auth: { admin: { createUser: createUserMock, updateUserById: updateUserByIdMock } },
     from: vi.fn((table: string) => {
-      if (table === 'profiles') return { update: profileUpdateMock };
+      if (table === 'profiles') return { select: profileSelectMock, update: profileUpdateMock };
       if (table === 'audit_log') return { insert: auditInsertMock };
       throw new Error(`tabla no mockeada en el test: ${table}`);
     }),
+    __profileSelectMock: profileSelectMock,
     __profileUpdateMock: profileUpdateMock,
     __auditInsertMock: auditInsertMock,
     __createUserMock: createUserMock,
@@ -188,14 +221,21 @@ describe('resetPassword', () => {
     expect(admin.__auditInsertMock).not.toHaveBeenCalled();
   });
 
-  it('la contraseña cambia aunque el registro en audit_log falle (no bloqueante, ya está documentado en el código)', async () => {
+  it('la contraseña cambia aunque el registro en audit_log falle (no bloqueante), y el error queda visible en logs (FB-F5-09 Hallazgo 2)', async () => {
     mockSessionClient('admin', 'admin-42');
     const admin = mockAdminClient({ auditInsertError: { message: 'boom' } });
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await resetPassword('usuario-99', VALID_PASSWORD);
 
     expect(result).toEqual({ ok: true });
     expect(admin.__updateUserByIdMock).toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('reseteo de contraseña'),
+      expect.objectContaining({ targetId: 'usuario-99', actorId: 'admin-42' })
+    );
+
+    consoleErrorSpy.mockRestore();
   });
 
   it('propaga el error de Supabase Auth sin throw', async () => {
@@ -204,6 +244,17 @@ describe('resetPassword', () => {
 
     const result = await resetPassword('usuario-99', VALID_PASSWORD);
     expect(result).toEqual({ ok: false, error: 'usuario no encontrado' });
+  });
+
+  it('usuario objetivo inexistente: ok:false, sin llamar updateUserById ni tocar audit_log (Hallazgo 3)', async () => {
+    mockSessionClient('admin', 'admin-42');
+    const admin = mockAdminClient({ targetProfileExists: false });
+
+    const result = await resetPassword('usuario-fantasma', VALID_PASSWORD);
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.userNotFound });
+    expect(admin.__updateUserByIdMock).not.toHaveBeenCalled();
+    expect(admin.__auditInsertMock).not.toHaveBeenCalled();
   });
 });
 
@@ -244,6 +295,52 @@ describe('deactivateUser', () => {
     expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.bajaModal.fechaRequired });
     expect(admin.__profileUpdateMock).not.toHaveBeenCalled();
   });
+
+  // ─── Hardening del usuario objetivo (FB-F5-09, Hallazgo 3, bloqueante) ──
+
+  it('un admin no puede desactivarse a sí mismo: rechazado del lado del server, sin tocar la base', async () => {
+    mockSessionClient('admin', 'admin-42');
+    const admin = mockAdminClient();
+
+    const result = await deactivateUser({ id: 'admin-42', motivo: 'Renuncia', fecha: '2026-08-07' });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.cannotDeactivateSelf });
+    expect(admin.__profileUpdateMock).not.toHaveBeenCalled();
+    expect(admin.__auditInsertMock).not.toHaveBeenCalled();
+  });
+
+  it('un id de usuario objetivo inexistente devuelve ok:false y no escribe en audit_log', async () => {
+    mockSessionClient('admin', 'admin-42');
+    const admin = mockAdminClient({ targetProfileExists: false });
+
+    const result = await deactivateUser({ id: 'usuario-fantasma', motivo: 'Renuncia', fecha: '2026-08-07' });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.userNotFound });
+    expect(admin.__profileUpdateMock).not.toHaveBeenCalled();
+    expect(admin.__auditInsertMock).not.toHaveBeenCalled();
+  });
+
+  it('un admin sí puede desactivar a otro admin (solo la auto-desactivación queda bloqueada)', async () => {
+    mockSessionClient('admin', 'admin-42');
+    const admin = mockAdminClient();
+
+    const result = await deactivateUser({ id: 'otro-admin-7', motivo: 'Renuncia', fecha: '2026-08-07' });
+
+    expect(result).toEqual({ ok: true });
+    expect(admin.__profileUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'inactivo' })
+    );
+  });
+
+  it('cero filas afectadas por el update es un error, no un éxito silencioso', async () => {
+    mockSessionClient('admin', 'admin-42');
+    const admin = mockAdminClient({ updatedRows: 0 });
+
+    const result = await deactivateUser({ id: 'user-1', motivo: 'Renuncia', fecha: '2026-08-07' });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.updateFailed });
+    expect(admin.__auditInsertMock).not.toHaveBeenCalled();
+  });
 });
 
 // ─── activateUser ───────────────────────────────────────────────
@@ -262,6 +359,17 @@ describe('activateUser', () => {
     expect(admin.__auditInsertMock).toHaveBeenCalledWith(
       expect.objectContaining({ actor_id: 'admin-42', action: 'user_activated', record_id: 'user-1' })
     );
+  });
+
+  it('usuario objetivo inexistente: ok:false, sin tocar la base ni audit_log (Hallazgo 3)', async () => {
+    mockSessionClient('admin', 'admin-42');
+    const admin = mockAdminClient({ targetProfileExists: false });
+
+    const result = await activateUser('usuario-fantasma');
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.userNotFound });
+    expect(admin.__profileUpdateMock).not.toHaveBeenCalled();
+    expect(admin.__auditInsertMock).not.toHaveBeenCalled();
   });
 });
 

@@ -8,7 +8,7 @@ import { CreateUserButton } from './CreateUserButton';
 
 export default async function GestionUsuariosPage() {
   // requireAdmin redirige si no es admin
-  await requireAdmin();
+  const adminProfile = await requireAdmin();
 
   const supabase = await createServerClient();
 
@@ -47,7 +47,7 @@ export default async function GestionUsuariosPage() {
       </div>
 
       <Card padding="sm">
-        <UserTable users={users} supervisors={supervisors} />
+        <UserTable users={users} supervisors={supervisors} currentUserId={adminProfile.id} />
       </Card>
     </div>
   );

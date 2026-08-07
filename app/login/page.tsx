@@ -12,10 +12,15 @@ type LoginPageProps = {
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const { motivo } = await searchParams;
   // `motivo=acceso` llega desde el gate de requireAuth() (FB-F5-08): sesión
-  // sin perfil activo. El mensaje es el genérico de sesión expirada — nunca
-  // uno específico de "cuenta inactiva", para no confirmarle a quien haya
-  // adivinado una contraseña correcta de una cuenta dada de baja que acertó.
-  const blockedMessage = motivo === 'acceso' ? copy.errors.sessionExpired : undefined;
+  // con credenciales correctas pero perfil no activo. Usa el MISMO copy que
+  // una credencial inválida (FB-F5-09, Hallazgo 1) — nunca uno específico de
+  // "cuenta inactiva" ni el de sesión expirada: alguien que ya tiene la
+  // contraseña correcta de una cuenta dada de baja no puede distinguir ese
+  // caso de un intento con contraseña equivocada. Una expiración real de
+  // sesión (sin `motivo`, ver lib/auth.ts) no pasa por acá — no hubo intento
+  // de login con contraseña de por medio, así que no filtra nada mantener el
+  // copy neutro.
+  const blockedMessage = motivo === 'acceso' ? copy.auth.login.invalidCredentials : undefined;
 
   return (
     <div className="min-h-screen flex">

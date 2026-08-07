@@ -165,6 +165,11 @@ export const copy = {
     },
     activateSuccess: 'Usuario activado correctamente.',
     activateError:   'Error al activar el usuario.',
+    errors: {
+      userNotFound:         'El usuario no existe o ya no está disponible.',
+      updateFailed:         'No se pudo actualizar el usuario. Intentá de nuevo.',
+      cannotDeactivateSelf: 'No podés desactivar tu propia cuenta.',
+    },
   },
 
   miPerfil: {

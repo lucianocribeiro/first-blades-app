@@ -31,10 +31,11 @@ export async function requireAuth(): Promise<SessionProfile> {
   // aunque la cookie local no se haya podido reescribir acá porque un
   // Server Component no puede escribir cookies— devuelve user:null. Eso es
   // lo que evita un loop /login↔/dashboard (middleware redirige lejos de
-  // /login mientras vea `user` truthy). El mensaje en /login es el mismo
-  // genérico de sesión expirada sin importar el motivo real (sin sesión,
-  // sin perfil, o inactivo/pendiente) — así nadie que adivine una
-  // contraseña correcta de una cuenta dada de baja se entera de que acertó.
+  // /login mientras vea `user` truthy). El mensaje en /login para
+  // `motivo=acceso` es el MISMO que el de credencial inválida (FB-F5-09,
+  // Hallazgo 1, ver app/login/page.tsx) — no el genérico de sesión expirada:
+  // quien ya tiene la contraseña correcta de una cuenta dada de baja no
+  // puede distinguir este rechazo de un intento con contraseña equivocada.
   if (profile.status !== 'activo') {
     await supabase.auth.signOut();
     redirect('/login?motivo=acceso');

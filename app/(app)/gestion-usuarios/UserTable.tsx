@@ -18,9 +18,10 @@ type Supervisor = Pick<Tables<'profiles'>, 'id' | 'full_name' | 'email'>;
 type UserTableProps = {
   users: Tables<'profiles'>[];
   supervisors: Supervisor[];
+  currentUserId: string;
 };
 
-export function UserTable({ users, supervisors }: UserTableProps) {
+export function UserTable({ users, supervisors, currentUserId }: UserTableProps) {
   const [editingUser, setEditingUser] = useState<Tables<'profiles'> | null>(null);
   const [bajaTarget, setBajaTarget] = useState<Tables<'profiles'> | null>(null);
   const [resetTarget, setResetTarget] = useState<Tables<'profiles'> | null>(null);
@@ -101,14 +102,26 @@ export function UserTable({ users, supervisors }: UserTableProps) {
             {copy.gestionUsuarios.resetPassword.action}
           </Button>
           {u.status === 'activo' ? (
-            <Button
-              variant="ghost"
-              icon={<UserX size={14} className="text-error" />}
-              onClick={() => setBajaTarget(u)}
-              className="px-2 py-1 text-xs"
-            >
-              {copy.gestionUsuarios.deactivate}
-            </Button>
+            u.id === currentUserId ? (
+              <Button
+                variant="ghost"
+                icon={<UserX size={14} />}
+                disabled
+                title={copy.gestionUsuarios.errors.cannotDeactivateSelf}
+                className="px-2 py-1 text-xs"
+              >
+                {copy.gestionUsuarios.deactivate}
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                icon={<UserX size={14} className="text-error" />}
+                onClick={() => setBajaTarget(u)}
+                className="px-2 py-1 text-xs"
+              >
+                {copy.gestionUsuarios.deactivate}
+              </Button>
+            )
           ) : (
             <Button
               variant="ghost"
