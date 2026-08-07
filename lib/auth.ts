@@ -23,6 +23,24 @@ export async function requireAuth(): Promise<SessionProfile> {
 
   if (!profile) redirect('/login');
 
+  // Gate de acceso (FB-F5-08): solo status='activo' entra. `inactivo` y
+  // `pendiente` quedan afuera aunque el JWT siga siendo técnicamente válido
+  // (p.ej. alguien inactivado mientras ya estaba navegando). `signOut()`
+  // revoca la sesión del lado del servidor (scope 'global' por default en
+  // auth-js): el próximo `getUser()` —incluido el que hace el middleware,
+  // aunque la cookie local no se haya podido reescribir acá porque un
+  // Server Component no puede escribir cookies— devuelve user:null. Eso es
+  // lo que evita un loop /login↔/dashboard (middleware redirige lejos de
+  // /login mientras vea `user` truthy). El mensaje en /login para
+  // `motivo=acceso` es el MISMO que el de credencial inválida (FB-F5-09,
+  // Hallazgo 1, ver app/login/page.tsx) — no el genérico de sesión expirada:
+  // quien ya tiene la contraseña correcta de una cuenta dada de baja no
+  // puede distinguir este rechazo de un intento con contraseña equivocada.
+  if (profile.status !== 'activo') {
+    await supabase.auth.signOut();
+    redirect('/login?motivo=acceso');
+  }
+
   return profile;
 }
 

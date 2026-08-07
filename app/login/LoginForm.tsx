@@ -8,12 +8,17 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { copy } from '@/lib/copy';
 
-export function LoginForm() {
+type LoginFormProps = {
+  /** Mensaje sembrado desde el server (ej. redirect del gate de acceso). */
+  initialError?: string;
+};
+
+export function LoginForm({ initialError }: LoginFormProps = {}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError ?? '');
   const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
