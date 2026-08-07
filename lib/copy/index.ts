@@ -124,6 +124,8 @@ export const copy = {
       password:            'Contraseña inicial',
       passwordHint:        'El usuario podrá cambiarla después del primer ingreso',
       status:              'Estado',
+      motivoBaja:          'Motivo de baja',
+      fechaBaja:           'Fecha de baja',
     },
     messages: {
       createSuccess: 'Usuario creado correctamente.',
@@ -136,6 +138,33 @@ export const copy = {
     deactivate:   'Desactivar',
     activate:     'Activar',
     confirmDeactivate: '¿Desactivar este usuario?',
+    password: {
+      tooShort:         'La contraseña debe tener al menos 8 caracteres.',
+      missingNumber:    'La contraseña debe incluir al menos un número.',
+      missingUppercase: 'La contraseña debe incluir al menos una mayúscula.',
+    },
+    resetPassword: {
+      action:        'Restablecer contraseña',
+      title:         'Restablecer contraseña',
+      description:   'El usuario podrá ingresar únicamente con esta contraseña nueva a partir de ahora.',
+      passwordLabel: 'Contraseña nueva',
+      confirm:       'Restablecer',
+      success:       'Contraseña restablecida correctamente.',
+      error:         'Error al restablecer la contraseña.',
+    },
+    bajaModal: {
+      title:            'Dar de baja',
+      motivoLabel:      'Motivo de la baja',
+      motivoPlaceholder: 'Explicá el motivo de la baja.',
+      motivoRequired:   'El motivo de la baja es requerido.',
+      fechaLabel:       'Fecha de baja',
+      fechaRequired:    'La fecha de baja es requerida.',
+      confirm:          'Confirmar baja',
+      success:          'Usuario dado de baja correctamente.',
+      error:            'Error al dar de baja al usuario.',
+    },
+    activateSuccess: 'Usuario activado correctamente.',
+    activateError:   'Error al activar el usuario.',
   },
 
   miPerfil: {

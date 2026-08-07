@@ -5,6 +5,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { StatusBadge } from '@/components/ui/StatusBadge';
 import { copy } from '@/lib/copy';
 import { ROLE_LABELS } from '@/lib/roles';
 import { createUser, updateUser } from './actions';
@@ -26,11 +27,6 @@ const roleOptions = [
   { value: 'empleado',   label: ROLE_LABELS.empleado },
 ];
 
-const statusOptions = [
-  { value: 'activo',    label: copy.status.activo },
-  { value: 'inactivo',  label: copy.status.inactivo },
-];
-
 export function UserFormModal({
   open,
   onClose,
@@ -45,7 +41,6 @@ export function UserFormModal({
   const [email, setEmail] = useState(editingUser?.email ?? '');
   const [role, setRole] = useState<Enums<'user_role'>>(editingUser?.role ?? 'empleado');
   const [supervisorId, setSupervisorId] = useState(editingUser?.supervisor_id ?? '');
-  const [status, setStatus] = useState<Enums<'employee_status'>>(editingUser?.status ?? 'activo');
   const [password, setPassword] = useState('');
 
   function handleClose() {
@@ -58,40 +53,37 @@ export function UserFormModal({
     setError('');
 
     startTransition(async () => {
-      try {
-        if (isEdit) {
-          const input: UpdateUserInput = {
-            id: editingUser.id,
-            full_name: fullName,
-            role,
-            status,
-            supervisor_id: role === 'empleado' ? supervisorId || undefined : undefined,
-          };
-          await updateUser(input);
-        } else {
-          if (!password) {
-            setError(copy.gestionUsuarios.passwordRequired);
-            return;
-          }
-          const input: CreateUserInput = {
-            email,
-            full_name: fullName,
-            role,
-            supervisor_id: role === 'empleado' ? supervisorId || undefined : undefined,
-            initial_password: password,
-          };
-          await createUser(input);
+      if (isEdit) {
+        const input: UpdateUserInput = {
+          id: editingUser.id,
+          full_name: fullName,
+          role,
+          supervisor_id: role === 'empleado' ? supervisorId || undefined : undefined,
+        };
+        const result = await updateUser(input);
+        if (!result.ok) {
+          setError(result.error);
+          return;
         }
-        handleClose();
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : isEdit
-            ? copy.gestionUsuarios.messages.updateError
-            : copy.gestionUsuarios.messages.createError
-        );
+      } else {
+        if (!password) {
+          setError(copy.gestionUsuarios.passwordRequired);
+          return;
+        }
+        const input: CreateUserInput = {
+          email,
+          full_name: fullName,
+          role,
+          supervisor_id: role === 'empleado' ? supervisorId || undefined : undefined,
+          initial_password: password,
+        };
+        const result = await createUser(input);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
       }
+      handleClose();
     });
   }
 
@@ -160,13 +152,31 @@ export function UserFormModal({
         )}
 
         {isEdit && (
-          <Select
-            label={copy.gestionUsuarios.form.status}
-            value={status}
-            onChange={(e) => setStatus(e.target.value as Enums<'employee_status'>)}
-            options={statusOptions}
-            required
-          />
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-secondary">
+              {copy.gestionUsuarios.form.status}
+            </span>
+            <div>
+              <StatusBadge status={editingUser.status} />
+            </div>
+          </div>
+        )}
+
+        {isEdit && editingUser.status === 'inactivo' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-secondary">
+                {copy.gestionUsuarios.form.motivoBaja}
+              </span>
+              <p className="text-sm text-neutral">{editingUser.motivo_baja || '—'}</p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-secondary">
+                {copy.gestionUsuarios.form.fechaBaja}
+              </span>
+              <p className="text-sm text-neutral">{editingUser.fecha_baja || '—'}</p>
+            </div>
+          </div>
         )}
 
         {!isEdit && (

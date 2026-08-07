@@ -1,14 +1,16 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Pencil, UserX, UserCheck } from 'lucide-react';
+import { Pencil, UserX, UserCheck, KeyRound } from 'lucide-react';
 import { Table } from '@/components/ui/Table';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { copy } from '@/lib/copy';
 import { ROLE_LABELS } from '@/lib/roles';
-import { setUserStatus } from './actions';
+import { activateUser } from './actions';
 import { UserFormModal } from './UserFormModal';
+import { BajaModal } from './BajaModal';
+import { ResetPasswordModal } from './ResetPasswordModal';
 import type { Tables } from '@/supabase/types';
 
 type Supervisor = Pick<Tables<'profiles'>, 'id' | 'full_name' | 'email'>;
@@ -20,6 +22,9 @@ type UserTableProps = {
 
 export function UserTable({ users, supervisors }: UserTableProps) {
   const [editingUser, setEditingUser] = useState<Tables<'profiles'> | null>(null);
+  const [bajaTarget, setBajaTarget] = useState<Tables<'profiles'> | null>(null);
+  const [resetTarget, setResetTarget] = useState<Tables<'profiles'> | null>(null);
+  const [activateError, setActivateError] = useState('');
   const [isPending, startTransition] = useTransition();
 
   function supervisorName(supervisorId: string | null) {
@@ -28,10 +33,15 @@ export function UserTable({ users, supervisors }: UserTableProps) {
     return sup?.full_name || sup?.email || '—';
   }
 
-  function handleToggleStatus(user: Tables<'profiles'>) {
-    const next = user.status === 'activo' ? 'inactivo' : 'activo';
+  function userLabel(user: Tables<'profiles'>) {
+    return user.full_name || user.email;
+  }
+
+  function handleActivate(user: Tables<'profiles'>) {
+    setActivateError('');
     startTransition(async () => {
-      await setUserStatus(user.id, next);
+      const result = await activateUser(user.id);
+      if (!result.ok) setActivateError(result.error);
     });
   }
 
@@ -84,21 +94,32 @@ export function UserTable({ users, supervisors }: UserTableProps) {
           </Button>
           <Button
             variant="ghost"
-            icon={
-              u.status === 'activo' ? (
-                <UserX size={14} className="text-error" />
-              ) : (
-                <UserCheck size={14} className="text-success" />
-              )
-            }
-            onClick={() => handleToggleStatus(u)}
-            loading={isPending}
+            icon={<KeyRound size={14} />}
+            onClick={() => setResetTarget(u)}
             className="px-2 py-1 text-xs"
           >
-            {u.status === 'activo'
-              ? copy.gestionUsuarios.deactivate
-              : copy.gestionUsuarios.activate}
+            {copy.gestionUsuarios.resetPassword.action}
           </Button>
+          {u.status === 'activo' ? (
+            <Button
+              variant="ghost"
+              icon={<UserX size={14} className="text-error" />}
+              onClick={() => setBajaTarget(u)}
+              className="px-2 py-1 text-xs"
+            >
+              {copy.gestionUsuarios.deactivate}
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              icon={<UserCheck size={14} className="text-success" />}
+              onClick={() => handleActivate(u)}
+              loading={isPending}
+              className="px-2 py-1 text-xs"
+            >
+              {copy.gestionUsuarios.activate}
+            </Button>
+          )}
         </div>
       ),
     },
@@ -106,6 +127,12 @@ export function UserTable({ users, supervisors }: UserTableProps) {
 
   return (
     <>
+      {activateError && (
+        <p className="text-sm text-error bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+          {activateError}
+        </p>
+      )}
+
       <Table
         columns={columns}
         rows={users}
@@ -119,6 +146,24 @@ export function UserTable({ users, supervisors }: UserTableProps) {
           onClose={() => setEditingUser(null)}
           editingUser={editingUser}
           supervisors={supervisors}
+        />
+      )}
+
+      {bajaTarget && (
+        <BajaModal
+          open={!!bajaTarget}
+          onClose={() => setBajaTarget(null)}
+          userId={bajaTarget.id}
+          userLabel={userLabel(bajaTarget)}
+        />
+      )}
+
+      {resetTarget && (
+        <ResetPasswordModal
+          open={!!resetTarget}
+          onClose={() => setResetTarget(null)}
+          userId={resetTarget.id}
+          userLabel={userLabel(resetTarget)}
         />
       )}
     </>

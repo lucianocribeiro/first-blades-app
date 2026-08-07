@@ -5,7 +5,18 @@ import { copy } from '@/lib/copy';
 
 export const metadata: Metadata = { title: 'Ingresar · Portal First Blades' };
 
-export default function LoginPage() {
+type LoginPageProps = {
+  searchParams: Promise<{ motivo?: string }>;
+};
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const { motivo } = await searchParams;
+  // `motivo=acceso` llega desde el gate de requireAuth() (FB-F5-08): sesión
+  // sin perfil activo. El mensaje es el genérico de sesión expirada — nunca
+  // uno específico de "cuenta inactiva", para no confirmarle a quien haya
+  // adivinado una contraseña correcta de una cuenta dada de baja que acertó.
+  const blockedMessage = motivo === 'acceso' ? copy.errors.sessionExpired : undefined;
+
   return (
     <div className="min-h-screen flex">
       {/* Panel izquierdo — marca */}
@@ -46,7 +57,7 @@ export default function LoginPage() {
               {copy.auth.login.subtitle}
             </p>
 
-            <LoginForm />
+            <LoginForm initialError={blockedMessage} />
 
             <p className="text-center text-xs text-neutral mt-6">
               {copy.auth.login.secureAccess}
