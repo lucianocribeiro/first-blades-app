@@ -11,3 +11,20 @@ const BUSINESS_TIMEZONE = 'America/Argentina/Buenos_Aires';
 export function getBusinessToday(referenceDate: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: BUSINESS_TIMEZONE }).format(referenceDate);
 }
+
+// ¿`date` cae dentro de los últimos `days` días de calendario (Argentina),
+// contando el día de hoy como día 0? Usado por el badge "Nuevo" de
+// Procedimientos (FB-F5-06): 7 días de ventana, borde exacto en el día 7
+// (día 6 todavía es "nuevo", día 7 ya no). Comparación por día de
+// calendario en huso AR, no por milisegundos crudos — evita que el badge
+// dependa de la hora exacta de publicación.
+export function isWithinBusinessDays(
+  date: string | Date,
+  days: number,
+  referenceDate: Date = new Date()
+): boolean {
+  const targetDay = getBusinessToday(new Date(date));
+  const today = getBusinessToday(referenceDate);
+  const diffDays = Math.round((Date.parse(today) - Date.parse(targetDay)) / 86_400_000);
+  return diffDays >= 0 && diffDays < days;
+}

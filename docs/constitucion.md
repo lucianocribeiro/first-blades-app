@@ -51,6 +51,7 @@
 - Un `throw new Error(mensajeAmigable)` que cruza el límite de una Server Action llega **redactado** en producción (Next.js oculta el mensaje real de cualquier error no capturado que cruce ese límite) — el usuario ve un mensaje genérico en vez del copy es-AR pensado para él.
 - Regla: las actions que pueden fallar de forma esperada **devuelven** `{ ok: boolean, error?: string }` en vez de tirar; los call sites chequean `!ok` y muestran `error` (copy es-AR), sin depender de que el mensaje del `throw` llegue crudo al cliente.
 - Cerrado en Fase 4 (`lib/storage.ts` y el flujo de documentos) tras detectar mensajes redactados en prod; el contrato aplica a toda Server Action nueva.
+- **Excepción (FB-F5-AUD-05, Fase 5):** el contrato aplica a los **errores de negocio de una llamada ya autorizada** (RPC que falla, validación que no pasa). Los **guards de rol** (ej. `requireAdmin()`) cortan por `redirect()`, no por `{ ok }`: `redirect()` no es un `throw` que Next redacte, es su propio mecanismo — y a un no-admin no hay un mensaje de negocio que darle.
 
 ---
 

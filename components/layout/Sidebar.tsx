@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
@@ -12,6 +13,9 @@ import { copy } from '@/lib/copy';
 import { canAccess } from '@/lib/roles';
 import type { UserRole } from '@/lib/roles';
 import { createClientComponent } from '@/lib/supabase/client';
+import { isWithinBusinessDays } from '@/lib/business-date';
+
+const NUEVO_BADGE_WINDOW_DAYS = 7;
 
 type NavItem = {
   key: string;
@@ -46,10 +50,38 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClientComponent();
+  const [hasNuevosProcedimientos, setHasNuevosProcedimientos] = useState(false);
 
   const visibleItems = navItems.filter((item) =>
     canAccess(role, item.key as Parameters<typeof canAccess>[1])
   );
+
+  // Punto en el ítem del menú cuando hay al menos un procedimiento "Nuevo"
+  // (FB-F5-06). Vía el cliente del navegador (RLS de sesión, no admin): un
+  // no-admin nunca ve archivados acá tampoco. Volumen chico (decenas de
+  // filas, constitución §5) — traer updated_at de los vigentes y filtrar en
+  // JS con el mismo helper que usa el badge por fila alcanza, sin duplicar
+  // el criterio de "nuevo" en una query SQL aparte.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkNuevos() {
+      const { data } = await supabase
+        .from('procedures')
+        .select('updated_at')
+        .eq('estado', 'vigente');
+
+      if (cancelled || !data) return;
+      const rows = data as { updated_at: string }[];
+      const hasNuevo = rows.some((row) => isWithinBusinessDays(row.updated_at, NUEVO_BADGE_WINDOW_DAYS));
+      setHasNuevosProcedimientos(hasNuevo);
+    }
+
+    checkNuevos();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -111,6 +143,13 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
             >
               <Icon size={18} className="shrink-0" />
               <span className="truncate">{item.label}</span>
+              {item.key === 'procedimientos' && hasNuevosProcedimientos && (
+                <span
+                  className={['ml-auto shrink-0 w-2 h-2 rounded-full', active ? 'bg-white' : 'bg-primary'].join(' ')}
+                  aria-label={copy.procedimientos.nuevoBadge}
+                  title={copy.procedimientos.nuevoBadge}
+                />
+              )}
             </Link>
           );
         })}
