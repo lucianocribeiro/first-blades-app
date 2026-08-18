@@ -72,7 +72,6 @@ Sidebar colapsable con hamburguesa. Ítems y visibilidad:
 | Aprobaciones (bandeja única de purgatorio) | ✓ | — | — |
 | Procedimientos / Políticas | ✓ (gestiona) | ✓ (lee) | ✓ (lee) |
 | Rendición de Gastos (externo, link) | ✓ | ✓ | ✓ |
-| Ingreso (formularios de ingreso / precarga) | ✓ (recibidos) | ✓ (ingreso) | ✓ (ingreso) |
 | Gestión de Usuarios | ✓ | — | — |
 
 - El admin **ve todos los ítems** del menú. En Solicitud de Pasaje/Ausencia **envía para sí mismo** (admin-para-sí solamente, auto-aprobado — ver excepción A5/FB-ADJ-01 más arriba); aprueba las de empleado/supervisor en **Aprobaciones**.

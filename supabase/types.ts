@@ -707,7 +707,7 @@ export type Database = {
         | "manejo_defensivo"
         | "cursos_vestas"
         | "otros"
-      employee_status: "activo" | "inactivo" | "pendiente"
+      employee_status: "activo" | "inactivo"
       estado_dia:
         | "trabajando"
         | "en_viaje"
@@ -867,7 +867,7 @@ export const Constants = {
         "cursos_vestas",
         "otros",
       ],
-      employee_status: ["activo", "inactivo", "pendiente"],
+      employee_status: ["activo", "inactivo"],
       estado_dia: [
         "trabajando",
         "en_viaje",

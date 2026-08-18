@@ -21,7 +21,6 @@ const STATUS_OPTIONS = [
   { value: '', label: copy.equipo.todoEstado },
   { value: 'activo', label: copy.status.activo },
   { value: 'inactivo', label: copy.status.inactivo },
-  { value: 'pendiente', label: copy.status.pendiente },
 ];
 
 export function EquipoTable({ profiles }: Props) {

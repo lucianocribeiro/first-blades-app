@@ -20,7 +20,7 @@ export type UpdateProfileInput = {
   dni?: string;
   fecha_ingreso?: string;
   // Campos solo-admin
-  status?: 'activo' | 'inactivo' | 'pendiente';
+  status?: 'activo' | 'inactivo';
   entrevista_tecnica?: EntrevistaTecnica;
 };
 

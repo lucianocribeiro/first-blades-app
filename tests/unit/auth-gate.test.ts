@@ -1,7 +1,7 @@
 /**
  * FB-F5-08 — Gate de acceso en requireAuth(): solo profiles.status='activo'
- * entra. `inactivo` y `pendiente` se expulsan aunque el JWT siga siendo
- * técnicamente válido (p.ej. alguien inactivado mientras ya navegaba) —
+ * entra. `inactivo` se expulsa aunque el JWT siga siendo técnicamente
+ * válido (p.ej. alguien inactivado mientras ya navegaba) —
  * cubre la parte "mockeable" del gate (redirect + signOut invocados con lo
  * esperado). El caso de sesión real cortada por revocación de Supabase
  * Auth se verifica contra Postgres/Auth real en
@@ -83,13 +83,6 @@ describe('requireAuth: status activo entra sin fricción', () => {
 describe('requireAuth: gate de status (FB-F5-08)', () => {
   it('inactivo: cierra la sesión ANTES de redirigir a /login con motivo genérico', async () => {
     const client = mockClient({ status: 'inactivo' });
-    await expect(requireAuth()).rejects.toThrow(NEXT_REDIRECT);
-    expect(client.__signOut).toHaveBeenCalledTimes(1);
-    expect(redirect).toHaveBeenCalledWith('/login?motivo=acceso');
-  });
-
-  it('pendiente: cierra la sesión y redirige igual que inactivo (mismo destino, sin distinguir motivo)', async () => {
-    const client = mockClient({ status: 'pendiente' });
     await expect(requireAuth()).rejects.toThrow(NEXT_REDIRECT);
     expect(client.__signOut).toHaveBeenCalledTimes(1);
     expect(redirect).toHaveBeenCalledWith('/login?motivo=acceso');

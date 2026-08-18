@@ -13,7 +13,6 @@ export type RouteKey =
   | 'aprobaciones'
   | 'procedimientos'
   | 'rendicionGastos'
-  | 'formularios'
   | 'gestionUsuarios';
 
 const roleAccess: Record<RouteKey, UserRole[]> = {
@@ -26,7 +25,6 @@ const roleAccess: Record<RouteKey, UserRole[]> = {
   aprobaciones:      ['admin'],
   procedimientos:    ['admin', 'supervisor', 'empleado'],
   rendicionGastos:   ['admin', 'supervisor', 'empleado'],
-  formularios:       ['admin', 'supervisor', 'empleado'],
   gestionUsuarios:   ['admin'],
 };
 

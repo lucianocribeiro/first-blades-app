@@ -4,7 +4,7 @@ import { useSelectedLayoutSegment } from 'next/navigation';
 import { Menu, Bell, ChevronDown, Calendar } from 'lucide-react';
 import {
   User, Users, CalendarDays, Plane, Clock, CheckCircle,
-  FileText, Receipt, ClipboardList, Settings, Home,
+  FileText, Receipt, Settings, Home,
 } from 'lucide-react';
 import { copy } from '@/lib/copy';
 
@@ -30,7 +30,6 @@ const pageMeta: Record<string, PageMeta> = {
   aprobaciones:       { title: copy.pages.aprobaciones.title,       subtitle: copy.pages.aprobaciones.subtitle,       icon: CheckCircle },
   procedimientos:     { title: copy.pages.procedimientos.title,     subtitle: copy.pages.procedimientos.subtitle,     icon: FileText },
   'rendicion-gastos': { title: copy.pages.rendicionGastos.title,    subtitle: copy.pages.rendicionGastos.subtitle,    icon: Receipt },
-  formularios:        { title: copy.pages.formularios.title,        subtitle: copy.pages.formularios.subtitle,        icon: ClipboardList },
   'gestion-usuarios': { title: copy.pages.gestionUsuarios.title,    subtitle: copy.pages.gestionUsuarios.subtitle,    icon: Settings },
 };
 
