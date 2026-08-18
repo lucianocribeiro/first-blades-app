@@ -41,7 +41,7 @@ CLAUDE.md            # este archivo
 
 ## Patrón Purgatorio (transversal)
 
-Aplica a documentos, onboarding/precarga, solicitudes de pasaje y de ausencia.
+Aplica a documentos, solicitudes de pasaje y de ausencia.
 
 ```
 Empleado/Supervisor envía (formulario nativo)
@@ -54,7 +54,7 @@ Invariante: nada llega a `aprobado` sin acción explícita de un admin. Ver skil
 
 **Excepciones deliberadas — dos paths de auto-aprobación:**
 1. **(A5)** `uploadDocumentForEmployee` (carga admin en nombre del empleado) crea el documento directamente en `aprobado`. El admin ya está aprobando implícitamente al cargar. Fijado con tests en `mi-perfil.test.ts` → describe `excepción A5`.
-2. **(FB-ADJ-01) Admin-para-sí:** una Solicitud de Ausencia o de Pasaje que un admin envía **para sí mismo** se auto-aprueba al enviarla (con diálogo de confirmación previo) — no pasa por Aprobaciones. Ver constitución (`docs/constitucion.md` v0.7.1) §4 y la excepción explícita al principio "nada se autoactiva".
+2. **(FB-ADJ-01) Admin-para-sí:** una Solicitud de Ausencia o de Pasaje que un admin envía **para sí mismo** se auto-aprueba al enviarla (con diálogo de confirmación previo) — no pasa por Aprobaciones. Ver constitución (`docs/constitucion.md` v0.8) §4 y la excepción explícita al principio "nada se autoactiva".
 
 Todo lo demás (submission de empleado o supervisor, y cualquier solicitud de un admin para otra persona) entra en `pendiente` sin excepción.
 
@@ -75,7 +75,7 @@ Sidebar colapsable con hamburguesa. Ítems y visibilidad:
 | Gestión de Usuarios | ✓ | — | — |
 
 - El admin **ve todos los ítems** del menú. En Solicitud de Pasaje/Ausencia **envía para sí mismo** (admin-para-sí solamente, auto-aprobado — ver excepción A5/FB-ADJ-01 más arriba); aprueba las de empleado/supervisor en **Aprobaciones**.
-- En Fase 0 todos los ítems existen en el shell y rutean a un placeholder, **salvo Gestión de Usuarios, que es funcional**.
+- Todos los ítems del menú son funcionales (Fase 5 cerró el último, Procedimientos / Políticas). No queda ningún placeholder.
 
 ## Lenguaje visual
 
