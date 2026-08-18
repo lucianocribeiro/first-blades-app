@@ -131,7 +131,7 @@ ORDER BY enumsortorder;
 
 **Confirmado por comparación línea a línea:** las 5 líneas de `employee_status` en el regen (`Row`/`Insert`/`Update` de `profiles` referenciando el enum por nombre, la unión de valores, y el array de `Constants`) son **carácter por carácter idénticas** a lo que edité a mano en el commit `609276f`. La edición manual fue correcta.
 
-**No toqué el archivo.** Reporto el diff tal cual pide el prompt — la corrección del `PostgrestVersion` (si se decide aplicar) es una decisión aparte, no forma parte de este ajuste.
+**Actualización — regen aplicado (2026-08-18, mismo día):** por indicación de Luciano, el regen se aplicó sobre `supabase/types.ts` en esta misma rama. Un segundo `supabase gen types typescript --linked` corrido inmediatamente después da **diff vacío** contra el archivo ya actualizado — la señal de diff cero vuelve a ser confiable. `npx tsc --noEmit` y `npx vitest run tests/unit` (58 archivos, 753 tests) pasan limpios tras el cambio.
 
 ---
 
@@ -139,4 +139,6 @@ ORDER BY enumsortorder;
 
 **Producción quedó exactamente como se esperaba.** Los 6 bloques verificados sin divergencia respecto al snapshot, salvo el cambio esperado (`employee_status` de 3 a 2 valores) y sus consecuencias directas (default recreado igual, datos preservados, dependencias sin cambios). `approval_status` intacto, sin contrabando de esquema.
 
-**Única divergencia encontrada:** `PostgrestVersion` en `types.ts` (`14.5` → `14.15`), de infraestructura, no de esquema ni de la migración `0021`. No bloquea el cierre de `FB-ADJ-03` — queda anotada para decidir aparte si se actualiza.
+## Cierre
+
+La única divergencia encontrada era la versión de PostgREST (`PostgrestVersion: "14.5"` → `"14.15"` en `supabase/types.ts`) — infraestructura del proyecto, no esquema ni consecuencia de la migración `0021`. Se resolvió aplicando el regen: el diff cero solo sirve como señal de drift si el archivo commiteado refleja lo que la base devuelve hoy, así que quedarse con el valor desactualizado habría hecho que el próximo regen mostrara el mismo diff sin forma de distinguir residuo de novedad real. `FB-ADJ-03` queda cerrado sin divergencias pendientes.
