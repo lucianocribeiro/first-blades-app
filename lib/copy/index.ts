@@ -54,15 +54,10 @@ export const copy = {
     aprobaciones:     'Aprobaciones',
     procedimientos:   'Procedimientos / Políticas',
     rendicionGastos:  'Rendición de Gastos',
-    // FB-ADJ-01: renombre de etiqueta únicamente — la ruta (/formularios) y
-    // el contenido "próximamente" no cambian.
-    formularios:      'Ingreso',
     gestionUsuarios:  'Gestión de Usuarios',
   },
 
   placeholder: {
-    comingSoon:        'Próximamente',
-    comingSoonDesc:    'Este módulo estará disponible próximamente.',
     externalLink:      'Accedé a tu Rendición de Gastos en Google Workspace.',
     externalBtn:       'Abrir en Google Workspace',
     externalPending:   'Enlace pendiente de configuración.',
@@ -1022,10 +1017,6 @@ export const copy = {
     rendicionGastos: {
       title:    'Rendición de Gastos',
       subtitle: 'Acceso externo a Google Workspace',
-    },
-    formularios: {
-      title:    'Ingreso',
-      subtitle: 'Formularios de ingreso y precarga',
     },
     gestionUsuarios: {
       title:    'Gestión de Usuarios',

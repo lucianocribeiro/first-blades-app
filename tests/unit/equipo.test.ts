@@ -529,7 +529,7 @@ describe('filterProfiles: búsqueda y filtro combinado', () => {
     makeProfile('u1', 'Ana García', 'ana@test.com', 'activo'),
     makeProfile('u2', 'Juan López', 'juan@test.com', 'inactivo'),
     makeProfile('u3', null, 'pedro@test.com', 'activo'),
-    makeProfile('u4', 'María Torres', 'maria@empresa.com', 'pendiente'),
+    makeProfile('u4', 'María Torres', 'maria@empresa.com', 'inactivo'),
   ];
 
   it('sin filtros devuelve todos los perfiles', () => {
@@ -569,14 +569,9 @@ describe('filterProfiles: búsqueda y filtro combinado', () => {
 
   it('filtro por estado inactivo', () => {
     const result = filterProfiles(profiles, '', 'inactivo');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('u2');
-  });
-
-  it('filtro por estado pendiente', () => {
-    const result = filterProfiles(profiles, '', 'pendiente');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('u4');
+    expect(result).toHaveLength(2);
+    expect(result.map((p) => p.id)).toContain('u2');
+    expect(result.map((p) => p.id)).toContain('u4');
   });
 
   it('filtro combinado: búsqueda + estado que coinciden', () => {

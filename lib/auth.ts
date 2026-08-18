@@ -23,8 +23,8 @@ export async function requireAuth(): Promise<SessionProfile> {
 
   if (!profile) redirect('/login');
 
-  // Gate de acceso (FB-F5-08): solo status='activo' entra. `inactivo` y
-  // `pendiente` quedan afuera aunque el JWT siga siendo técnicamente válido
+  // Gate de acceso (FB-F5-08): solo status='activo' entra. `inactivo`
+  // queda afuera aunque el JWT siga siendo técnicamente válido
   // (p.ej. alguien inactivado mientras ya estaba navegando). `signOut()`
   // revoca la sesión del lado del servidor (scope 'global' por default en
   // auth-js): el próximo `getUser()` —incluido el que hace el middleware,

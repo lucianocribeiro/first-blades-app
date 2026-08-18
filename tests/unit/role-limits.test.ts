@@ -5,13 +5,13 @@ import type { RouteKey } from '@/lib/roles';
 const ALL_ROUTES: RouteKey[] = [
   'miPerfil', 'equipo', 'calendario', 'solicitudPasaje',
   'solicitudAusencia', 'aprobaciones', 'procedimientos',
-  'rendicionGastos', 'formularios', 'gestionUsuarios',
+  'rendicionGastos', 'gestionUsuarios',
 ];
 
 const ADMIN_ONLY: RouteKey[] = ['equipo', 'aprobaciones', 'gestionUsuarios'];
 const SHARED: RouteKey[] = [
   'miPerfil', 'calendario', 'solicitudPasaje',
-  'solicitudAusencia', 'procedimientos', 'rendicionGastos', 'formularios',
+  'solicitudAusencia', 'procedimientos', 'rendicionGastos',
 ];
 
 // ─── Admin ────────────────────────────────────────────────────

@@ -86,7 +86,6 @@ Tres roles: **Administrador**, **Supervisor**, **Empleado**.
 | Carga de Documentos | Carga + (aprueba en Aprobaciones) | Envía propios (→ Pendiente) | Envía propios (→ Pendiente) |
 | **Aprobaciones** | **Bandeja única: pasajes, ausencias, documentos, onboarding** | — | — |
 | Gestión (usuarios) | Crea usuarios, asigna rol + supervisor | — | — |
-| Ingreso (formularios de ingreso / precarga) | Ve formularios recibidos | Acceso al formulario de ingreso | Acceso al formulario de ingreso |
 | Rendición de Gastos (Google Form, externo) | Revisa (en Sheets) | Carga comprobantes (link) | Carga comprobantes (link) |
 | Procedimientos / Políticas | Gestiona documentos | Lectura | Lectura |
 
@@ -102,7 +101,7 @@ Notas:
 ## 5. Modelo de datos (Supabase / Postgres)
 
 Enums:
-- `employee_status`: `activo` | `inactivo` | `pendiente`
+- `employee_status`: `activo` | `inactivo`
 - `approval_status`: `pendiente` | `aprobado` | `rechazado`
 - `user_role`: `admin` | `supervisor` | `empleado`
 - `estado_dia` (calendario): `trabajando` | `en_viaje` | `en_franco` | `periodo_fuera_trabajo`

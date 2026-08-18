@@ -16,7 +16,6 @@ type ProfileEditFormProps = {
 const statusOptions = [
   { value: 'activo',    label: copy.status.activo },
   { value: 'inactivo',  label: copy.status.inactivo },
-  { value: 'pendiente', label: copy.status.pendiente },
 ];
 
 const TIPOS_TRABAJO = Object.entries(copy.miPerfil.adminFields.tiposTrabajo) as [

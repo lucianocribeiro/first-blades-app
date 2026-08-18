@@ -1226,4 +1226,45 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     expect(byName.storage_procedimientos_update.qual).toMatch(/is_admin/);
     expect(byName.storage_procedimientos_delete.qual).toMatch(/is_admin/);
   });
+
+  // FB-ADJ-03: drift detector real para employee_status — antes solo se
+  // verificaba que el tipo existiera (ver 'enums de dominio existen' más
+  // arriba), no sus valores exactos. Este es el hueco que 0021 explota
+  // (recrea el tipo con 2 valores en vez de 3) sin que ningún test lo note.
+  it('enum employee_status tiene EXACTAMENTE 2 valores: activo, inactivo — pendiente eliminado (0021)', async () => {
+    const { rows } = await client.query(`
+      SELECT enumlabel FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'employee_status'
+      ORDER BY enumsortorder
+    `);
+    expect(rows.map((r: { enumlabel: string }) => r.enumlabel)).toEqual(['activo', 'inactivo']);
+  });
+
+  it('profiles.status: employee_status NOT NULL DEFAULT activo, sin cambios de forma más allá del tipo recreado (0021)', async () => {
+    const { rows } = await client.query(`
+      SELECT is_nullable, column_default, udt_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'status'
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].is_nullable).toBe('NO');
+    expect(rows[0].udt_name).toBe('employee_status');
+    // Postgres normaliza el cast del default; no se afirma el string completo.
+    expect(rows[0].column_default).toMatch(/^'activo'::employee_status$/);
+  });
+
+  it('employee_status: sin dependencias de negocio recreadas de más — pg_depend solo ve la columna, su default y el array-type implícito (0021)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_describe_object(classid, objid, objsubid) AS dependent_object, deptype
+      FROM pg_depend
+      WHERE refobjid = 'employee_status'::regtype
+      ORDER BY 1
+    `);
+    expect(rows).toEqual([
+      { dependent_object: 'column status of table profiles', deptype: 'n' },
+      { dependent_object: 'default value for column status of table profiles', deptype: 'n' },
+      { dependent_object: 'type employee_status[]', deptype: 'i' },
+    ]);
+  });
 });
