@@ -19,8 +19,16 @@ import {
   computeDefaultEsEstimado,
   getDateRange,
   describeRangeUpsertError,
+  ESTADO_BG_CLASS,
+  ESTADO_BG_CLASS_ESTIMADO,
+  CELDA_VACIA_BG_CLASS,
 } from '@/app/(app)/calendario/utils';
-import type { RotationAssignment } from '@/lib/db-types';
+import type { EstadoDia, RotationAssignment } from '@/lib/db-types';
+
+// Los 4 valores del enum estado_dia. Declarados acá (no derivados de un mapa)
+// para que agregar un estado al enum sin agregarlo a AMBOS mapas del SSOT
+// rompa la matriz de abajo en vez de pasar inadvertido.
+const ESTADOS: EstadoDia[] = ['trabajando', 'en_viaje', 'en_franco', 'periodo_fuera_trabajo'];
 
 // ─── Gating de rol (ruta compartida, no admin-only) ────────────
 
@@ -116,26 +124,56 @@ describe('buildAssignmentIndex', () => {
 describe('getCellVisual', () => {
   it('celda sin asignación es gris (default, no es un estado)', () => {
     const visual = getCellVisual(undefined);
+    expect(visual.bgClass).toBe(CELDA_VACIA_BG_CLASS);
     expect(visual.bgClass).toBe('bg-calendar-vacio');
     expect(visual.label).toBe(copy.calendario.leyenda.sinCargar);
   });
 
-  it('estado real (es_estimado=false) usa el color sólido del estado', () => {
-    const visual = getCellVisual(makeAssignment({ estado_dia: 'en_franco', es_estimado: false }));
-    expect(visual.bgClass).toBe('bg-calendar-enFranco');
-    expect(visual.label).toBe(copy.status.en_franco);
+  // ─── Matriz completa: 4 estados × es_estimado true/false ──────
+  //
+  // FB-F3-FIX-01: antes se cubrían solo `en_franco` estimado y los 4 estados
+  // reales; la variante estimada de en_viaje y periodo_fuera_trabajo no
+  // tenía ningún test. La matriz cierra el hueco y afirma contra el SSOT
+  // (ESTADO_BG_CLASS / ESTADO_BG_CLASS_ESTIMADO), que es el único lugar
+  // donde se declaran las clases.
+  describe.each(ESTADOS)('estado %s', (estado) => {
+    it('real (es_estimado=false) usa la clase sólida del SSOT', () => {
+      const visual = getCellVisual(makeAssignment({ estado_dia: estado, es_estimado: false }));
+      expect(visual.bgClass).toBe(ESTADO_BG_CLASS[estado]);
+      expect(visual.label).toBe(copy.status[estado]);
+    });
+
+    it('estimado (es_estimado=true) usa la clase translúcida del SSOT', () => {
+      const visual = getCellVisual(makeAssignment({ estado_dia: estado, es_estimado: true }));
+      expect(visual.bgClass).toBe(ESTADO_BG_CLASS_ESTIMADO[estado]);
+      expect(visual.label).toBe(copy.status[estado]);
+    });
+
+    it('estimado y real son clases distintas, y ninguna es la de celda vacía', () => {
+      // Un estimado nunca puede terminar renderizando como "sin cargar"
+      // (gris) ni confundirse con el estado real.
+      expect(ESTADO_BG_CLASS_ESTIMADO[estado]).not.toBe(ESTADO_BG_CLASS[estado]);
+      expect(ESTADO_BG_CLASS_ESTIMADO[estado]).not.toBe(CELDA_VACIA_BG_CLASS);
+      expect(ESTADO_BG_CLASS[estado]).not.toBe(CELDA_VACIA_BG_CLASS);
+    });
   });
 
-  it('estado estimado (es_estimado=true) usa el mismo color en tono claro', () => {
-    const visual = getCellVisual(makeAssignment({ estado_dia: 'en_franco', es_estimado: true }));
-    expect(visual.bgClass).toBe('bg-calendar-enFranco/35');
-  });
-
-  it('mapea los 4 estados a su token de color correspondiente', () => {
-    expect(getCellVisual(makeAssignment({ estado_dia: 'trabajando' })).bgClass).toBe('bg-calendar-trabajando');
-    expect(getCellVisual(makeAssignment({ estado_dia: 'en_viaje' })).bgClass).toBe('bg-calendar-enViaje');
-    expect(getCellVisual(makeAssignment({ estado_dia: 'en_franco' })).bgClass).toBe('bg-calendar-enFranco');
-    expect(getCellVisual(makeAssignment({ estado_dia: 'periodo_fuera_trabajo' })).bgClass).toBe('bg-calendar-fueraTrabajo');
+  it('los valores esperados del SSOT son los tokens de marca del calendario', () => {
+    // Anclaje explícito de los literales: si alguien renombra un token, este
+    // test lo hace visible en vez de dejar que la matriz de arriba (que lee
+    // del mismo mapa) siga pasando en verde contra un valor nuevo.
+    expect(ESTADO_BG_CLASS).toEqual({
+      trabajando: 'bg-calendar-trabajando',
+      en_viaje: 'bg-calendar-enViaje',
+      en_franco: 'bg-calendar-enFranco',
+      periodo_fuera_trabajo: 'bg-calendar-fueraTrabajo',
+    });
+    expect(ESTADO_BG_CLASS_ESTIMADO).toEqual({
+      trabajando: 'bg-calendar-trabajando/35',
+      en_viaje: 'bg-calendar-enViaje/35',
+      en_franco: 'bg-calendar-enFranco/35',
+      periodo_fuera_trabajo: 'bg-calendar-fueraTrabajo/35',
+    });
   });
 });
 

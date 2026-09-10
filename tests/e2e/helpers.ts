@@ -8,7 +8,7 @@
 import { type Page, expect } from '@playwright/test';
 import { createAdminClient } from '../../lib/supabase/admin';
 import { copy } from '../../lib/copy';
-import type { MotivoAusencia, MotivoViaje } from '../../lib/db-types';
+import type { EstadoDia, MotivoAusencia, MotivoViaje } from '../../lib/db-types';
 
 export type Role = 'admin' | 'supervisor' | 'empleado';
 
@@ -88,7 +88,12 @@ export async function resolveUserId(email: string): Promise<string> {
 export async function seedRotationAssignment(opts: {
   userId: string;
   fecha: string;
-  estadoDia?: 'trabajando' | 'en_franco';
+  estadoDia?: EstadoDia;
+  // FB-F3-FIX-01: sembrar días PLANIFICADOS (es_estimado = true) — la
+  // variante que renderizaba transparente. Default false: las specs que ya
+  // usaban este helper siembran días reales y no cambian.
+  esEstimado?: boolean;
+  motivoAusencia?: MotivoAusencia;
 }): Promise<void> {
   const admin = createAdminClient();
   const { error } = await admin.from('rotation_assignments').upsert(
@@ -96,11 +101,30 @@ export async function seedRotationAssignment(opts: {
       user_id: opts.userId,
       fecha: opts.fecha,
       estado_dia: opts.estadoDia ?? 'trabajando',
-      es_estimado: false,
+      es_estimado: opts.esEstimado ?? false,
+      motivo_ausencia: opts.motivoAusencia ?? null,
     },
     { onConflict: 'user_id,fecha' }
   );
   if (error) throw new Error(`[e2e] no se pudo sembrar rotation_assignments: ${error.message}`);
+}
+
+// Borra las asignaciones de un empleado en un rango — para que una spec que
+// pinta sobre la grilla arranque siempre del mismo estado conocido, también
+// en un retry de Playwright (que vuelve a correr los hooks del describe).
+export async function clearRotationAssignments(opts: {
+  userId: string;
+  desde: string;
+  hasta: string;
+}): Promise<void> {
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from('rotation_assignments')
+    .delete()
+    .eq('user_id', opts.userId)
+    .gte('fecha', opts.desde)
+    .lte('fecha', opts.hasta);
+  if (error) throw new Error(`[e2e] no se pudo limpiar rotation_assignments: ${error.message}`);
 }
 
 // Postgres SQLSTATE de exclusion_violation — dispara con
