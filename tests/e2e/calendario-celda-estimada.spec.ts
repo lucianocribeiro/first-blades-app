@@ -89,7 +89,15 @@ async function pintarRango(page: Page, desde: number, hasta: number, estado: str
   await expect(dialog).toContainText(`${r.aplicaronPrefijo} ${total} ${r.de} ${total} ${r.diasPlural}.`);
   await expect(dialog).not.toContainText(r.fallaronTitulo);
 
-  await dialog.getByRole('button', { name: copy.calendario.range.modal.cerrar, exact: true }).click();
+  // OJO: dentro del <dialog> hay DOS botones cuyo accessible name es
+  // "Cerrar" — la X del header de Modal (aria-label = copy.general.close) y
+  // el botón del footer (texto = copy.calendario.range.modal.cerrar). Los dos
+  // strings son iguales, así que getByRole a secas es una strict mode
+  // violation. Se filtra por TEXTO visible: la X solo tiene un ícono.
+  await dialog
+    .getByRole('button', { name: copy.calendario.range.modal.cerrar, exact: true })
+    .filter({ hasText: copy.calendario.range.modal.cerrar })
+    .click();
   await expect(dialog).not.toBeVisible();
 }
 
