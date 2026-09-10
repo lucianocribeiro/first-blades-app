@@ -61,22 +61,63 @@ export function buildAssignmentIndex(
 
 export type CellVisual = { bgClass: string; label: string };
 
-const ESTADO_BG_CLASS: Record<EstadoDia, string> = {
+// ─── SSOT de clases de fondo del calendario (FB-F3-FIX-01) ───────────────
+//
+// Estos tres exports son la ÚNICA fuente de verdad de los fondos de celda:
+// los consumen getCellVisual() (la grilla) y Legend.tsx (la referencia
+// visual), y los tests afirman la matriz contra ellos.
+//
+// Las clases se escriben SIEMPRE literales y completas, nunca compuestas con
+// un template literal. El scanner de Tailwind (JIT) hace un match de texto
+// plano sobre el código fuente: solo emite al CSS las clases que encuentra
+// escritas enteras. Antes, la variante estimada se armaba en runtime
+// (base + el sufijo de opacidad), así que las variantes translúcidas de
+// en_franco, en_viaje y periodo_fuera_trabajo NUNCA se generaban — el
+// atributo class llegaba al DOM pero no existía en el CSS y la celda quedaba
+// transparente, blanca sobre el fondo de fila (bug recO3SGuYGiB2qEJ3: un
+// franco estimado se veía "en blanco" en vez de rojo). Solo se salvaba la de
+// trabajando, por aparecer escrita entera en Legend.tsx.
+//
+// Regla para el futuro: cualquier variante nueva se agrega acá, escrita
+// entera. Si alguna vez hay que componer un nombre de clase, va a safelist
+// explícito en tailwind.config.ts — nunca a interpolación.
+//
+// OJO al documentar: el scanner NO entiende de comentarios. Escribir una de
+// estas clases completa dentro de un comentario de un archivo de `content`
+// alcanza para que Tailwind la emita — y eso enmascararía una regresión y
+// dejaría ciego al guard de tests/unit/calendario-clases-tailwind.test.ts.
+// Por eso los comentarios de acá y de Legend.tsx nombran las variantes en
+// prosa en vez de escribirlas literales.
+
+// Estado real (es_estimado = false): color pleno.
+export const ESTADO_BG_CLASS: Record<EstadoDia, string> = {
   trabajando: 'bg-calendar-trabajando',
   en_viaje: 'bg-calendar-enViaje',
   en_franco: 'bg-calendar-enFranco',
   periodo_fuera_trabajo: 'bg-calendar-fueraTrabajo',
 };
 
+// Estado estimado (es_estimado = true): mismo color del estado, translúcido
+// al 35% — distinguible del real y del vacío, nunca invisible.
+export const ESTADO_BG_CLASS_ESTIMADO: Record<EstadoDia, string> = {
+  trabajando: 'bg-calendar-trabajando/35',
+  en_viaje: 'bg-calendar-enViaje/35',
+  en_franco: 'bg-calendar-enFranco/35',
+  periodo_fuera_trabajo: 'bg-calendar-fueraTrabajo/35',
+};
+
+// Celda sin asignación: gris. No es un estado del enum — es la ausencia de
+// fila en rotation_assignments.
+export const CELDA_VACIA_BG_CLASS = 'bg-calendar-vacio';
+
 // Celda sin asignación = gris (default, no es un estado). Estimado = mismo
 // color del estado real pero en tono más claro (opacidad reducida).
 export function getCellVisual(assignment: RotationAssignment | undefined): CellVisual {
   if (!assignment) {
-    return { bgClass: 'bg-calendar-vacio', label: copy.calendario.leyenda.sinCargar };
+    return { bgClass: CELDA_VACIA_BG_CLASS, label: copy.calendario.leyenda.sinCargar };
   }
-  const base = ESTADO_BG_CLASS[assignment.estado_dia];
-  const bgClass = assignment.es_estimado ? `${base}/35` : base;
-  return { bgClass, label: copy.status[assignment.estado_dia] };
+  const mapa = assignment.es_estimado ? ESTADO_BG_CLASS_ESTIMADO : ESTADO_BG_CLASS;
+  return { bgClass: mapa[assignment.estado_dia], label: copy.status[assignment.estado_dia] };
 }
 
 // PRD Fase 3, decisión #2: un cron nocturno (pieza posterior) pasa es_estimado
