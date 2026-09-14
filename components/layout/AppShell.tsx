@@ -8,10 +8,12 @@ import type { UserRole } from '@/lib/roles';
 type AppShellProps = {
   role: UserRole;
   userName: string;
+  // FB-PI-01: solo llega para admin (ver app/(app)/layout.tsx).
+  aprobacionesPendientes?: number;
   children: React.ReactNode;
 };
 
-export function AppShell({ role, userName, children }: AppShellProps) {
+export function AppShell({ role, userName, aprobacionesPendientes, children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   return (
@@ -26,6 +28,7 @@ export function AppShell({ role, userName, children }: AppShellProps) {
         <Topbar
           onMenuToggle={() => setSidebarOpen((prev) => !prev)}
           userName={userName}
+          aprobacionesPendientes={aprobacionesPendientes}
         />
         <main className="flex-1 overflow-y-auto p-6">
           {children}
