@@ -54,6 +54,7 @@ export const copy = {
     aprobaciones:     'Aprobaciones',
     procedimientos:   'Procedimientos / Políticas',
     rendicionGastos:  'Rendición de Gastos',
+    inventario:       'Inventario',
     gestionUsuarios:  'Gestión de Usuarios',
   },
 

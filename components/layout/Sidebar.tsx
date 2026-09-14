@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   User, Users, Calendar, Plane, Clock, CheckCircle,
-  FileText, Receipt, Settings, LogOut,
+  FileText, Receipt, Package, Settings, LogOut,
   ExternalLink,
 } from 'lucide-react';
 import { copy } from '@/lib/copy';
@@ -36,6 +36,7 @@ const navItems: NavItem[] = [
   { key: 'aprobaciones',      label: copy.nav.aprobaciones,      href: '/aprobaciones',        icon: CheckCircle,   roles: ['admin'] },
   { key: 'procedimientos',    label: copy.nav.procedimientos,    href: '/procedimientos',      icon: FileText,      roles: ['admin', 'supervisor', 'empleado'] },
   { key: 'rendicionGastos',   label: copy.nav.rendicionGastos,   href: '#',                   icon: Receipt,       roles: ['admin', 'supervisor', 'empleado'], external: true },
+  { key: 'inventario',        label: copy.nav.inventario,        href: '#',                   icon: Package,       roles: ['admin'], external: true },
   { key: 'gestionUsuarios',   label: copy.nav.gestionUsuarios,   href: '/gestion-usuarios',   icon: Settings,      roles: ['admin'] },
 ];
 
