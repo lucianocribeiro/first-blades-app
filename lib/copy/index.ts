@@ -788,6 +788,14 @@ export const copy = {
     notifications: 'Notificaciones',
     userMenu:      'Menú de usuario',
     menuButton:    'Menú',
+    // FB-PI-01: aria-label de la campanita del admin (link a Aprobaciones).
+    // Se arma como "<prefijo> <n> <sufijo>"; con 0, el texto sin cantidad.
+    aprobacionesPendientesPrefijo:  'Notificaciones:',
+    aprobacionesPendientesSufijoUna: 'aprobación pendiente',
+    aprobacionesPendientesSufijo:   'aprobaciones pendientes',
+    aprobacionesSinPendientes:      'Notificaciones: sin aprobaciones pendientes',
+    // Tope visual del badge: hasta 99 se muestra el número exacto.
+    aprobacionesPendientesTope:     '99+',
   },
 
   miEquipo: {

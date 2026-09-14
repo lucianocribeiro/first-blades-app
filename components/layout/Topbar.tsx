@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useSelectedLayoutSegment } from 'next/navigation';
 import { Menu, Bell, ChevronDown, Calendar } from 'lucide-react';
 import {
@@ -11,6 +12,9 @@ import { copy } from '@/lib/copy';
 type TopbarProps = {
   onMenuToggle: () => void;
   userName: string;
+  // FB-PI-01: cantidad de aprobaciones pendientes. Solo llega para admin
+  // (app/(app)/layout.tsx); ausente = campanita inerte, como antes.
+  aprobacionesPendientes?: number;
 };
 
 type PageMeta = {
@@ -33,6 +37,22 @@ const pageMeta: Record<string, PageMeta> = {
   'gestion-usuarios': { title: copy.pages.gestionUsuarios.title,    subtitle: copy.pages.gestionUsuarios.subtitle,    icon: Settings },
 };
 
+const TOPE_BADGE = 99;
+
+// FB-PI-01: string literal completo (nada compuesto en runtime) — el JIT de
+// Tailwind solo emite clases que encuentra escritas enteras. Exportado para
+// el guard de CSS compilado (tests/unit/topbar-campanita.test.tsx).
+export const CAMPANITA_BADGE_CLASS =
+  'absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-error text-white text-[10px] font-semibold leading-[18px] text-center';
+
+function aprobacionesAriaLabel(pendientes: number): string {
+  if (pendientes <= 0) return copy.topbar.aprobacionesSinPendientes;
+  const sufijo = pendientes === 1
+    ? copy.topbar.aprobacionesPendientesSufijoUna
+    : copy.topbar.aprobacionesPendientesSufijo;
+  return `${copy.topbar.aprobacionesPendientesPrefijo} ${pendientes} ${sufijo}`;
+}
+
 function currentDate(): string {
   return new Date().toLocaleDateString('es-AR', {
     weekday: 'long',
@@ -42,7 +62,7 @@ function currentDate(): string {
   });
 }
 
-export function Topbar({ onMenuToggle, userName }: TopbarProps) {
+export function Topbar({ onMenuToggle, userName, aprobacionesPendientes }: TopbarProps) {
   const segment = useSelectedLayoutSegment() ?? 'dashboard';
   const meta = pageMeta[segment] ?? pageMeta['dashboard'];
   const Icon = meta.icon;
@@ -78,14 +98,35 @@ export function Topbar({ onMenuToggle, userName }: TopbarProps) {
           <span className="capitalize">{currentDate()}</span>
         </div>
 
-        {/* Notificaciones */}
-        <button
-          className="relative p-2 rounded-lg text-neutral hover:bg-surface transition-colors"
-          aria-label={copy.topbar.notifications}
-        >
-          <Bell size={18} />
-          {/* Badge — futuro: conectar a conteo real */}
-        </button>
+        {/* Notificaciones — FB-PI-01: para admin, link a Aprobaciones con
+            badge de pendientes (solo si > 0). */}
+        {aprobacionesPendientes === undefined ? (
+          <button
+            className="relative p-2 rounded-lg text-neutral hover:bg-surface transition-colors"
+            aria-label={copy.topbar.notifications}
+          >
+            <Bell size={18} />
+          </button>
+        ) : (
+          <Link
+            href="/aprobaciones"
+            className="relative p-2 rounded-lg text-neutral hover:bg-surface transition-colors"
+            aria-label={aprobacionesAriaLabel(aprobacionesPendientes)}
+          >
+            <Bell size={18} />
+            {aprobacionesPendientes > 0 && (
+              <span
+                aria-hidden="true"
+                data-testid="campanita-badge"
+                className={CAMPANITA_BADGE_CLASS}
+              >
+                {aprobacionesPendientes > TOPE_BADGE
+                  ? copy.topbar.aprobacionesPendientesTope
+                  : aprobacionesPendientes}
+              </span>
+            )}
+          </Link>
+        )}
 
         {/* Avatar */}
         <button

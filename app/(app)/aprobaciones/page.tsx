@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { requireAdmin } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
 import { copy } from '@/lib/copy';
+import { pendientesQuery } from '@/lib/aprobaciones';
 import { Card } from '@/components/ui/Card';
 import { AprobacionesTable, type PendingItem } from './AprobacionesTable';
 import {
@@ -32,34 +33,36 @@ export default async function AprobacionesPage() {
   // motivo (FB-F4-05) + pasajes pendientes (FB-F4-10), cada uno con join a
   // profiles para mostrar el nombre del solicitante (y, en pasaje, también
   // del empleado que viaja, cuando difiere del solicitante).
+  //
+  // FB-PI-01: el filtro de "pendiente" vive en lib/aprobaciones.ts
+  // (pendientesQuery) — la misma función con la que cuenta el badge de la
+  // campanita, para que el número y estas filas no se desincronicen.
   const [docsResult, ausenciasResult, pasajesResult] = await Promise.all([
-    supabase
-      .from('documents')
-      .select('*, user_profile:profiles!documents_user_id_fkey(full_name, email)')
-      .eq('estado', 'pendiente')
-      .order('created_at', { ascending: true }),
-    supabase
-      .from('ausencia_requests')
-      .select('*, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)')
-      .eq('estado', 'pendiente')
-      .order('created_at', { ascending: true }),
-    supabase
-      .from('pasaje_requests')
-      .select(
-        '*, solicitante_profile:profiles!pasaje_requests_solicitante_id_fkey(full_name, email), empleado_profile:profiles!pasaje_requests_empleado_id_fkey(full_name, email)'
-      )
-      .eq('estado', 'pendiente')
-      .order('created_at', { ascending: true }),
+    pendientesQuery(
+      supabase,
+      'documents',
+      '*, user_profile:profiles!documents_user_id_fkey(full_name, email)'
+    ).order('created_at', { ascending: true }),
+    pendientesQuery(
+      supabase,
+      'ausencia_requests',
+      '*, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)'
+    ).order('created_at', { ascending: true }),
+    pendientesQuery(
+      supabase,
+      'pasaje_requests',
+      '*, solicitante_profile:profiles!pasaje_requests_solicitante_id_fkey(full_name, email), empleado_profile:profiles!pasaje_requests_empleado_id_fkey(full_name, email)'
+    ).order('created_at', { ascending: true }),
   ]);
 
   const error = docsResult.error || ausenciasResult.error || pasajesResult.error;
 
-  const documents = ((docsResult.data as RawDocument[] | null) ?? []).map(
+  const documents = ((docsResult.data as unknown as RawDocument[] | null) ?? []).map(
     (doc): PendingItem => ({ kind: 'documento', data: doc })
   );
-  const ausenciasRaw = (ausenciasResult.data as RawAusencia[] | null) ?? [];
+  const ausenciasRaw = (ausenciasResult.data as unknown as RawAusencia[] | null) ?? [];
   const ausencias = ausenciasRaw.map((req): PendingItem => ({ kind: 'ausencia', data: req }));
-  const pasajesRaw = (pasajesResult.data as RawPasaje[] | null) ?? [];
+  const pasajesRaw = (pasajesResult.data as unknown as RawPasaje[] | null) ?? [];
   const pasajes = pasajesRaw.map((req): PendingItem => ({ kind: 'pasaje', data: req }));
 
   const items = [...documents, ...ausencias, ...pasajes].sort((a, b) =>
