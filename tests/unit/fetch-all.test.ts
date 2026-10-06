@@ -59,6 +59,18 @@ describe('fetchAllRows: lectura completa', () => {
     expect(data).toHaveLength(1000);
   });
 
+  it('exactamente 1001 filas (FB-PI-AUD-05): la 2.ª página trae UNA fila y el bucle cierra', async () => {
+    const { query, ranges } = source(1001);
+    const { data, error } = await fetchAllRows(query, { label: '[test]' });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1001);
+    // La fila 1001 (n = 1000) es justo la que el corte de PostgREST dejaba afuera.
+    expect(data![1000]).toEqual({ n: 1000 });
+    // Página llena, página de 1 fila, página vacía que confirma el final.
+    expect(ranges).toEqual([[0, 999], [1000, 1999], [1001, 2000]]);
+  });
+
   it('servidor con tope MENOR que la página (400 < 1000): igual trae todo', async () => {
     const { query } = source(1234, { serverMaxRows: 400 });
     const { data, error } = await fetchAllRows(query, { label: '[test]' });

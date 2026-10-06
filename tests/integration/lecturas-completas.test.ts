@@ -7,7 +7,8 @@
  * cada lectura. Si alguien saca la paginación de cualquiera de ellas, la
  * respuesta vuelve cortada en 1000 sin error y el test se pone rojo:
  *   B — franco-alerts: días recientes del calendario
- *   D — franco-alerts: avisos ya enviados (idempotencia de mails)
+ *   D — franco-alerts: avisos ya enviados (idempotencia de mails), más el
+ *       borde exacto de 1001 filas (FB-PI-AUD-05)
  *   E — document-expiry: umbrales ya enviados (idempotencia de mails)
  *   I — document-expiry: documentos aprobados con vencimiento
  * Ver docs/audits/FB-PI-05-DIAG.md §6.
@@ -40,6 +41,9 @@ const AVISOS_FRANCO = 1100;
 // (100 IDs en el .in(): ver §6.5 del diagnóstico sobre el largo del URL.)
 const DOCS_CON_AVISOS = 100;
 const AVISOS_VENCIMIENTO = DOCS_CON_AVISOS * 3 * RECEPTORES.length;
+// FB-PI-AUD-05: el borde exacto. Con 1001 filas la 2.ª página trae una sola
+// fila — donde se cuela un off-by-one en la paginación.
+const AVISOS_FRANCO_BORDE = 1001;
 
 beforeAll(async () => {
   if (!dbAvailable) return;
@@ -82,6 +86,13 @@ beforeAll(async () => {
      FROM generate_series(1, $3::int) AS i`,
     [IDS.employee1, IDS.admin, AVISOS_FRANCO]
   );
+
+  await db.query(
+    `INSERT INTO notification_log (tipo, empleado_id, umbral, racha_inicio, recipient_profile_id)
+     SELECT 'franco_excedido'::notification_type, $1::uuid, 10, DATE '2020-01-01' + i, $2::uuid
+     FROM generate_series(1, $3::int) AS i`,
+    [IDS.employee2, IDS.admin, AVISOS_FRANCO_BORDE]
+  );
 }, 60_000);
 
 afterAll(async () => {
@@ -115,6 +126,16 @@ describe.skipIf(!dbAvailable)('crons: lecturas completas por encima de 1000 fila
     const enviados = await store.getSentAlerts([{ employeeId: IDS.employee1 }] as never);
 
     expect(enviados).toHaveLength(AVISOS_FRANCO);
+  });
+
+  it('D — borde exacto: 1001 avisos enviados vuelven los 1001 (FB-PI-AUD-05)', async () => {
+    const store = createSupabaseFrancoAlertsStore(createStorageAdminClient());
+    const enviados = await store.getSentAlerts([{ employeeId: IDS.employee2 }] as never);
+
+    expect(enviados).toHaveLength(AVISOS_FRANCO_BORDE);
+    // Sin repetidos: la fila de la 2.ª página no es un duplicado de la 1.ª.
+    const claves = new Set(enviados.map((e) => `${e.tipo}|${e.umbral}|${e.racha_inicio}`));
+    expect(claves.size).toBe(AVISOS_FRANCO_BORDE);
   });
 
   it('I — document-expiry: trae TODOS los documentos con vencimiento (1100)', async () => {
