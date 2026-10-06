@@ -980,6 +980,73 @@ export const copy = {
       upsertError:   'Error al actualizar el día.',
       loadError:     'No se pudo cargar el roster del mes.',
     },
+    // FB-PI-04: export del calendario a Excel (admin). Las etiquetas de
+    // estado/motivo de acá son las que lee el import (FB-PI-05) — el mapeo
+    // etiqueta↔enum vive en lib/rotation/calendario-excel-mapping.ts.
+    excel: {
+      panel: {
+        title:    'Exportar a Excel',
+        subtitle: 'Descargá el calendario de los empleados y supervisores activos para completarlo fuera de la app.',
+        desde:    'Desde',
+        hasta:    'Hasta',
+        exportar: 'Exportar',
+        exportado: 'Archivo descargado.',
+      },
+      // Nombres técnicos de las columnas: son la clave que lee el import, no
+      // se traducen ni se embellecen.
+      columnas: {
+        email:        'email',
+        nombre:       'nombre',
+        fecha:        'fecha',
+        estado:       'estado',
+        motivo:       'motivo',
+        motivo_otros: 'motivo_otros',
+        notas:        'notas',
+      },
+      hojas: {
+        calendario: 'Calendario',
+        referencia: 'Referencia',
+      },
+      // Las etiquetas de estado NO viven acá: salen de copy.status, las mismas
+      // que ve el admin en la grilla (FB-PI-04-B). Los motivos salen de
+      // copy.calendario.motivos. Ver lib/rotation/calendario-excel-mapping.ts.
+      validacion: {
+        estadoTitulo:  'Estado inválido',
+        estadoMensaje: 'Elegí un estado de la lista o dejá la celda vacía (día sin asignar).',
+        motivoTitulo:  'Motivo inválido',
+        // Se completa con la etiqueta del estado (copy.status) al generar el archivo.
+        motivoMensaje: 'Elegí un motivo de la lista. Solo se completa si el estado es',
+        motivoOtrosTitulo:  'Detalle demasiado largo',
+        motivoOtrosMensaje: 'El detalle del motivo no puede superar los 80 caracteres.',
+      },
+      referencia: {
+        encabezados: {
+          estado:      'estado',
+          motivo:      'motivo',
+          motivoOtros: 'motivo_otros',
+          significado: 'Qué significa',
+        },
+        vacio:          '(vacío)',
+        obligatorio:    'Obligatorio (máx. 80 caracteres)',
+        noCorresponde:  'Debe quedar vacío',
+        sinAsignar:     'Día sin asignar',
+        diaAsignado:    'Día asignado',
+        ausenciaPorMotivo: 'Ausencia por este motivo',
+        // Se completa con la etiqueta del estado (copy.status) al generar el archivo.
+        notaMotivo: 'El motivo solo se completa cuando el estado es',
+        notas: [
+          'Las columnas email, nombre y fecha están bloqueadas: no las modifiques.',
+          'Una celda de estado vacía significa un día sin asignar.',
+          'Los desplegables son una ayuda: el sistema vuelve a validar cada fila al importar el archivo.',
+        ],
+      },
+      errors: {
+        fechaInvalida:  'Ingresá un rango de fechas válido.',
+        rangoInvertido: 'La fecha "Desde" no puede ser posterior a "Hasta".',
+        rangoExcedido:  'El rango no puede superar los 366 días.',
+        generacion:     'No se pudo generar el archivo. Intentá de nuevo.',
+      },
+    },
   },
 
   pages: {

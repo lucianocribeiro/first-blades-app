@@ -9,7 +9,8 @@
  *
  * Cubre las lecturas de página del diagnóstico (docs/audits/FB-PI-05-DIAG.md
  * §6): roster del Calendario (C), alertas de franco en Calendario (A),
- * Aprobadas (F, G) y Equipo (H). Las de los crons (B, D, E, I) se cubren
+ * Aprobadas (F, G), Equipo (H) y el export a Excel (FB-PI-AUD-04: perfiles
+ * y asignaciones). Las de los crons (B, D, E, I) se cubren
  * contra PostgREST real en tests/integration/lecturas-completas.test.ts.
  *
  * Los filtros no se simulan: cada tabla devuelve el conjunto que se le da
@@ -32,6 +33,14 @@ import AprobadasPage from '@/app/(app)/aprobadas/page';
 import { AprobadasTable } from '@/app/(app)/aprobadas/AprobadasTable';
 import EquipoPage from '@/app/(app)/equipo/page';
 import { EquipoTable } from '@/app/(app)/equipo/EquipoTable';
+import ExcelJS from 'exceljs';
+import { fetchCalendarioExportData } from '@/lib/rotation/calendario-export';
+import { buildCalendarioWorkbook } from '@/lib/rotation/calendario-excel';
+import { copy } from '@/lib/copy';
+
+// exceljs declara su propio `Buffer` global (extends ArrayBuffer), que no
+// cierra con el Buffer de @types/node: el cast es solo de tipos.
+type XlsxInput = Parameters<ExcelJS.Xlsx['load']>[0];
 
 const MAX_ROWS = 1000;
 
@@ -66,7 +75,7 @@ function simulatedPostgrest(tables: Record<string, unknown[]>) {
   const client = { from: (table: string) => builder(table) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(createServerClient).mockResolvedValue(client as any);
-  return { requests };
+  return { requests, client };
 }
 
 type ElementLike = { type?: unknown; props?: Record<string, unknown> };
@@ -224,5 +233,30 @@ describe('Equipo: documentos con vencimiento por encima del umbral (H)', () => {
     const rows = table?.props?.profiles as { doc_vencidos: number }[];
 
     expect(rows.reduce((acc, r) => acc + r.doc_vencidos, 0)).toBe(1100);
+  });
+});
+
+describe('Export a Excel: más de 1000 perfiles en alcance (FB-PI-AUD-04)', () => {
+  it('1100 empleados/supervisores activos: los 1100 llegan a la lectura y al archivo', async () => {
+    const perfiles = Array.from({ length: 1100 }, (_, i) => {
+      const k = String(i + 1).padStart(4, '0');
+      return { id: `emp-${k}`, full_name: `Empleado ${k}`, email: `emp${k}@test.com` };
+    });
+    const { client } = simulatedPostgrest({ profiles: perfiles, rotation_assignments: [] });
+
+    const data = await fetchCalendarioExportData(client as never, '2026-03-01', '2026-03-02');
+
+    expect(data).not.toBeNull();
+    expect(data!.employees).toHaveLength(1100);
+    // El perfil 1001 es justo el primero que el corte de PostgREST dejaba afuera.
+    expect(data!.employees.map((e) => e.email)).toContain('emp1001@test.com');
+    expect(data!.employees.map((e) => e.email)).toContain('emp1100@test.com');
+
+    const buffer = await buildCalendarioWorkbook(data!, '2026-03-01', '2026-03-02');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as XlsxInput);
+    const sheet = wb.getWorksheet(copy.calendario.excel.hojas.calendario)!;
+    // 1100 perfiles × 2 días, más el encabezado.
+    expect(sheet.rowCount - 1).toBe(2200);
   });
 });

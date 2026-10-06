@@ -5,6 +5,7 @@ import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import { copy } from '@/lib/copy';
 import { Card } from '@/components/ui/Card';
 import { CalendarioSections } from './CalendarioSections';
+import { ExportarExcelPanel } from './ExportarExcelPanel';
 import { getCurrentYearMonth, getDaysInMonth, computeMotivoDashboard } from './utils';
 import {
   computeFrancoAlerts,
@@ -40,6 +41,7 @@ function RosterView({
   saldoRows,
   initialCollapseState,
   showFilter,
+  showExport,
 }: {
   year: number;
   month: number;
@@ -52,6 +54,7 @@ function RosterView({
   saldoRows: SaldoDiasTramite[] | null;
   initialCollapseState: ReturnType<typeof parseCollapseState>;
   showFilter: boolean;
+  showExport: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -59,6 +62,10 @@ function RosterView({
         <h2 className="text-lg font-semibold text-secondary">{copy.calendario.title}</h2>
         <p className="text-sm text-neutral mt-0.5">{copy.calendario.subtitle}</p>
       </div>
+
+      {/* FB-PI-04: export a Excel, solo admin. El control real es el
+          requireAdmin() de la action, no este condicional. */}
+      {showExport && <ExportarExcelPanel defaultDesde={days[0]} defaultHasta={days[days.length - 1]} />}
 
       <CalendarioSections
         year={year}
@@ -248,6 +255,7 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
       saldoRows={saldoRows}
       initialCollapseState={initialCollapseState}
       showFilter={profile.role !== 'empleado'}
+      showExport={isAdmin}
     />
   );
 }

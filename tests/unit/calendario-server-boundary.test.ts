@@ -33,6 +33,7 @@ import { createServerClient } from '@/lib/supabase/server';
 import { upsertRotationAssignment } from '@/app/(app)/calendario/actions';
 import CalendarioPage from '@/app/(app)/calendario/page';
 import { CalendarioSections } from '@/app/(app)/calendario/CalendarioSections';
+import { ExportarExcelPanel } from '@/app/(app)/calendario/ExportarExcelPanel';
 import { copy } from '@/lib/copy';
 
 // FB-F3-11: page.tsx lee la cookie de colapsado con `await cookies()`
@@ -167,7 +168,8 @@ type ElementLike = { type?: unknown; props?: Record<string, unknown> };
 // también usa hooks), así que NUNCA se invoca (ni como target — el chequeo
 // de igualdad corta antes — ni de paso buscando otro elemento): las props
 // que le llegan ya alcanzan para verificar el branch de rol sin necesidad
-// de bajar más.
+// de bajar más. ExportarExcelPanel (FB-PI-04) es la otra: también usa
+// hooks, y se la busca por tipo sin renderizarla.
 function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (!node) return undefined;
   if (Array.isArray(node)) {
@@ -180,7 +182,7 @@ function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (typeof node !== 'object') return undefined;
   const el = node as ElementLike;
   if (el.type === type) return el;
-  if (el.type === CalendarioSections) return undefined;
+  if (el.type === CalendarioSections || el.type === ExportarExcelPanel) return undefined;
   if (typeof el.type === 'function') {
     const rendered = (el.type as (props: unknown) => unknown)(el.props);
     return findElement(rendered, type);
@@ -507,5 +509,34 @@ describe('CalendarioPage: visibilidad del panel de saldo de días de trámite po
     expect(sections?.props?.saldoRows).toEqual([
       { employeeId: 'sup-1', fullName: 'Sup Uno', email: 'sup1@test.com', consumidos: 0, restantes: 3, excedido: false, fechas: [] },
     ]);
+  });
+});
+
+// FB-PI-04: el panel de export a Excel solo se renderiza para admin. Es
+// presentación — el control real es requireAdmin() en la action (ver
+// tests/unit/calendario-export-action.test.ts).
+describe('CalendarioPage: panel de export a Excel por rol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: ve el panel, con el mes visible como rango sugerido', async () => {
+    mockProfileRole('admin');
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({ year: '2026', month: '2' }) });
+
+    const panel = findElement(result, ExportarExcelPanel);
+    expect(panel).toBeTruthy();
+    expect(panel?.props).toMatchObject({ defaultDesde: '2026-02-01', defaultHasta: '2026-02-28' });
+  });
+
+  it.each(['supervisor', 'empleado'] as const)('%s: NO ve el panel', async (role) => {
+    mockProfileRole(role);
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(findElement(result, ExportarExcelPanel)).toBeUndefined();
   });
 });
