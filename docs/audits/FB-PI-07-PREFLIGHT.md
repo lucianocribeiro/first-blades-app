@@ -144,3 +144,21 @@ Más los errores de runtime de Vercel (Calendario, Equipo y Aprobaciones sin err
 ## 7. Acciones que tocaron producción en este paso
 
 Solo las 3 consultas `SELECT` de §0 (método). Ninguna escritura.
+
+---
+
+## 8. Registro de ejecución
+
+**Formato del borrado elegido por Luciano: un solo bloque atómico** (§6, Paso 2). Se ejecuta recién con su autorización explícita de ese paso.
+
+### Paso 1 — Snapshot ✅ (autorizado por Luciano, 2026-10-06)
+
+- **Carpeta:** `~/Desktop/Dev/first-blades-backups/FB-PI-07-2026-10-06/`, fuera del repo y no commiteada.
+- **Contenido:** `rotation_assignments.json` (23) · `ausencia_requests.json` (2) · `audit_log_referencias.json` (14) · `manifest.json`.
+- **Verificación:**
+  - Conteos 23, 2 y 14, iguales a lo esperado. Las 2 solicitudes inventariadas están presentes y `aprobado`.
+  - Cada día generado por las solicitudes está en el JSON de días (5 y 7).
+  - Los `sha256` releídos desde disco coinciden: `rotation_assignments.json` `afd3e47b09db83ea…` · `ausencia_requests.json` `ed3fe05b86a73d70…` · `audit_log_referencias.json` `a45253047fe98e31…`.
+- **Totales que no deben cambiar** (guardados en el manifest): `profiles` 27 · `auth.users` 27 · `documents` 2 · objetos del bucket `documents` 2 · `audit_log` 19 · `pasaje_requests` 0.
+- **Corrección del manifest:** el script tomó el conteo del bucket con `list('')`, que devuelve carpetas de primer nivel (1), no objetos. Se reemplazó en el manifest por el conteo real por SQL (2). Los JSON hasheados no se tocaron.
+- **Producción:** solo lectura (`SELECT`, `listUsers` de Auth y listado de Storage). **Ninguna escritura.**
