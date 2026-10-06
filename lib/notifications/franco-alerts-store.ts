@@ -5,6 +5,7 @@
 // integración contra Supabase local.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/supabase/types';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import type { FrancoAlertaDia, FrancoAlertRow, FrancoAlertTipo } from '@/app/(app)/calendario/francoAlerts';
 import type { RosterEmployee } from '@/app/(app)/calendario/RosterGrid';
 import type {
@@ -99,25 +100,42 @@ export function createSupabaseFrancoAlertsStore(
       today: string
     ): Promise<FrancoAlertaDia[]> {
       if (employeeIds.length === 0) return [];
-      const { data, error } = await client
-        .from('rotation_assignments')
-        .select('user_id, fecha, estado_dia, es_estimado')
-        .in('user_id', employeeIds)
-        .gte('fecha', windowStart)
-        .lte('fecha', today);
+      // FB-PI-05: ventana de 66 días × empleados, supera las 1000 filas con
+      // el calendario cargado. Truncada, la racha se calcula sobre días
+      // faltantes y salen mails falsos (o no salen los reales).
+      const { data, error } = await fetchAllRows(
+        () =>
+          client
+            .from('rotation_assignments')
+            .select('user_id, fecha, estado_dia, es_estimado')
+            .in('user_id', employeeIds)
+            .gte('fecha', windowStart)
+            .lte('fecha', today)
+            .order('user_id', { ascending: true })
+            .order('fecha', { ascending: true }),
+        { label: '[franco-alerts] días recientes:' }
+      );
       if (error) throw new Error(error.message);
-      return (data ?? []) as FrancoAlertaDia[];
+      return data as FrancoAlertaDia[];
     },
 
     async getSentAlerts(rows: FrancoAlertRow[]): Promise<SentFrancoAlert[]> {
       if (rows.length === 0) return [];
       const employeeIds = Array.from(new Set(rows.map((r) => r.employeeId)));
-      const { data, error } = await francoNotificationLog(client)
-        .select('empleado_id, tipo, umbral, racha_inicio, recipient_profile_id')
-        .is('document_id', null)
-        .in('empleado_id', employeeIds);
+      // FB-PI-05: idempotencia. notification_log crece para siempre; si esta
+      // lectura truncara, un aviso ya enviado no figuraría como enviado y se
+      // reenviaría el mail en cada corrida.
+      const { data, error } = await fetchAllRows(
+        () =>
+          francoNotificationLog(client)
+            .select('empleado_id, tipo, umbral, racha_inicio, recipient_profile_id')
+            .is('document_id', null)
+            .in('empleado_id', employeeIds)
+            .order('id', { ascending: true }),
+        { label: '[franco-alerts] avisos enviados:' }
+      );
       if (error) throw new Error(error.message);
-      return (data ?? []) as SentFrancoAlert[];
+      return data as SentFrancoAlert[];
     },
 
     async recordSent(rows: SentFrancoAlert[]): Promise<void> {

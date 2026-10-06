@@ -184,3 +184,18 @@ Varias consultas mandan listas de UUID por query string (`.in('user_id', ids)`, 
 2. Rebase de FB-PI-04 sobre el nuevo `main`, **reemplazando su loop por el helper** (un commit chico en FB-PI-04), y después su merge.
 
 La alternativa (FB-PI-04 primero y extraer su loop acá) demora el blocker atrás de un PR que todavía no pasó por CI. No se resuelve nada de esto por cuenta propia.
+
+---
+
+## 9. Resolución (FB-PI-05-B)
+
+Alcance aprobado: **los 9 casos** (A–I). Aprobadas con el helper y sin tocar la UI; la paginación en la UI queda como item aparte del Log.
+
+- Helper único: `lib/supabase/fetch-all.ts::fetchAllRows`. Pagina con `.range()` hasta una página vacía, lee el `{ error }` de cada página como valor, **nunca devuelve resultados parciales** (devuelve `{ data: null, error }` y loguea con etiqueta) y tiene un tope de seguridad (`maxRows`, 50 000 por defecto) que, si se alcanza, se reporta como error.
+- Aplicado a: A y C (`calendario/page.tsx`), B y D (`franco-alerts-store.ts`), E e I (`document-expiry-store.ts`), F y G (`aprobadas/page.tsx`), H (`equipo/page.tsx`). Cada consulta lleva un orden total (termina en `id` o en `user_id, fecha`).
+- Las páginas siguen con `createServerClient()`. Los crons siguen con el cliente de servicio: es un job de sistema y no cambia en este PR.
+- Tests que **se ponen rojos sin la paginación** (verificado volviendo las páginas a `main`: 4/4 en rojo):
+  - `tests/unit/lecturas-completas.test.ts`: cliente que simula el corte de PostgREST a 1000 filas sin error; cubre A, C, F, G y H.
+  - `tests/integration/lecturas-completas.test.ts`: los stores reales de los crons contra PostgREST local con más de 1000 filas; cubre B, D, E e I.
+  - `tests/unit/fetch-all.test.ts`: el helper (conteo exacto, tope del servidor menor que la página, error de una página intermedia propagado sin parciales, tope de seguridad).
+- **Rendimiento de Aprobadas:** con el volumen actual (2 ausencias y 0 pasajes aprobados en producción) no hay ningún impacto. No hace falta subir la prioridad del item de paginación en la UI.

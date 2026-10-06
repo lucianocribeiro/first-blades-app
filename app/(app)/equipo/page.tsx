@@ -1,5 +1,6 @@
 import { requireAdmin } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import { Card } from '@/components/ui/Card';
 import { copy } from '@/lib/copy';
 import { EquipoTable } from './EquipoTable';
@@ -25,11 +26,18 @@ export default async function EquipoPage() {
 
   const [profilesResult, docsResult] = await Promise.all([
     supabase.from('profiles').select('*').order('full_name', { ascending: true }),
-    supabase
-      .from('documents')
-      .select('id, user_id, document_type, certificado_tipo, certificado_otros_texto, fecha_vencimiento')
-      .eq('estado', 'aprobado')
-      .not('fecha_vencimiento', 'is', null),
+    // FB-PI-05: documentos con vencimiento de toda la nómina, lectura
+    // completa paginada (truncada, faltarían alertas de vencimiento).
+    fetchAllRows(
+      () =>
+        supabase
+          .from('documents')
+          .select('id, user_id, document_type, certificado_tipo, certificado_otros_texto, fecha_vencimiento')
+          .eq('estado', 'aprobado')
+          .not('fecha_vencimiento', 'is', null)
+          .order('id', { ascending: true }),
+      { label: '[EquipoPage] documentos con vencimiento:' }
+    ),
   ]);
 
   if (profilesResult.error) {
