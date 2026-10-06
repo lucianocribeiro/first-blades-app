@@ -140,7 +140,12 @@ Solo lecturas: API de Vercel (proyecto, equipo, deployment, logs de runtime de l
 
 ### G.4 Verificación
 
-- **Disparo manual de `promote-estimated-days`:** pendiente (ver G.5).
+- **Disparo manual de `promote-estimated-days`: HECHO.** Lo disparó Luciano desde *Cron Jobs → Run*, que manda el header real de Vercel. El panel mostró **200**. Leí los logs de runtime de Vercel a las 19:44 ART, dentro de la hora de retención:
+  - **Timestamp:** `2026-10-06T22:42:51.525Z` (**19:42:51 ART**), `GET /api/cron/promote-estimated-days`, request `ckjkr-1791326570255-3d0a66f8ed4d`, deployment `dpl_5y8kFbbHNKH5GNoKoQNWG8s6FJDN`, región `iad1`.
+  - **Salida:** `[promote-estimated-cron] promoted=0`. Era lo esperado con `rotation_assignments` en 0 filas: no se escribió nada.
+  - **Código de respuesta:** los logs de runtime no traen el status HTTP. El 200 lo vio Luciano en el panel, y es coherente con el código: esa línea solo se imprime después de pasar la validación del secreto y de que el `UPDATE` no dé error, y la línea siguiente responde 200.
+  - **Errores y advertencias:** ninguno. El filtro `error`/`warning`/`fatal` de la última hora vino vacío, y esa invocación fue la única request a `/api/cron/` de la ventana.
+  - **Esto NO cierra el item.** Prueba que el endpoint responde cuando lo invocan con el secreto, **no** que Vercel lo invoque solo según el schedule. Acá fallaron las dos cosas por separado, y la segunda sigue sin verificar.
 - **Los otros tres crons no se dispararon:** `purge-rejected-docs` puede borrar archivos, y los dos de alertas pueden mandar mails, que quedan fuera de alcance.
 
 ### G.5 Próximas ejecuciones nocturnas (schedules en UTC → hora argentina, UTC−3)
@@ -152,8 +157,12 @@ Solo lecturas: API de Vercel (proyecto, equipo, deployment, logs de runtime de l
 | `promote-estimated-days` | mié 07/10/2026, 02:00 ART |
 | `franco-alerts` | mié 07/10/2026, 03:00 ART |
 
-**Qué mirar el 07/10:** en *Project → Settings → Cron Jobs*, abrir **View Logs** de cada cron (o *Logs*, filtrando por `/api/cron/`) y ver que haya una invocación cerca de cada hora con status **200**. No tiene que haber ningún 401. En los logs del cron de promoción tiene que aparecer la línea `[promote-estimated-cron] promoted=0`. **Ojo:** en Hobby los logs de runtime se guardan **1 hora**. Hay que mirarlos antes de que pase esa hora desde cada corrida, o usar la vista de Cron Jobs del panel si guarda el historial.
+**Ventana para mirar (importante):** en Hobby, el log de cada cron dura **1 hora desde su corrida**. Si se mira a la mañana del 07/10, **ya no va a quedar ninguno**. Las ventanas son: purga 00:00–01:00, alertas de vencimiento 01:00–02:00, **promoción 02:00–03:00** y alertas de franco 03:00–04:00 (hora argentina). Basta con alcanzar **una** de esas ventanas para confirmar que el schedule dispara. La más limpia es la de promoción (02:00–03:00 ART), porque no depende de los mails.
+
+**Qué mirar:** en *Project → Settings → Cron Jobs*, abrir **View Logs** de cada cron (o *Logs*, filtrando por `/api/cron/`) y ver que haya una invocación cerca de cada hora con status **200**. No tiene que haber ningún 401. En los logs del cron de promoción tiene que aparecer la línea `[promote-estimated-cron] promoted=0`. **Ojo:** en Hobby los logs de runtime se guardan **1 hora**. Hay que mirarlos antes de que pase esa hora desde cada corrida, o usar la vista de Cron Jobs del panel si guarda el historial.
 
 ### G.6 Estado del item
 
 Log `recQzoGnSvpEHfAYg`: **En curso.** Se cierra solo cuando haya **una ejecución nocturna automática exitosa**. Que el disparo manual funcione prueba la autenticación, no el schedule.
+
+Los dos crons de alertas no van a poder mandar mails: la configuración de Gmail está fuera de alcance. Para esta verificación alcanza con que **no den 401**. Si alguno da 500 por el mail, se registra, pero no es una falla de este arreglo.
