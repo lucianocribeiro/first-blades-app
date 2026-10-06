@@ -114,3 +114,46 @@ Los otros tres crons **no** se proponen para la prueba: `purge` borraría archiv
 ## F. Acciones que tocaron producción
 
 Solo lecturas: API de Vercel (proyecto, equipo, deployment, logs de runtime de los últimos 55 minutos y un intento de listar variables de entorno, que devolvió `403`), una consulta `SELECT` a la base y la lectura local de los snapshots. **Ninguna escritura y ningún cron disparado.**
+
+---
+
+## G. Causa raíz confirmada y arreglo (FB-PI-10 / FB-PI-10-B)
+
+### G.1 Causa raíz — confirmada
+
+**`CRON_SECRET` no existía en Vercel** (confirmado por Luciano en el panel). Es la causa 1 de §C. Vercel disparaba los 4 crons según su schedule, pero solo manda `Authorization: Bearer <CRON_SECRET>` cuando la variable existe. Los endpoints fallan cerrado (`!cronSecret || authHeader !== …` → `401`) y respondían 401 sin ejecutar nada. Por eso hubo 73 días sin una sola ejecución exitosa, y el síntoma fueron datos viejos, no errores.
+
+### G.2 Contrato verificado (Paso 0, antes de cargar el secreto)
+
+- Los 4 `app/api/cron/*/route.ts` leen **solo** el header `Authorization` y lo comparan exacto contra `` `Bearer ${process.env.CRON_SECRET}` ``. Sin query params. Coincide con lo que manda Vercel. **Sin cambio de código.**
+- Si falta la variable, **se rechaza todo** (401). No hay agujero de seguridad.
+- `middleware.ts` excluye `/api/` del redirect a `/login`.
+- `CRON_SECRET=` ya estaba en `.env.example`; se corrigió el comentario, que mencionaba solo la purga.
+
+### G.3 Arreglo aplicado
+
+| Paso | Quién | Resultado |
+|---|---|---|
+| Generar y cargar `CRON_SECRET` en **Production** (solo Production) | Luciano | Hecho. Claude Code nunca vio el valor |
+| `rotation_assignments` antes de la prueba | Claude Code (`SELECT count(*)`) | **0 filas** (0 estimadas): la prueba no puede escribir nada |
+| Redeploy de producción del deployment `dpl_FR1s2vmaKLQwNwXrVp22BBfau9vo` (commit `d8f8f06`, sin limpiar caché) | Claude Code (API de Vercel) | Nuevo deployment **`dpl_5y8kFbbHNKH5GNoKoQNWG8s6FJDN`**, `READY` el 06/10/2026 a las 19:19:31 ART, con alias `first-blades-app.vercel.app` |
+
+### G.4 Verificación
+
+- **Disparo manual de `promote-estimated-days`:** pendiente (ver G.5).
+- **Los otros tres crons no se dispararon:** `purge-rejected-docs` puede borrar archivos, y los dos de alertas pueden mandar mails, que quedan fuera de alcance.
+
+### G.5 Próximas ejecuciones nocturnas (schedules en UTC → hora argentina, UTC−3)
+
+| Cron | Próxima ejecución |
+|---|---|
+| `purge-rejected-docs` — **corre primero** | mié 07/10/2026, **00:00 ART** |
+| `document-expiry-alerts` | mié 07/10/2026, 01:00 ART |
+| `promote-estimated-days` | mié 07/10/2026, 02:00 ART |
+| `franco-alerts` | mié 07/10/2026, 03:00 ART |
+
+**Qué mirar el 07/10:** en *Project → Settings → Cron Jobs*, abrir **View Logs** de cada cron (o *Logs*, filtrando por `/api/cron/`) y ver que haya una invocación cerca de cada hora con status **200**. No tiene que haber ningún 401. En los logs del cron de promoción tiene que aparecer la línea `[promote-estimated-cron] promoted=0`. **Ojo:** en Hobby los logs de runtime se guardan **1 hora**. Hay que mirarlos antes de que pase esa hora desde cada corrida, o usar la vista de Cron Jobs del panel si guarda el historial.
+
+### G.6 Estado del item
+
+Log `recQzoGnSvpEHfAYg`: **En curso.** Se cierra solo cuando haya **una ejecución nocturna automática exitosa**. Que el disparo manual funcione prueba la autenticación, no el schedule.
