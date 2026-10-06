@@ -202,3 +202,55 @@ Solo las 4 consultas `SELECT` de §0 (método). Ninguna escritura.
 - **Post-check (SQL):** bucket `documents` = **2** · prefijo `03744042-…/` = **0** · `audit_log` = **19** (sin cambios).
 - **Estado intermedio esperado:** las 2 filas de `documents` de Santiago siguen en la base, ya sin archivo, hasta el Paso 3. Los otros 2 documentos de la base tienen su archivo.
 - **Producción:** **2 objetos borrados de Storage**, únicos cambios del paso.
+
+### Paso 3 — Datos de la base ✅ (autorizado por Luciano, 2026-10-06)
+
+Cada sub-paso en un bloque atómico que aborta si el conteo no es el esperado. Ninguno abortó.
+
+| Sub-paso | Método | Pre-check | Resultado | Después |
+|---|---|---|---|---|
+| 3a `rotation_assignments` | SQL `DO $$ … $$` con guardas (además verifica id, email, estado y rol del perfil) | 46 filas | **46 borradas** | 0 de Santiago · total 69 → **23** |
+| 3b `documents` | SQL `DO $$ … $$` con guardas (los 2 `id` identificados) | 2 filas | **2 borradas** | 0 de Santiago, 0 referencias por `uploaded_by`/`reviewed_by` · total 4 → **2** · 0 filas sin archivo |
+| 3c usuario de Auth | **API de Auth Admin** `auth.admin.deleteUser(id, false)` (borrado duro), después de verificar que el email coincidía | perfil, usuario e identidad presentes; **0 dependencias** restantes en todas las tablas con FK | usuario borrado; `getUserById` ya no lo encuentra | cascada: `profiles` 28 → **27**, `auth.identities` del id → **0** |
+
+`audit_log` en **19** antes y después de cada sub-paso.
+
+### Paso 4 — Verificación posterior ✅
+
+| Medida | Antes | Esperado | Después |
+|---|---|---|---|
+| `profiles` | 28 | 27 | **27** ✔ |
+| `auth.users` | 28 | 27 | **27** ✔ |
+| `rotation_assignments` | 69 | 23 | **23** ✔ |
+| `documents` | 4 | 2 | **2** ✔ |
+| Objetos del bucket `documents` | 4 | 2 | **2** ✔ |
+| `audit_log` | 19 | 19 | **19** ✔ (las 3 entradas de §5 intactas; 0 con `actor_id` nulo) |
+| `ausencia_requests` / `pasaje_requests` | 2 / 0 | sin cambios | **2 / 0** ✔ |
+| Email en `profiles` / `auth.users` | 1 / 1 | 0 / 0 | **0 / 0** ✔ |
+| Identidad en `auth.identities` | 1 | 0 | **0** ✔ |
+| Objetos bajo el prefijo `03744042-…/` | 2 | 0 | **0** ✔ |
+| Consistencia | — | — | 0 perfiles sin usuario de Auth · 0 documentos sin archivo ✔ |
+
+**Remanente de calendario de prueba** (objeto del próximo trabajo, no de éste): **23 filas** de 3 perfiles activos.
+
+| Perfil | Rol | Días | Rango | Estimados |
+|---|---|---|---|---|
+| Administrador | admin | 5 | 01/09 → 05/09 | 0 |
+| Humberto Dominguez | supervisor | 11 | 01/09 → 11/09 | 3 |
+| Javier Alejandro Luna | empleado | 7 | 06/09 → 12/09 | 0 |
+
+Nota: de las **19 filas pasadas con `es_estimado = true`** que mencionaba el PRD (§7), **16 eran de Santiago**. Quedan 3, las del supervisor. El hallazgo sobre los crons (§4) sigue en pie.
+
+**La app sigue funcionando:** los errores de runtime de Vercel para `first-blades-app` dan **0 errores** en las últimas 2 horas, una ventana que cubre toda la purga (la consulta de 7 días agotó el tiempo de espera). La carga visual de Calendario, Equipo y Aprobaciones con sesión de admin queda para que la confirme Luciano.
+
+### Acciones que tocaron producción en toda la purga
+
+1. Paso 0: 4 consultas de solo lectura.
+2. Paso 1: solo lectura (consultas, `getUserById` y 2 descargas de Storage).
+3. Paso 2: **2 objetos borrados** del bucket `documents` (API de Storage).
+4. Paso 3a: **46 filas borradas** de `rotation_assignments` (SQL).
+5. Paso 3b: **2 filas borradas** de `documents` (SQL).
+6. Paso 3c: **1 usuario borrado** de Auth (API de Auth Admin), que en cascada borró **1 perfil** y **1 identidad**.
+7. Paso 4: consultas de solo lectura y consulta de errores de runtime de Vercel.
+
+`audit_log`: **sin cambios**. Snapshot para reconstruir: `~/Desktop/Dev/first-blades-backups/FB-PI-06-2026-10-06/`.
