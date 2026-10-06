@@ -7,6 +7,7 @@
 // createAdminClient — la lectura pasa por RLS (constitución §6.1).
 import type { createServerClient } from '@/lib/supabase/server';
 import { copy } from '@/lib/copy';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import type { RotationAssignment } from '@/lib/db-types';
 
 // Mismo criterio que lib/aprobaciones.ts: el tipo del cliente de
@@ -28,13 +29,6 @@ export type CalendarioExportData = {
 // Tope de un rango exportable: un año (bisiesto incluido). Acota el tamaño
 // del archivo (≈ empleados × días filas) y del payload de la action.
 export const MAX_DIAS_EXPORT = 366;
-
-// Tamaño de página para leer rotation_assignments. PostgREST corta cada
-// respuesta en `max_rows` (1000 en supabase/config.toml y en Supabase
-// hosted) SIN avisar: una sola query de 3 meses × 27 empleados (~2500
-// filas) volvería truncada y el archivo mostraría como "sin asignar" días
-// que sí tienen asignación. Por eso se pagina hasta agotar.
-export const PAGE_SIZE = 1000;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -85,34 +79,26 @@ export async function fetchCalendarioExportData(
   if (employees.length === 0) return { employees, assignments: [] };
 
   const ids = employees.map((e) => e.id);
-  const assignments: ExportAssignment[] = [];
 
-  // Se avanza por lo que efectivamente llegó y se corta recién con una página
-  // vacía: si el servidor tuviera un max_rows menor a PAGE_SIZE, cortar por
-  // "page.length < PAGE_SIZE" volvería a truncar en silencio.
-  for (let from = 0; ; ) {
-    const { data, error } = await supabase
-      .from('rotation_assignments')
-      .select('user_id, fecha, estado_dia, motivo_ausencia, motivo_otros_texto, notas')
-      .in('user_id', ids)
-      .gte('fecha', desde)
-      .lte('fecha', hasta)
-      // Orden total y estable (UNIQUE(user_id, fecha)): sin esto las páginas
-      // podrían solaparse o saltearse filas entre requests.
-      .order('user_id', { ascending: true })
-      .order('fecha', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
+  // FB-PI-05: lectura completa con el helper compartido. PostgREST corta cada
+  // respuesta en max_rows (1000) SIN avisar: una sola query de 3 meses × 25
+  // empleados (~2300 filas) volvería truncada y el archivo mostraría como
+  // "sin asignar" días que sí tienen asignación. Orden total por
+  // UNIQUE(user_id, fecha) para que las páginas no se solapen.
+  const { data: assignments, error } = await fetchAllRows(
+    () =>
+      supabase
+        .from('rotation_assignments')
+        .select('user_id, fecha, estado_dia, motivo_ausencia, motivo_otros_texto, notas')
+        .in('user_id', ids)
+        .gte('fecha', desde)
+        .lte('fecha', hasta)
+        .order('user_id', { ascending: true })
+        .order('fecha', { ascending: true }),
+    { label: '[fetchCalendarioExportData] asignaciones:' }
+  );
 
-    if (error) {
-      console.error('[fetchCalendarioExportData] error al cargar asignaciones:', error.message);
-      return null;
-    }
+  if (error) return null;
 
-    const page = (data ?? []) as ExportAssignment[];
-    if (page.length === 0) break;
-    assignments.push(...page);
-    from += page.length;
-  }
-
-  return { employees, assignments };
+  return { employees, assignments: assignments as ExportAssignment[] };
 }

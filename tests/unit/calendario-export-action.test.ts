@@ -218,7 +218,7 @@ describe('exportarCalendarioExcel: lectura', () => {
       }))
     );
 
-    // maxRows 400 < PAGE_SIZE: el servidor corta antes que nuestra página.
+    // maxRows 400 < tamaño de página de fetchAllRows: el servidor corta antes.
     const { queries } = mockClient({
       role: 'admin',
       employees: { data: empleados, error: null },
