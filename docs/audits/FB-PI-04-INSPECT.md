@@ -100,3 +100,16 @@ Nombre de archivo: `calendario_AAAA-MM-DD_a_AAAA-MM-DD.xlsx`.
 ## 8. Migración
 
 **Ninguna.** El export es solo lectura con el cliente de sesión (RLS de admin ya permite SELECT de `profiles` y `rotation_assignments`).
+
+---
+
+## 9. Verificación en Google Sheets — **PENDIENTE (no verificado)**
+
+Se intentó verificar subiendo un archivo de muestra con datos **sintéticos** a Google Drive (con conversión a Sheets). La subida fue **bloqueada por el control de permisos de la sesión** de Claude Code (escritura en una app conectada no pedida explícitamente). No se reintentó por otra vía.
+
+**Estado: no verificado en ninguna dirección.** Lo que sí está verificado sobre el `.xlsx` generado (XML crudo + relectura con `exceljs`, ver tests):
+
+- `<dataValidation type="list" … sqref="D2:D…">` (estado) y `sqref="E2:E…">` (motivo) con lista inline `"A,B,C"`, `allowBlank="1"`, `showErrorMessage="1"`; `motivo_otros` con `textLength ≤ 80`.
+- `<sheetProtection sheet="1" …>` sin contraseña; columnas `email`/`nombre`/`fecha` bloqueadas (default OOXML), `estado`/`motivo`/`motivo_otros`/`notas` con `locked="0"`.
+
+**Para cerrarlo (Luciano):** exportar un rango corto desde la app (o usar la muestra sintética que deja la sesión), subirlo a Drive → *Abrir con Google Sheets*, y revisar: (1) ¿aparece el desplegable en `estado` y `motivo`? (2) ¿rechaza un valor fuera de la lista? (3) ¿quedan protegidas `email`/`nombre`/`fecha`? El resultado se anota acá.

@@ -980,6 +980,76 @@ export const copy = {
       upsertError:   'Error al actualizar el día.',
       loadError:     'No se pudo cargar el roster del mes.',
     },
+    // FB-PI-04: export del calendario a Excel (admin). Las etiquetas de
+    // estado/motivo de acá son las que lee el import (FB-PI-05) — el mapeo
+    // etiqueta↔enum vive en lib/rotation/calendario-excel-mapping.ts.
+    excel: {
+      panel: {
+        title:    'Exportar a Excel',
+        subtitle: 'Descargá el calendario de todos los empleados activos para completarlo fuera de la app.',
+        desde:    'Desde',
+        hasta:    'Hasta',
+        exportar: 'Exportar',
+        exportado: 'Archivo descargado.',
+      },
+      // Nombres técnicos de las columnas: son la clave que lee el import, no
+      // se traducen ni se embellecen.
+      columnas: {
+        email:        'email',
+        nombre:       'nombre',
+        fecha:        'fecha',
+        estado:       'estado',
+        motivo:       'motivo',
+        motivo_otros: 'motivo_otros',
+        notas:        'notas',
+      },
+      hojas: {
+        calendario: 'Calendario',
+        referencia: 'Referencia',
+      },
+      // "Período fuera del trabajo" (y no el "Fuera del trabajo" corto de la
+      // grilla): en el archivo no hay leyenda que lo aclare. Ver PRD §3.
+      estados: {
+        trabajando:            'Trabajando',
+        en_franco:             'En franco',
+        en_viaje:              'En viaje',
+        periodo_fuera_trabajo: 'Período fuera del trabajo',
+      },
+      validacion: {
+        estadoTitulo:  'Estado inválido',
+        estadoMensaje: 'Elegí un estado de la lista o dejá la celda vacía (día sin asignar).',
+        motivoTitulo:  'Motivo inválido',
+        motivoMensaje: 'Elegí un motivo de la lista. Solo se completa si el estado es "Período fuera del trabajo".',
+        motivoOtrosTitulo:  'Detalle demasiado largo',
+        motivoOtrosMensaje: 'El detalle del motivo no puede superar los 80 caracteres.',
+      },
+      referencia: {
+        encabezados: {
+          estado:      'estado',
+          motivo:      'motivo',
+          motivoOtros: 'motivo_otros',
+          significado: 'Qué significa',
+        },
+        vacio:          '(vacío)',
+        obligatorio:    'Obligatorio (máx. 80 caracteres)',
+        noCorresponde:  'Debe quedar vacío',
+        sinAsignar:     'Día sin asignar',
+        diaAsignado:    'Día asignado',
+        ausenciaPorMotivo: 'Ausencia por este motivo',
+        notas: [
+          'Las columnas email, nombre y fecha están bloqueadas: no las modifiques.',
+          'El motivo solo se completa cuando el estado es "Período fuera del trabajo".',
+          'Una celda de estado vacía significa un día sin asignar.',
+          'Los desplegables son una ayuda: el sistema vuelve a validar cada fila al importar el archivo.',
+        ],
+      },
+      errors: {
+        fechaInvalida:  'Ingresá un rango de fechas válido.',
+        rangoInvertido: 'La fecha "Desde" no puede ser posterior a "Hasta".',
+        rangoExcedido:  'El rango no puede superar los 366 días.',
+        generacion:     'No se pudo generar el archivo. Intentá de nuevo.',
+      },
+    },
   },
 
   pages: {
