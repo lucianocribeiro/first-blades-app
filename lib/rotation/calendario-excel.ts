@@ -1,6 +1,7 @@
 // FB-PI-04 — Generación del .xlsx del calendario (export, admin).
 //
-// Hoja "Calendario": una fila por empleado activo × día del rango, incluidos
+// Hoja "Calendario": una fila por empleado o supervisor activo (sin admins,
+// ver fetchCalendarioExportData) × día del rango, incluidos
 // los días sin asignación (estado vacío): sobre un calendario vacío, el
 // archivo es la grilla a completar (PRD §3). Orden: nombre, después fecha.
 // Hoja "Referencia": combinaciones válidas de estado y motivo.
@@ -75,6 +76,7 @@ function addCalendarioSheet(workbook: ExcelJS.Workbook, data: CalendarioExportDa
   const estadoList = listFormula(ESTADOS_EXCEL.map(estadoToExcelLabel));
   const motivoList = listFormula(MOTIVOS_EXCEL.map(motivoToExcelLabel));
   const v = copy.calendario.excel.validacion;
+  const estadoConMotivo = estadoToExcelLabel(ESTADO_CON_MOTIVO);
 
   // data.employees ya viene ordenado por nombre (y email como desempate).
   for (const emp of data.employees) {
@@ -117,7 +119,7 @@ function addCalendarioSheet(workbook: ExcelJS.Workbook, data: CalendarioExportDa
         showErrorMessage: true,
         errorStyle: 'stop',
         errorTitle: v.motivoTitulo,
-        error: v.motivoMensaje,
+        error: `${v.motivoMensaje} "${estadoConMotivo}".`,
       };
       row.getCell('motivo_otros').dataValidation = {
         type: 'textLength',
@@ -172,7 +174,8 @@ function addReferenciaSheet(workbook: ExcelJS.Workbook) {
   }
 
   sheet.addRow({});
-  for (const nota of r.notas) sheet.addRow({ estado: nota });
+  const notas = [r.notas[0], `${r.notaMotivo} "${estadoToExcelLabel(ESTADO_CON_MOTIVO)}".`, ...r.notas.slice(1)];
+  for (const nota of notas) sheet.addRow({ estado: nota });
 
   return sheet;
 }

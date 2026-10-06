@@ -113,3 +113,11 @@ Se intentó verificar subiendo un archivo de muestra con datos **sintéticos** a
 - `<sheetProtection sheet="1" …>` sin contraseña; columnas `email`/`nombre`/`fecha` bloqueadas (default OOXML), `estado`/`motivo`/`motivo_otros`/`notas` con `locked="0"`.
 
 **Para cerrarlo (Luciano):** exportar un rango corto desde la app (o usar la muestra sintética que deja la sesión), subirlo a Drive → *Abrir con Google Sheets*, y revisar: (1) ¿aparece el desplegable en `estado` y `motivo`? (2) ¿rechaza un valor fuera de la lista? (3) ¿quedan protegidas `email`/`nombre`/`fecha`? El resultado se anota acá.
+
+---
+
+## 10. Ajustes posteriores (FB-PI-04-B)
+
+- **§4 queda superado:** la etiqueta de `periodo_fuera_trabajo` en el Excel se unificó a **"Fuera del trabajo"**, la misma de la grilla. Las cuatro etiquetas de estado salen de `copy.status` y las de motivo de `copy.calendario.motivos`: **una sola fuente**, consumida por el mapeo. Se eliminó `copy.calendario.excel.estados`, que duplicaba los cuatro literales y tenía uno divergente. Los textos del archivo que nombran el estado (mensaje de error del motivo y nota de Referencia) componen la etiqueta desde `copy.status`.
+- **Revisión de las demás etiquetas:** los otros tres estados (Trabajando, En franco, En viaje) y los seis motivos **ya coincidían** con la app. La única divergencia era la de `periodo_fuera_trabajo`.
+- **§2, alcance de empleados:** se confirmó como decisión de producto y quedó documentado en el PRD §3 y en `fetchCalendarioExportData`. El subtítulo del panel decía "todos los empleados activos" y se corrigió a "los empleados y supervisores activos".

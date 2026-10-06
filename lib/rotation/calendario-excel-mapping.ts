@@ -13,12 +13,17 @@
 import { copy } from '@/lib/copy';
 import type { EstadoDia, MotivoAusencia } from '@/lib/db-types';
 
+// Una sola fuente por etiqueta (FB-PI-04-B): los estados salen de
+// copy.status y los motivos de copy.calendario.motivos — exactamente lo que
+// el admin ve en la grilla, la leyenda y el modal de edición. El archivo no
+// define etiquetas propias.
+//
 // El orden de las claves es el orden de los desplegables (PRD §3).
 export const ESTADO_EXCEL_LABELS: Record<EstadoDia, string> = {
-  trabajando:            copy.calendario.excel.estados.trabajando,
-  en_franco:             copy.calendario.excel.estados.en_franco,
-  en_viaje:              copy.calendario.excel.estados.en_viaje,
-  periodo_fuera_trabajo: copy.calendario.excel.estados.periodo_fuera_trabajo,
+  trabajando:            copy.status.trabajando,
+  en_franco:             copy.status.en_franco,
+  en_viaje:              copy.status.en_viaje,
+  periodo_fuera_trabajo: copy.status.periodo_fuera_trabajo,
 };
 
 export const MOTIVO_EXCEL_LABELS: Record<MotivoAusencia, string> = {

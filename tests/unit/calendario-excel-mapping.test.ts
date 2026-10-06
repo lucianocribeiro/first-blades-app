@@ -48,7 +48,7 @@ describe('mapeo Excel: etiquetas', () => {
       'Trabajando',
       'En franco',
       'En viaje',
-      'Período fuera del trabajo',
+      'Fuera del trabajo',
     ]);
   });
 
@@ -82,6 +82,34 @@ describe('mapeo Excel: etiquetas', () => {
   it('la fórmula de cada desplegable entra en el tope de 255 caracteres de Excel', () => {
     expect(listFormula(ESTADOS_EXCEL.map(estadoToExcelLabel)).length).toBeLessThanOrEqual(255);
     expect(listFormula(MOTIVOS_EXCEL.map(motivoToExcelLabel)).length).toBeLessThanOrEqual(255);
+  });
+});
+
+// FB-PI-04-B: el Excel y la app muestran LA MISMA etiqueta para cada valor.
+// El admin elige del desplegable mirando la grilla; dos nombres para el
+// mismo estado confunden. Si alguien vuelve a escribir una etiqueta propia
+// para el archivo, estos tests fallan.
+describe('mapeo Excel: misma etiqueta que la app (sin divergencias)', () => {
+  it('cada estado usa la etiqueta de la grilla (copy.status)', () => {
+    for (const estado of ENUM_ESTADO) {
+      expect(estadoToExcelLabel(estado), `estado_dia='${estado}'`).toBe(copy.status[estado]);
+    }
+  });
+
+  it('cada motivo usa la etiqueta de la app (copy.calendario.motivos)', () => {
+    for (const motivo of ENUM_MOTIVO) {
+      expect(motivoToExcelLabel(motivo), `motivo_ausencia='${motivo}'`).toBe(copy.calendario.motivos[motivo]);
+    }
+  });
+
+  it('periodo_fuera_trabajo se llama "Fuera del trabajo" en el archivo y en la app', () => {
+    expect(estadoToExcelLabel('periodo_fuera_trabajo')).toBe('Fuera del trabajo');
+    expect(copy.status.periodo_fuera_trabajo).toBe('Fuera del trabajo');
+  });
+
+  it('el copy del Excel no define una lista de estados paralela', () => {
+    expect('estados' in copy.calendario.excel).toBe(false);
+    expect('motivos' in copy.calendario.excel).toBe(false);
   });
 });
 

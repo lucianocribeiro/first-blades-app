@@ -35,7 +35,8 @@ Es una decisión de producto tomada: no es un script de carga única.
 
 ### Entrada del admin
 - Rango de fechas (desde / hasta).
-- Alcance de empleados: **todos los activos**. Sin selector individual en esta versión.
+- Alcance de empleados: **empleados y supervisores activos**. Los **admins quedan excluidos** (decisión de Luciano, 14/09), con el mismo alcance que el roster del admin. Consecuencia asumida: un admin puede tener días de calendario propios, porque una ausencia o pasaje que se envía a sí mismo se auto-aprueba y escribe su calendario (§7, FB-ADJ-01); esos días **no salen en el export ni se pueden corregir por Excel**. Se gestionan desde la app.
+- Sin selector individual de empleados en esta versión.
 
 ### Salida
 Un `.xlsx`, **una fila por empleado y por día del rango**, incluidos los días sin ninguna asignación, que salen en blanco listos para completar. Ese es el punto: sobre un calendario vacío, el archivo es la grilla a llenar.
@@ -47,8 +48,8 @@ Un `.xlsx`, **una fila por empleado y por día del rango**, incluidos los días 
 | `email` | No (bloqueada) | Clave de identificación del empleado |
 | `nombre` | No (bloqueada) | `full_name`, solo para que el admin se ubique |
 | `fecha` | No (bloqueada) | Fecha del día, formato ISO `AAAA-MM-DD` |
-| `estado` | **Sí, desplegable** | Trabajando · En franco · En viaje · Período fuera del trabajo · (vacío = sin asignar) |
-| `motivo` | **Sí, desplegable** | Vacaciones · Licencia médica · Día de trámite · Matrimonio · Fallecimiento · Otros. Obligatorio si el estado es Período fuera del trabajo; vacío en los demás casos |
+| `estado` | **Sí, desplegable** | Trabajando · En franco · En viaje · Fuera del trabajo · (vacío = sin asignar) |
+| `motivo` | **Sí, desplegable** | Vacaciones · Licencia médica · Día de trámite · Matrimonio · Fallecimiento · Otros. Obligatorio si el estado es Fuera del trabajo; vacío en los demás casos |
 | `motivo_otros` | Sí, texto | Obligatorio si el motivo es Otros |
 | `notas` | Sí, texto | Campo libre existente |
 

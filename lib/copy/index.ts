@@ -986,7 +986,7 @@ export const copy = {
     excel: {
       panel: {
         title:    'Exportar a Excel',
-        subtitle: 'Descargá el calendario de todos los empleados activos para completarlo fuera de la app.',
+        subtitle: 'Descargá el calendario de los empleados y supervisores activos para completarlo fuera de la app.',
         desde:    'Desde',
         hasta:    'Hasta',
         exportar: 'Exportar',
@@ -1007,19 +1007,15 @@ export const copy = {
         calendario: 'Calendario',
         referencia: 'Referencia',
       },
-      // "Período fuera del trabajo" (y no el "Fuera del trabajo" corto de la
-      // grilla): en el archivo no hay leyenda que lo aclare. Ver PRD §3.
-      estados: {
-        trabajando:            'Trabajando',
-        en_franco:             'En franco',
-        en_viaje:              'En viaje',
-        periodo_fuera_trabajo: 'Período fuera del trabajo',
-      },
+      // Las etiquetas de estado NO viven acá: salen de copy.status, las mismas
+      // que ve el admin en la grilla (FB-PI-04-B). Los motivos salen de
+      // copy.calendario.motivos. Ver lib/rotation/calendario-excel-mapping.ts.
       validacion: {
         estadoTitulo:  'Estado inválido',
         estadoMensaje: 'Elegí un estado de la lista o dejá la celda vacía (día sin asignar).',
         motivoTitulo:  'Motivo inválido',
-        motivoMensaje: 'Elegí un motivo de la lista. Solo se completa si el estado es "Período fuera del trabajo".',
+        // Se completa con la etiqueta del estado (copy.status) al generar el archivo.
+        motivoMensaje: 'Elegí un motivo de la lista. Solo se completa si el estado es',
         motivoOtrosTitulo:  'Detalle demasiado largo',
         motivoOtrosMensaje: 'El detalle del motivo no puede superar los 80 caracteres.',
       },
@@ -1036,9 +1032,10 @@ export const copy = {
         sinAsignar:     'Día sin asignar',
         diaAsignado:    'Día asignado',
         ausenciaPorMotivo: 'Ausencia por este motivo',
+        // Se completa con la etiqueta del estado (copy.status) al generar el archivo.
+        notaMotivo: 'El motivo solo se completa cuando el estado es',
         notas: [
           'Las columnas email, nombre y fecha están bloqueadas: no las modifiques.',
-          'El motivo solo se completa cuando el estado es "Período fuera del trabajo".',
           'Una celda de estado vacía significa un día sin asignar.',
           'Los desplegables son una ayuda: el sistema vuelve a validar cada fila al importar el archivo.',
         ],

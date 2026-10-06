@@ -9,7 +9,7 @@
  *   - los admins tampoco (mismo scope que el roster del admin);
  *   - más de 1000 asignaciones en el rango: la paginación trae TODAS, sin
  *     el truncado silencioso del max_rows de PostgREST (config.toml: 1000);
- *   - el archivo tiene una fila por empleado activo × día, incluidos los
+ *   - el archivo tiene una fila por empleado o supervisor activo × día, incluidos los
  *     días sin asignación.
  * Solo lectura sobre una base efímera; el seed de asignaciones se hace como
  * postgres (fuera de RLS) en setup.

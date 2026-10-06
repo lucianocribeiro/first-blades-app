@@ -62,6 +62,11 @@ export async function fetchCalendarioExportData(
 ): Promise<CalendarioExportData | null> {
   // Mismo scope que el roster del admin en calendario/page.tsx: empleados y
   // supervisores ACTIVOS. Los inactivos no salen en el archivo.
+  //
+  // Los ADMINS quedan afuera por decisión de producto (FB-PI-04-B, PRD §3),
+  // no por omisión: un admin puede tener días propios (su ausencia o pasaje
+  // para sí se auto-aprueba y escribe el calendario, FB-ADJ-01), pero esos
+  // días no se exportan ni se corrigen por Excel — se gestionan en la app.
   const { data: employeesRaw, error: employeesError } = await supabase
     .from('profiles')
     .select('id, full_name, email')

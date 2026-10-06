@@ -127,12 +127,12 @@ describe('hoja Calendario: filas', () => {
     expect(find('ana@firstblades.test', '2026-03-01')).toMatchObject({ estado: 'En franco', notas: 'franco largo' });
     expect(find('beto@firstblades.test', '2026-03-01')).toMatchObject({ estado: 'En viaje' });
     expect(find('beto@firstblades.test', '2026-02-28')).toMatchObject({
-      estado: 'Período fuera del trabajo',
+      estado: 'Fuera del trabajo',
       motivo: 'Otros',
       motivo_otros: 'mudanza',
     });
     expect(find('beto@firstblades.test', '2026-03-02')).toMatchObject({
-      estado: 'Período fuera del trabajo',
+      estado: 'Fuera del trabajo',
       motivo: 'Día de trámite',
     });
   });
@@ -164,7 +164,7 @@ describe('hoja Calendario: desplegables y bloqueo', () => {
       const dv = sheet.getRow(r).getCell(COL.estado).dataValidation;
       expect(dv?.type).toBe('list');
       expect(dv?.allowBlank).toBe(true);
-      expect(dv?.formulae).toEqual(['"Trabajando,En franco,En viaje,Período fuera del trabajo"']);
+      expect(dv?.formulae).toEqual(['"Trabajando,En franco,En viaje,Fuera del trabajo"']);
     }
   });
 
@@ -199,6 +199,35 @@ describe('hoja Calendario: desplegables y bloqueo', () => {
   });
 });
 
+describe('textos del archivo: nombran el estado con la etiqueta de la app', () => {
+  it('el mensaje de error del motivo y la nota de Referencia dicen "Fuera del trabajo"', () => {
+    const esperado = `"${copy.status.periodo_fuera_trabajo}"`;
+    const dv = sheet.getRow(2).getCell(5).dataValidation;
+    expect(dv?.error).toContain(esperado);
+
+    const ref = workbook.getWorksheet(copy.calendario.excel.hojas.referencia)!;
+    const textos: string[] = [];
+    ref.eachRow((row) => textos.push(String(row.getCell(1).value ?? '')));
+    expect(textos.some((t) => t.includes(esperado))).toBe(true);
+  });
+
+  it('ninguna celda ni validación del archivo menciona otra etiqueta para ese estado', async () => {
+    const buffer = await buildCalendarioWorkbook(DATA, DESDE, HASTA);
+    // Todas las celdas, mensajes y listas de validación de las dos hojas.
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as XlsxInput);
+    const todo: string[] = [];
+    wb.eachSheet((ws) => {
+      ws.eachRow((row) => row.eachCell((cell) => {
+        todo.push(String(cell.value ?? ''));
+        if (cell.dataValidation?.error) todo.push(cell.dataValidation.error);
+        for (const f of cell.dataValidation?.formulae ?? []) todo.push(String(f));
+      }));
+    });
+    expect(todo.filter((t) => /per[ií]odo fuera/i.test(t))).toEqual([]);
+  });
+});
+
 describe('hoja Referencia', () => {
   it('existe y lista todas las combinaciones válidas de estado y motivo', () => {
     const ref = workbook.getWorksheet(copy.calendario.excel.hojas.referencia)!;
@@ -216,12 +245,12 @@ describe('hoja Referencia', () => {
       ['Trabajando', vacio],
       ['En franco', vacio],
       ['En viaje', vacio],
-      ['Período fuera del trabajo', 'Vacaciones'],
-      ['Período fuera del trabajo', 'Licencia médica'],
-      ['Período fuera del trabajo', 'Día de trámite'],
-      ['Período fuera del trabajo', 'Matrimonio'],
-      ['Período fuera del trabajo', 'Fallecimiento'],
-      ['Período fuera del trabajo', 'Otros'],
+      ['Fuera del trabajo', 'Vacaciones'],
+      ['Fuera del trabajo', 'Licencia médica'],
+      ['Fuera del trabajo', 'Día de trámite'],
+      ['Fuera del trabajo', 'Matrimonio'],
+      ['Fuera del trabajo', 'Fallecimiento'],
+      ['Fuera del trabajo', 'Otros'],
     ];
     for (const combo of esperadas) {
       expect(combos).toContainEqual(combo);

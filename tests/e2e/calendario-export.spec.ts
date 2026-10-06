@@ -3,7 +3,8 @@
 // Contra el stack efímero real (Next + Supabase local sembrado):
 //  - el admin elige un rango en /calendario, exporta y el navegador descarga
 //    el .xlsx con el rango en el nombre; el archivo trae una fila por
-//    empleado activo × día del rango (se cuenta contra la base);
+//    empleado o supervisor activo (sin admins) × día del rango (se cuenta
+//    contra la base);
 //  - supervisor y empleado no ven la acción (el corte server-side lo cubre
 //    tests/unit/calendario-export-action.test.ts con el guard real).
 //
