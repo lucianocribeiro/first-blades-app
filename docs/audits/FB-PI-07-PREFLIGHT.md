@@ -162,3 +162,35 @@ Solo las 3 consultas `SELECT` de §0 (método). Ninguna escritura.
 - **Totales que no deben cambiar** (guardados en el manifest): `profiles` 27 · `auth.users` 27 · `documents` 2 · objetos del bucket `documents` 2 · `audit_log` 19 · `pasaje_requests` 0.
 - **Corrección del manifest:** el script tomó el conteo del bucket con `list('')`, que devuelve carpetas de primer nivel (1), no objetos. Se reemplazó en el manifest por el conteo real por SQL (2). Los JSON hasheados no se tocaron.
 - **Producción:** solo lectura (`SELECT`, `listUsers` de Auth y listado de Storage). **Ninguna escritura.**
+
+### Paso 2 — Borrado en un solo bloque atómico ✅ (autorizado por Luciano, 2026-10-06)
+
+- Se ejecutó el bloque `DO $$ … $$` de §6 **tal cual**: guardas previas (2 solicitudes `aprobado` identificadas, 2 en total en `ausencia_requests` y 23 en `rotation_assignments`), luego `DELETE` de las **2 solicitudes** y luego `DELETE` de los **23 días**, con verificación de `ROW_COUNT` en cada uno.
+- **El bloque no abortó:** se borraron exactamente 2 y 23 filas, en una sola transacción.
+
+### Paso 3 — Verificación posterior ✅
+
+| Medida | Antes | Esperado | Después |
+|---|---|---|---|
+| `rotation_assignments` | 23 | 0 | **0** ✔ |
+| `ausencia_requests` | 2 | 0 | **0** ✔ |
+| `pasaje_requests` | 0 | 0 | **0** ✔ |
+| `profiles` | 27 | 27 (sin cambios) | **27** ✔ |
+| `auth.users` | 27 | 27 (sin cambios) | **27** ✔ |
+| `documents` | 2 | 2 (sin cambios) | **2** ✔ |
+| Objetos del bucket `documents` | 2 | 2 (sin cambios) | **2** ✔ |
+| `audit_log` | 19 | 19 | **19** ✔ (las 14 entradas de §3 presentes, verificadas **por id** contra el snapshot) |
+| `notification_log` | 0 | 0 | **0** ✔ |
+| Filas con `es_estimado = true` | 3 | 0 | **0** |
+
+- **App:** los errores de runtime de Vercel para `first-blades-app` dan **0 errores** en la última hora, que cubre la purga. La carga visual de Calendario, Equipo y Aprobaciones con sesión de admin queda para que la confirme Luciano.
+- **Nota (prompt, "para el próximo item"):** con las 3 filas estimadas del supervisor desaparece el **síntoma** de `recQzoGnSvpEHfAYg`, **no el problema**. El diagnóstico de los crons de Vercel es el siguiente trabajo.
+
+### Acciones que tocaron producción en toda la purga
+
+1. Paso 0: 3 consultas de solo lectura.
+2. Paso 1: solo lectura (consultas, `listUsers` de Auth, listado de Storage y un conteo SQL de objetos).
+3. Paso 2: **2 filas borradas** de `ausencia_requests` y **23 filas borradas** de `rotation_assignments`, en un solo bloque atómico (SQL).
+4. Paso 3: consultas de solo lectura y consulta de errores de runtime de Vercel.
+
+`audit_log`, perfiles, usuarios, documentos y archivos: **sin cambios**. Snapshot para reconstruir: `~/Desktop/Dev/first-blades-backups/FB-PI-07-2026-10-06/`.
