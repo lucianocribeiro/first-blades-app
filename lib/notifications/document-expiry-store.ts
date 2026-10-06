@@ -4,6 +4,7 @@
 // por tests de integración contra Supabase local.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/supabase/types';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import type { NotificationLogInsert } from '@/lib/db-types';
 import type {
   ExpiryDataStore,
@@ -19,15 +20,22 @@ export function createSupabaseExpiryStore(
 ): ExpiryDataStore {
   return {
     async getApprovedDatedDocuments(): Promise<ExpiryDocument[]> {
-      const { data, error } = await client
-        .from('documents')
-        .select(
-          'id, user_id, document_type, certificado_tipo, certificado_otros_texto, fecha_vencimiento'
-        )
-        .eq('estado', 'aprobado')
-        .not('fecha_vencimiento', 'is', null);
+      // FB-PI-05: todos los documentos con vencimiento de toda la nómina.
+      // Truncada, un documento que vence se quedaría sin aviso.
+      const { data, error } = await fetchAllRows(
+        () =>
+          client
+            .from('documents')
+            .select(
+              'id, user_id, document_type, certificado_tipo, certificado_otros_texto, fecha_vencimiento'
+            )
+            .eq('estado', 'aprobado')
+            .not('fecha_vencimiento', 'is', null)
+            .order('id', { ascending: true }),
+        { label: '[document-expiry] documentos con vencimiento:' }
+      );
       if (error) throw new Error(error.message);
-      return (data ?? []) as ExpiryDocument[];
+      return data as ExpiryDocument[];
     },
 
     async getAdmins(): Promise<ExpiryRecipient[]> {
@@ -51,13 +59,20 @@ export function createSupabaseExpiryStore(
 
     async getSentThresholds(docIds: string[]): Promise<SentThreshold[]> {
       if (docIds.length === 0) return [];
-      const { data, error } = await client
-        .from('notification_log')
-        .select('document_id, umbral, recipient_profile_id')
-        .eq('tipo', TIPO)
-        .in('document_id', docIds);
+      // FB-PI-05: idempotencia. Documentos × 3 umbrales × destinatarios;
+      // truncada, se reenviarían mails de vencimiento ya enviados.
+      const { data, error } = await fetchAllRows(
+        () =>
+          client
+            .from('notification_log')
+            .select('document_id, umbral, recipient_profile_id')
+            .eq('tipo', TIPO)
+            .in('document_id', docIds)
+            .order('id', { ascending: true }),
+        { label: '[document-expiry] umbrales enviados:' }
+      );
       if (error) throw new Error(error.message);
-      return (data ?? []) as SentThreshold[];
+      return data as SentThreshold[];
     },
 
     async recordSent(rows: SentThreshold[]): Promise<void> {

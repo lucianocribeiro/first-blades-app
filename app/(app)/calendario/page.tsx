@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { requireAuth } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import { copy } from '@/lib/copy';
 import { Card } from '@/components/ui/Card';
 import { CalendarioSections } from './CalendarioSections';
@@ -131,12 +132,21 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
 
   let assignments: RotationAssignment[] = [];
   if (employeeIds.length > 0) {
-    const { data: assignmentsRaw, error: assignmentsError } = await supabase
-      .from('rotation_assignments')
-      .select('*')
-      .in('user_id', employeeIds)
-      .gte('fecha', firstDay)
-      .lte('fecha', lastDay);
+    // FB-PI-05: lectura completa paginada. Una sola query truncaría en
+    // silencio en max_rows (1000) con ≥ 33 empleados y el mes lleno, y la
+    // grilla mostraría vacías celdas que tienen asignación.
+    const { data: assignmentsRaw, error: assignmentsError } = await fetchAllRows(
+      () =>
+        supabase
+          .from('rotation_assignments')
+          .select('*')
+          .in('user_id', employeeIds)
+          .gte('fecha', firstDay)
+          .lte('fecha', lastDay)
+          .order('user_id', { ascending: true })
+          .order('fecha', { ascending: true }),
+      { label: '[CalendarioPage] roster:' }
+    );
 
     if (assignmentsError) {
       console.error('[CalendarioPage] error al cargar asignaciones:', assignmentsError.message);
@@ -158,12 +168,20 @@ export default async function CalendarioPage({ searchParams }: CalendarioPagePro
     const today = getBusinessToday();
     const windowStart = getFrancoAlertWindowStart(today);
 
-    const { data: francoDiasRaw, error: francoError } = await supabase
-      .from('rotation_assignments')
-      .select('user_id, fecha, estado_dia, es_estimado')
-      .in('user_id', employeeIds)
-      .gte('fecha', windowStart)
-      .lte('fecha', today);
+    // FB-PI-05: ventana de 66 días × empleados — la primera lectura que
+    // pasa las 1000 filas (con 25 activos y ~40 días de calendario lleno).
+    const { data: francoDiasRaw, error: francoError } = await fetchAllRows(
+      () =>
+        supabase
+          .from('rotation_assignments')
+          .select('user_id, fecha, estado_dia, es_estimado')
+          .in('user_id', employeeIds)
+          .gte('fecha', windowStart)
+          .lte('fecha', today)
+          .order('user_id', { ascending: true })
+          .order('fecha', { ascending: true }),
+      { label: '[CalendarioPage] alertas de franco:' }
+    );
 
     if (francoError) {
       console.error('[CalendarioPage] error al cargar alertas de franco:', francoError.message);

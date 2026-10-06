@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { requireAdmin } from '@/lib/auth';
 import { createServerClient } from '@/lib/supabase/server';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import { copy } from '@/lib/copy';
 import { Card } from '@/components/ui/Card';
 import { AprobadasTable, type AprobadaItem } from './AprobadasTable';
@@ -27,19 +28,34 @@ export default async function AprobadasPage() {
   // es simplemente estado='aprobado', sin excluir canceladas: siguen siendo
   // parte del historial de aprobadas, solo que ya no son "vigentes" para
   // volver a tocar (la RPC las rechaza; la UI las muestra sin acciones).
+  //
+  // FB-PI-05: el historial de aprobadas crece sin techo — lectura completa
+  // paginada, para que el listado no oculte aprobaciones viejas sin avisar.
+  // La paginación EN LA UI es un item aparte del Log; acá solo se garantiza
+  // que los datos estén completos. `id` desempata el orden entre páginas.
   const [ausenciasResult, pasajesResult] = await Promise.all([
-    supabase
-      .from('ausencia_requests')
-      .select('*, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)')
-      .eq('estado', 'aprobado')
-      .order('reviewed_at', { ascending: false }),
-    supabase
-      .from('pasaje_requests')
-      .select(
-        '*, solicitante_profile:profiles!pasaje_requests_solicitante_id_fkey(full_name, email), empleado_profile:profiles!pasaje_requests_empleado_id_fkey(full_name, email)'
-      )
-      .eq('estado', 'aprobado')
-      .order('reviewed_at', { ascending: false }),
+    fetchAllRows(
+      () =>
+        supabase
+          .from('ausencia_requests')
+          .select('*, user_profile:profiles!ausencia_requests_user_id_fkey(full_name, email)')
+          .eq('estado', 'aprobado')
+          .order('reviewed_at', { ascending: false })
+          .order('id', { ascending: true }),
+      { label: '[AprobadasPage] ausencias aprobadas:' }
+    ),
+    fetchAllRows(
+      () =>
+        supabase
+          .from('pasaje_requests')
+          .select(
+            '*, solicitante_profile:profiles!pasaje_requests_solicitante_id_fkey(full_name, email), empleado_profile:profiles!pasaje_requests_empleado_id_fkey(full_name, email)'
+          )
+          .eq('estado', 'aprobado')
+          .order('reviewed_at', { ascending: false })
+          .order('id', { ascending: true }),
+      { label: '[AprobadasPage] pasajes aprobados:' }
+    ),
   ]);
 
   const error = ausenciasResult.error || pasajesResult.error;

@@ -400,13 +400,23 @@ function mockProfilesAndAssignments(employees: unknown[], assignments: unknown[]
   function makeBuilder(finalData: unknown[]) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const builder: any = {};
-    for (const method of ['select', 'eq', 'in', 'or', 'gte']) {
+    for (const method of ['select', 'eq', 'in', 'or', 'gte', 'lte', 'order']) {
       builder[method] = vi.fn().mockReturnValue(builder);
     }
-    // .order() termina la cadena de profiles; .lte() termina la de
-    // rotation_assignments (ninguna de las dos queries de asignaciones usa order()).
-    builder.order = vi.fn().mockResolvedValue({ data: finalData, error: null });
-    builder.lte = vi.fn().mockResolvedValue({ data: finalData, error: null });
+    // Thenable, como el builder real: se resuelve al awaitearlo, termine la
+    // cadena donde termine. FB-PI-05: las lecturas paginadas (fetchAllRows)
+    // terminan en .range(from, to) — se devuelve esa porción, y una página
+    // vacía cierra la paginación.
+    let window: [number, number] | null = null;
+    builder.range = vi.fn((from: number, to: number) => {
+      window = [from, to];
+      return builder;
+    });
+    builder.then = (onOk: (r: unknown) => unknown, onErr: (e: unknown) => unknown) => {
+      const data = window ? finalData.slice(window[0], window[1] + 1) : finalData;
+      window = null;
+      return Promise.resolve({ data, error: null }).then(onOk, onErr);
+    };
     return builder;
   }
 
