@@ -194,3 +194,11 @@ Solo las 4 consultas `SELECT` de §0 (método). Ninguna escritura.
   - certificado (PDF): `sha256` `3990de87a23a0e4e…`
   - estudio médico (DOCX): `sha256` `5642e5ffdd40b244…`
 - **Producción:** solo lectura. Hubo `SELECT` de `profiles`, `rotation_assignments`, `documents` y `audit_log`, `getUserById` de Auth y 2 descargas de Storage. **Ninguna escritura.**
+
+### Paso 2 — Archivos de Storage ✅ (autorizado por Luciano, 2026-10-06)
+
+- **Pre-check (SQL, solo lectura):** bucket `documents` = 4 objetos; los 2 objetivo presentes; 2 objetos bajo el prefijo `03744042-…/`.
+- **Ejecución:** `storage.from('documents').remove([…])` con la **API de Storage** (service role), solo con las 2 rutas exactas. La API devolvió los 2 objetos borrados. No se usó SQL sobre `storage.*`.
+- **Post-check (SQL):** bucket `documents` = **2** · prefijo `03744042-…/` = **0** · `audit_log` = **19** (sin cambios).
+- **Estado intermedio esperado:** las 2 filas de `documents` de Santiago siguen en la base, ya sin archivo, hasta el Paso 3. Los otros 2 documentos de la base tienen su archivo.
+- **Producción:** **2 objetos borrados de Storage**, únicos cambios del paso.
