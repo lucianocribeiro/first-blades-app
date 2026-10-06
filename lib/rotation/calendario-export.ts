@@ -67,20 +67,28 @@ export async function fetchCalendarioExportData(
   // no por omisión: un admin puede tener días propios (su ausencia o pasaje
   // para sí se auto-aprueba y escribe el calendario, FB-ADJ-01), pero esos
   // días no se exportan ni se corrigen por Excel — se gestionan en la app.
-  const { data: employeesRaw, error: employeesError } = await supabase
-    .from('profiles')
-    .select('id, full_name, email')
-    .eq('status', 'activo')
-    .in('role', ['empleado', 'supervisor'])
-    .order('full_name', { ascending: true })
-    .order('email', { ascending: true });
+  //
+  // FB-PI-AUD-04: también va por fetchAllRows. Con más de 1000 perfiles en
+  // alcance, una lectura directa volvería cortada sin error y el archivo
+  // (y la lectura de asignaciones, que filtra por estos IDs) quedaría
+  // incompleto en silencio. Orden total: nombre para leer de corrido, email
+  // y finalmente id (único) como desempate estable entre páginas.
+  const { data: employeesRaw, error: employeesError } = await fetchAllRows(
+    () =>
+      supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .eq('status', 'activo')
+        .in('role', ['empleado', 'supervisor'])
+        .order('full_name', { ascending: true })
+        .order('email', { ascending: true })
+        .order('id', { ascending: true }),
+    { label: '[fetchCalendarioExportData] empleados:' }
+  );
 
-  if (employeesError) {
-    console.error('[fetchCalendarioExportData] error al cargar empleados:', employeesError.message);
-    return null;
-  }
+  if (employeesError) return null;
 
-  const employees = (employeesRaw ?? []) as ExportEmployee[];
+  const employees = employeesRaw as ExportEmployee[];
   if (employees.length === 0) return { employees, assignments: [] };
 
   const ids = employees.map((e) => e.id);

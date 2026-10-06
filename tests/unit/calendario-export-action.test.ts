@@ -98,7 +98,13 @@ function mockClient(opts: ClientOptions) {
               error: null,
             };
           }
-          return employees;
+          // Lectura de empleados (paginada por fetchAllRows): se sirve por
+          // .range() con el mismo corte que PostgREST.
+          if (employees.error) return employees;
+          const range = calls.find(([m]) => m === 'range');
+          const [from, to] = (range?.[1] ?? [0, 999]) as [number, number];
+          const end = Math.min(to + 1, from + maxRows);
+          return { data: ((employees.data ?? []) as unknown[]).slice(from, end), error: null };
         });
       } else if (table === 'rotation_assignments') {
         q = makeQuery((calls) => {
