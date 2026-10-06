@@ -181,3 +181,16 @@ El 3b es igual para `public.documents WHERE user_id = uid`, esperando **2**.
 ## 8. Acciones que tocaron producción en este paso
 
 Solo las 4 consultas `SELECT` de §0 (método). Ninguna escritura.
+
+---
+
+## 9. Registro de ejecución
+
+### Paso 1 — Snapshot ✅ (autorizado por Luciano, 2026-10-06)
+
+- **Carpeta:** `~/Desktop/Dev/first-blades-backups/FB-PI-06-2026-10-06/`, fuera del repo y no commiteada.
+- **Contenido:** `profile.json` · `auth_user.json` (desde la API de Auth Admin, **sin secretos**: no incluye `encrypted_password` ni tokens; incluye la identidad) · `rotation_assignments.json` (46) · `documents.json` (2) · `audit_log_referencias.json` (3) · `storage/03744042-…/` (los 2 archivos) · `manifest.json`.
+- **Verificación:** los conteos dieron 1 perfil, 1 usuario, 1 identidad, 46 días, 2 documentos, 2 archivos y 3 entradas de auditoría, todos iguales a lo esperado. Los `sha256` de los archivos escritos en disco coinciden con lo descargado y los tamaños coinciden con `documents.file_size` (62 786 B y 38 365 B). El JSON de días releído tiene 46 filas.
+  - certificado (PDF): `sha256` `3990de87a23a0e4e…`
+  - estudio médico (DOCX): `sha256` `5642e5ffdd40b244…`
+- **Producción:** solo lectura. Hubo `SELECT` de `profiles`, `rotation_assignments`, `documents` y `audit_log`, `getUserById` de Auth y 2 descargas de Storage. **Ninguna escritura.**
