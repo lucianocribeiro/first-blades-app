@@ -670,6 +670,10 @@ export type Database = {
         }
         Returns: string
       }
+      importar_calendario: {
+        Args: { p_esperado: Json; p_filas: Json }
+        Returns: Json
+      }
       is_admin: { Args: never; Returns: boolean }
       log_audit: {
         Args: {

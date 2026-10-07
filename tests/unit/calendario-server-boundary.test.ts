@@ -34,6 +34,7 @@ import { upsertRotationAssignment } from '@/app/(app)/calendario/actions';
 import CalendarioPage from '@/app/(app)/calendario/page';
 import { CalendarioSections } from '@/app/(app)/calendario/CalendarioSections';
 import { ExportarExcelPanel } from '@/app/(app)/calendario/ExportarExcelPanel';
+import { ImportarExcelPanel } from '@/app/(app)/calendario/ImportarExcelPanel';
 import { copy } from '@/lib/copy';
 
 // FB-F3-11: page.tsx lee la cookie de colapsado con `await cookies()`
@@ -169,7 +170,8 @@ type ElementLike = { type?: unknown; props?: Record<string, unknown> };
 // de igualdad corta antes — ni de paso buscando otro elemento): las props
 // que le llegan ya alcanzan para verificar el branch de rol sin necesidad
 // de bajar más. ExportarExcelPanel (FB-PI-04) es la otra: también usa
-// hooks, y se la busca por tipo sin renderizarla.
+// hooks, y se la busca por tipo sin renderizarla. ImportarExcelPanel
+// (FB-PI-11), igual.
 function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (!node) return undefined;
   if (Array.isArray(node)) {
@@ -182,7 +184,7 @@ function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (typeof node !== 'object') return undefined;
   const el = node as ElementLike;
   if (el.type === type) return el;
-  if (el.type === CalendarioSections || el.type === ExportarExcelPanel) return undefined;
+  if (el.type === CalendarioSections || el.type === ExportarExcelPanel || el.type === ImportarExcelPanel) return undefined;
   if (typeof el.type === 'function') {
     const rendered = (el.type as (props: unknown) => unknown)(el.props);
     return findElement(rendered, type);
@@ -538,5 +540,32 @@ describe('CalendarioPage: panel de export a Excel por rol', () => {
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
     expect(findElement(result, ExportarExcelPanel)).toBeUndefined();
+  });
+});
+
+// FB-PI-11: el panel de import, mismo criterio. El control real es
+// requireAdmin() en las actions (tests/unit/calendario-import-action.test.ts)
+// y la guarda de la RPC (tests/integration/calendario-import.test.ts).
+describe('CalendarioPage: panel de import desde Excel por rol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: ve el panel', async () => {
+    mockProfileRole('admin');
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(findElement(result, ImportarExcelPanel)).toBeTruthy();
+  });
+
+  it.each(['supervisor', 'empleado'] as const)('%s: NO ve el panel', async (role) => {
+    mockProfileRole(role);
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(findElement(result, ImportarExcelPanel)).toBeUndefined();
   });
 });

@@ -1267,4 +1267,158 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
       { dependent_object: 'type employee_status[]', deptype: 'i' },
     ]);
   });
+
+  // ─── 0022: import del calendario (FB-PI-11 / FB-PI-11-B) ──────────────
+
+  it('profiles_email_normalizado_unique: índice ÚNICO sobre lower(btrim(email)) — mismo criterio que el matcheo del import (0022)', async () => {
+    const { rows } = await client.query(`
+      SELECT i.indisunique, pg_get_indexdef(i.indexrelid) AS def
+      FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+      WHERE c.relname = 'profiles_email_normalizado_unique'
+        AND i.indrelid = 'public.profiles'::regclass
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].indisunique).toBe(true);
+    expect(rows[0].def).toMatch(/lower\(btrim\(email\)\)/);
+  });
+
+  it('profiles: dos emails que difieren solo en mayúsculas o espacios son imposibles (23505) — cambio de comportamiento del alta (0022)', async () => {
+    await client.query('BEGIN');
+    try {
+      const { rows } = await client.query(`SELECT id, email FROM public.profiles LIMIT 1`);
+      if (rows.length === 0) return; // base sin perfiles: nada contra qué chocar
+      const variante = `  ${String(rows[0].email).toUpperCase()} `;
+      const nuevoId = '22000000-0000-0000-0000-000000000001';
+      await client.query(
+        `INSERT INTO auth.users (id, aud, role, email, encrypted_password, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_sso_user, is_anonymous)
+         VALUES ($1::uuid, 'authenticated', 'authenticated', 'otro-0022@test.com', '', now(), now(), '{}', '{}', false, false)`,
+        [nuevoId]
+      );
+      await expect(
+        client.query(`UPDATE public.profiles SET email = $1 WHERE id = $2::uuid`, [variante, nuevoId])
+      ).rejects.toMatchObject({ code: '23505' });
+    } finally {
+      await client.query('ROLLBACK');
+    }
+  });
+
+  it('función importar_calendario() existe con la firma (jsonb, jsonb), sin defaults, retorna jsonb (0022)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        p.pronargs,
+        p.pronargdefaults,
+        pg_get_function_result(p.oid) AS ret,
+        (
+          SELECT array_agg(t.typname::text ORDER BY u.ord)
+          FROM unnest(p.proargtypes) WITH ORDINALITY AS u(oid, ord)
+          JOIN pg_type t ON t.oid = u.oid
+        ) AS arg_types,
+        p.proargnames
+      FROM pg_proc p
+      WHERE p.proname = 'importar_calendario' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].arg_types).toEqual(['jsonb', 'jsonb']);
+    expect(rows[0].proargnames).toEqual(['p_filas', 'p_esperado']);
+    expect(rows[0].pronargs).toBe(2);
+    expect(rows[0].pronargdefaults).toBe(0);
+    expect(rows[0].ret).toBe('jsonb');
+  });
+
+  it('importar_calendario: SECURITY DEFINER, search_path=public y mismo owner que is_admin()/auth_role() (molde §6.1, 0022)', async () => {
+    const { rows } = await client.query(`
+      SELECT p.prosecdef, p.proconfig, r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname = 'importar_calendario' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].prosecdef).toBe(true);
+    expect(rows[0].proconfig).toEqual(['search_path=public']);
+    expect(['authenticated', 'anon', 'public']).not.toContain(rows[0].owner);
+
+    const { rows: helperOwners } = await client.query(`
+      SELECT r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname IN ('is_admin', 'auth_role') AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(helperOwners).toHaveLength(2);
+    for (const helper of helperOwners) expect(helper.owner).toBe(rows[0].owner);
+  });
+
+  it('importar_calendario: EXECUTE otorgado a authenticated, negado a anon y a PUBLIC (0022)', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        has_function_privilege('authenticated', 'public.importar_calendario(jsonb,jsonb)', 'EXECUTE') AS authenticated_can,
+        has_function_privilege('anon', 'public.importar_calendario(jsonb,jsonb)', 'EXECUTE') AS anon_can,
+        has_function_privilege('public', 'public.importar_calendario(jsonb,jsonb)', 'EXECUTE') AS public_can
+    `);
+    expect(rows[0]).toEqual({ authenticated_can: true, anon_can: false, public_can: false });
+  });
+
+  it('importar_calendario: audita vía log_audit() (molde 0020), nunca con INSERT directo a audit_log (0022)', async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_functiondef(p.oid) AS def
+      FROM pg_proc p
+      WHERE p.proname = 'importar_calendario' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows[0].def).toMatch(/PERFORM public\.log_audit\(/);
+    expect(rows[0].def).not.toMatch(/INSERT INTO public\.audit_log/i);
+  });
+
+  it('log_audit() sigue cerrada tras 0022: sin EXECUTE para authenticated/anon/PUBLIC', async () => {
+    const { rows } = await client.query(`
+      SELECT
+        has_function_privilege('authenticated', 'public.log_audit(text,text,uuid,jsonb,jsonb)', 'EXECUTE') AS authenticated_can,
+        has_function_privilege('anon', 'public.log_audit(text,text,uuid,jsonb,jsonb)', 'EXECUTE') AS anon_can,
+        has_function_privilege('public', 'public.log_audit(text,text,uuid,jsonb,jsonb)', 'EXECUTE') AS public_can
+    `);
+    expect(rows[0]).toEqual({ authenticated_can: false, anon_can: false, public_can: false });
+  });
+
+  it('0022 es delta puro: rotation_assignments conserva columnas, UNIQUE, CHECK y policies; enums estado_dia/motivo_ausencia sin cambios', async () => {
+    const { rows: cons } = await client.query(`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'public.rotation_assignments'::regclass
+      ORDER BY conname
+    `);
+    expect(cons.map((r) => r.conname)).toEqual([
+      'rotation_assignments_motivo_requerido',
+      'rotation_assignments_pkey',
+      'rotation_assignments_rotation_group_id_fkey',
+      'rotation_assignments_user_id_fecha_key',
+      'rotation_assignments_user_id_fkey',
+    ]);
+    const { rows: pols } = await client.query(`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'rotation_assignments'
+      ORDER BY policyname
+    `);
+    expect(pols.map((r) => r.policyname)).toEqual(['rotation_assign_select', 'rotation_assign_write_admin']);
+    const { rows: trg } = await client.query(`
+      SELECT count(*)::int AS n FROM pg_trigger
+      WHERE tgrelid = 'public.rotation_assignments'::regclass AND NOT tgisinternal
+    `);
+    expect(trg[0].n).toBe(0);
+
+    const enumValues = async (typ: string) =>
+      (
+        await client.query(
+          `SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+           WHERE pg_type.typname = $1 ORDER BY enumsortorder`,
+          [typ]
+        )
+      ).rows.map((r: { enumlabel: string }) => r.enumlabel);
+    expect(await enumValues('estado_dia')).toEqual(['trabajando', 'en_viaje', 'en_franco', 'periodo_fuera_trabajo']);
+    expect(await enumValues('motivo_ausencia')).toEqual([
+      'vacaciones',
+      'licencia_medica',
+      'dia_tramite',
+      'matrimonio',
+      'fallecimiento',
+      'otros',
+    ]);
+  });
 });

@@ -35,14 +35,41 @@ export async function createUser(input: CreateUserInput): Promise<CreateUserResu
 
   const admin = createAdminClient();
 
+  // FB-PI-11-B (migración 0022): el índice único profiles_email_normalizado_unique
+  // hace imposibles dos perfiles cuyo email difiera solo en mayúsculas o
+  // espacios. Se chequea ANTES de crear el usuario de Auth para devolver un
+  // error legible en es-AR y no dejar un usuario de Auth huérfano por el
+  // fallo del trigger handle_new_user (que daría un error crudo de base).
+  // ilike sin comodines = igualdad sin distinguir mayúsculas; se escapan
+  // `%`, `_` y `\`, que en un email son caracteres literales.
+  const email = input.email.trim();
+  const emailLike = email.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data: existentes, error: dupError } = await admin
+    .from('profiles')
+    .select('id')
+    .ilike('email', emailLike)
+    .limit(1);
+
+  if (dupError) return { ok: false, error: copy.gestionUsuarios.messages.createError };
+  if (existentes && existentes.length > 0) {
+    return { ok: false, error: copy.gestionUsuarios.errors.emailDuplicado };
+  }
+
   const { data, error: authError } = await admin.auth.admin.createUser({
-    email: input.email,
+    email,
     password: input.initial_password,
     email_confirm: true,
     user_metadata: { full_name: input.full_name },
   });
 
-  if (authError) return { ok: false, error: authError.message };
+  if (authError) {
+    // Carrera con otra alta del mismo email entre el chequeo y la creación:
+    // Auth lo rechaza con email_exists.
+    if (authError.code === 'email_exists') {
+      return { ok: false, error: copy.gestionUsuarios.errors.emailDuplicado };
+    }
+    return { ok: false, error: authError.message };
+  }
 
   // status explícito, no el DEFAULT 'activo' de la columna: con el gate de
   // acceso de FB-F5-08 (requireAuth() solo deja entrar a status='activo'),

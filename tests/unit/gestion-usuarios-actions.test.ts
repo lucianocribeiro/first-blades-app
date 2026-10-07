@@ -56,7 +56,10 @@ function mockSessionClient(role = 'admin', userId = 'admin-1') {
 // ─── Mock del admin client (service_role) ──────────────────────
 
 type AdminOptions = {
-  createUserError?: { message: string } | null;
+  createUserError?: { message: string; code?: string } | null;
+  // FB-PI-11-B: perfiles que ya tienen el email (sin distinguir mayúsculas).
+  emailExistente?: boolean;
+  emailLookupError?: { message: string } | null;
   updateUserByIdError?: { message: string } | null;
   profileUpdateError?: { message: string } | null;
   auditInsertError?: { message: string } | null;
@@ -74,6 +77,8 @@ function mockAdminClient(opts: AdminOptions = {}) {
     auditInsertError = null,
     targetProfileExists = true,
     updatedRows = 1,
+    emailExistente = false,
+    emailLookupError = null,
   } = opts;
 
   // El código real encadena `.update(...).eq(...)` sin `.select()` en
@@ -97,12 +102,22 @@ function mockAdminClient(opts: AdminOptions = {}) {
   });
 
   // Releer el perfil objetivo (Hallazgo 3): `.select('id').eq('id', x).maybeSingle()`.
+  // Chequeo de email duplicado del alta (FB-PI-11-B):
+  // `.select('id').ilike('email', x).limit(1)`.
+  const emailIlikeMock = vi.fn().mockReturnValue({
+    limit: vi.fn().mockResolvedValue(
+      emailLookupError
+        ? { data: null, error: emailLookupError }
+        : { data: emailExistente ? [{ id: 'existente' }] : [], error: null }
+    ),
+  });
   const profileSelectMock = vi.fn().mockReturnValue({
     eq: vi.fn().mockReturnValue({
       maybeSingle: vi.fn().mockResolvedValue(
         targetProfileExists ? { data: { id: 'target-id' }, error: null } : { data: null, error: null }
       ),
     }),
+    ilike: emailIlikeMock,
   });
 
   const auditInsertMock = vi.fn().mockResolvedValue({ error: auditInsertError });
@@ -119,6 +134,7 @@ function mockAdminClient(opts: AdminOptions = {}) {
       throw new Error(`tabla no mockeada en el test: ${table}`);
     }),
     __profileSelectMock: profileSelectMock,
+    __emailIlikeMock: emailIlikeMock,
     __profileUpdateMock: profileUpdateMock,
     __auditInsertMock: auditInsertMock,
     __createUserMock: createUserMock,
@@ -182,6 +198,69 @@ describe('createUser', () => {
     });
 
     expect(result).toEqual({ ok: false, error: 'email ya registrado' });
+  });
+
+  // FB-PI-11-B: la migración 0022 crea un índice único sobre
+  // lower(btrim(email)). Cambio de comportamiento del alta: un email que
+  // difiere solo en mayúsculas de uno existente se rechaza con copy es-AR,
+  // antes de crear el usuario de Auth (no un error crudo de base).
+  it('email existente sin distinguir mayúsculas: error es-AR, sin crear el usuario de Auth', async () => {
+    mockSessionClient('admin');
+    const admin = mockAdminClient({ emailExistente: true });
+
+    const result = await createUser({
+      email: '  Ana.Perez@Test.com ',
+      full_name: 'Ana',
+      role: 'empleado',
+      initial_password: VALID_PASSWORD,
+    });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.emailDuplicado });
+    expect(admin.__emailIlikeMock).toHaveBeenCalledWith('email', 'Ana.Perez@Test.com');
+    expect(admin.__createUserMock).not.toHaveBeenCalled();
+  });
+
+  it('escapa los comodines de ilike: `_` y `%` del email son literales', async () => {
+    mockSessionClient('admin');
+    const admin = mockAdminClient();
+
+    await createUser({
+      email: 'ana_p%1@test.com',
+      full_name: 'Ana',
+      role: 'empleado',
+      initial_password: VALID_PASSWORD,
+    });
+
+    expect(admin.__emailIlikeMock).toHaveBeenCalledWith('email', 'ana\\_p\\%1@test.com');
+  });
+
+  it('carrera: Auth responde email_exists → mismo error es-AR', async () => {
+    mockSessionClient('admin');
+    mockAdminClient({ createUserError: { message: 'A user with this email address has already been registered', code: 'email_exists' } });
+
+    const result = await createUser({
+      email: 'dup@test.com',
+      full_name: 'Dup',
+      role: 'empleado',
+      initial_password: VALID_PASSWORD,
+    });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.emailDuplicado });
+  });
+
+  it('falla la lectura del chequeo de duplicado: { ok: false } con copy es-AR, sin crear', async () => {
+    mockSessionClient('admin');
+    const admin = mockAdminClient({ emailLookupError: { message: 'db caída' } });
+
+    const result = await createUser({
+      email: 'nuevo@test.com',
+      full_name: 'Nuevo',
+      role: 'empleado',
+      initial_password: VALID_PASSWORD,
+    });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.messages.createError });
+    expect(admin.__createUserMock).not.toHaveBeenCalled();
   });
 });
 

@@ -6,6 +6,7 @@ import { copy } from '@/lib/copy';
 import { Card } from '@/components/ui/Card';
 import { CalendarioSections } from './CalendarioSections';
 import { ExportarExcelPanel } from './ExportarExcelPanel';
+import { ImportarExcelPanel } from './ImportarExcelPanel';
 import { getCurrentYearMonth, getDaysInMonth, computeMotivoDashboard } from './utils';
 import {
   computeFrancoAlerts,
@@ -66,6 +67,10 @@ function RosterView({
       {/* FB-PI-04: export a Excel, solo admin. El control real es el
           requireAdmin() de la action, no este condicional. */}
       {showExport && <ExportarExcelPanel defaultDesde={days[0]} defaultHasta={days[days.length - 1]} />}
+
+      {/* FB-PI-11: import desde Excel, solo admin. El control real es el
+          requireAdmin() de las actions y la guarda de la RPC. */}
+      {showExport && <ImportarExcelPanel />}
 
       <CalendarioSections
         year={year}
