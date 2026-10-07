@@ -16,6 +16,8 @@
 |---|---|---|
 | 2026-10-07 | Catálogo + conteos para el informe de inspección (`FB-PI-11-INSPECT.md`) | Solo lectura |
 | 2026-10-07 | Queries de esta auditoría (§2) | Solo lectura |
+| 2026-10-07 | Huérfanos Auth↔perfil y catálogo de guardas (FB-PI-11-C, §7) | Solo lectura |
+| 2026-10-07 17:27 UTC | Reverificación previa al push (§6.0) | Solo lectura |
 
 Nada más. No se aplicó la migración, no se regeneraron tipos contra `--linked`, no se escribió ninguna fila.
 
@@ -95,28 +97,160 @@ Queda registrada en el encabezado de la migración 0022, en este informe y en la
 
 ## 6. Runbook del push (lo corre Luciano) ⛔
 
-1. **Auditoría previa:** este informe. Repetir §2.1 justo antes del push si pasó tiempo o hubo altas de usuarios:
-   ```sql
-   SELECT lower(btrim(email)), count(*) FROM public.profiles GROUP BY 1 HAVING count(*) > 1;  -- esperado: 0 filas
-   ```
-2. **Push:** `supabase db push` (aplica solo 0022).
-3. **Verificación de catálogo post-push:**
-   ```sql
-   SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args,
-          pg_get_userbyid(p.proowner) AS owner, p.prosecdef, p.proconfig, p.proacl::text
-   FROM pg_proc p
-   WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('importar_calendario', 'log_audit', 'is_admin');
-   -- esperado importar_calendario: args "p_filas jsonb, p_esperado jsonb", owner postgres,
-   --   prosecdef true, proconfig {search_path=public},
-   --   proacl {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} (sin anon, sin "=X")
-   -- esperado log_audit: sin cambios ({postgres=X/postgres,service_role=X/postgres})
+> Actualizado en FB-PI-11-E, con CI verde en los tres jobs sobre la cabeza final del PR #56. Claude Code **no** ejecuta el push.
 
-   SELECT indexname, indexdef FROM pg_indexes
-   WHERE schemaname = 'public' AND tablename = 'profiles';
-   -- esperado: profiles_pkey, profiles_dni_unique, profiles_email_normalizado_unique (lower(btrim(email)))
+### 6.0 Reverificación previa (hecha el 2026-10-07 17:27 UTC, solo lectura)
+
+| Chequeo | Resultado |
+|---|---|
+| Perfiles / usuarios de Auth | 27 / 27 |
+| Grupos con la misma clave `lower(btrim(email))` | **0** |
+| Emails con espacios al borde / con mayúsculas / nulos | 0 / 0 / 0 |
+| Usuarios de Auth sin perfil / perfiles sin usuario de Auth | 0 / 0 |
+| Última migración aplicada | `0021` |
+| `importar_calendario` / `profiles_email_normalizado_unique` existen | no / no |
+| `rotation_assignments` / `audit_log` | 0 / 19 filas |
+
+→ El índice único se crea sin conflicto. **Si pasa tiempo antes del push o hay altas de usuarios en el medio, repetí la query del paso 1.**
+
+### 6.1 Pasos (desde la raíz del repo, en la rama `feat/fb-pi-11-import-calendario` actualizada)
+
+CLI: `supabase` **2.75.0**, la misma de CI y del push de 0020. El repo ya está linkeado a `simfemdkrkdbumefcxei` (`supabase/.temp/project-ref`).
+
+1. **Duplicados de email, justo antes** (SQL editor de Supabase o pedímelo y lo corro por MCP en solo lectura):
+   ```sql
+   SELECT lower(btrim(email)) AS clave, count(*)
+   FROM public.profiles
+   GROUP BY 1 HAVING count(*) > 1;
+   -- esperado: 0 filas. Si hay alguna, NO hacer el push: el CREATE UNIQUE INDEX fallaría.
    ```
-4. **`supabase migration list`:** Local = Remote hasta `0022`.
-5. **Regen de tipos, siempre:** `supabase gen types typescript --linked > supabase/types.ts`. En este PR la entrada de `importar_calendario` en `types.ts` está **agregada a mano**, siguiendo el precedente de 0020 / FB-F5-05: `Args: { p_esperado: Json; p_filas: Json }`, `Returns: Json`. La regen tiene que dar **diff cero** contra esa entrada; si no, el diff se commitea y se reporta.
+2. **Estado previo:**
+   ```bash
+   supabase migration list
+   ```
+   Esperado: `0001`–`0021` en Local y en Remote; `0022` **solo en Local**.
+3. **Ensayo sin aplicar:**
+   ```bash
+   supabase db push --dry-run
+   ```
+   Esperado: lista **solo** `0022_import_calendario.sql`. Si aparece cualquier otra, frenar.
+4. **Push:**
+   ```bash
+   supabase db push
+   ```
+   Confirmar cuando lo pregunte. Esperado: `Applying migration 0022_import_calendario.sql...` y `Finished supabase db push.`
+5. **Verificación de catálogo** (§6.2).
+6. **Estado posterior:**
+   ```bash
+   supabase migration list
+   ```
+   Esperado: `0001`–`0022` en Local **y** en Remote, sin huecos.
+7. **Regen de tipos, siempre:**
+   ```bash
+   supabase gen types typescript --linked > supabase/types.ts
+   git diff --stat supabase/types.ts
+   ```
+   Esperado: **diff cero**. La entrada de `importar_calendario` ya está en el PR, agregada a mano siguiendo el precedente de 0020 / FB-F5-05: `Args: { p_esperado: Json; p_filas: Json }`, `Returns: Json`. Si hay diff, se commitea el archivo regenerado (es la fuente de verdad), se corre `npm run typecheck` y se reporta qué cambió.
+
+### 6.2 Queries de verificación de catálogo (para copiar)
+
+```sql
+-- a) La función nueva: firma, owner, SECURITY DEFINER, search_path, grants.
+SELECT p.proname,
+       pg_get_function_identity_arguments(p.oid) AS args,
+       pg_get_function_result(p.oid)             AS ret,
+       pg_get_userbyid(p.proowner)               AS owner,
+       p.prosecdef,
+       p.proconfig,
+       p.proacl::text
+FROM pg_proc p
+WHERE p.pronamespace = 'public'::regnamespace
+  AND p.proname = 'importar_calendario';
+-- Esperado (1 fila):
+--   args      = p_filas jsonb, p_esperado jsonb
+--   ret       = jsonb
+--   owner     = postgres
+--   prosecdef = true
+--   proconfig = {search_path=public}
+--   proacl    = {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+--               (SIN anon=X y SIN "=X/postgres", que sería PUBLIC)
+
+-- b) Privilegios efectivos (independiente de cómo se escriba el ACL).
+SELECT has_function_privilege('authenticated', 'public.importar_calendario(jsonb,jsonb)', 'EXECUTE') AS authenticated,
+       has_function_privilege('anon',          'public.importar_calendario(jsonb,jsonb)', 'EXECUTE') AS anon,
+       has_function_privilege('public',        'public.importar_calendario(jsonb,jsonb)', 'EXECUTE') AS public;
+-- Esperado: true | false | false
+
+-- c) La guarda afirmativa quedó aplicada (no la versión por negación).
+SELECT pg_get_functiondef('public.importar_calendario(jsonb,jsonb)'::regprocedure) ~ 'is_admin\(\) IS NOT TRUE' AS guarda_afirmativa;
+-- Esperado: true
+
+-- d) Mismo owner que los helpers de RLS.
+SELECT p.proname, pg_get_userbyid(p.proowner) AS owner
+FROM pg_proc p
+WHERE p.pronamespace = 'public'::regnamespace
+  AND p.proname IN ('importar_calendario', 'is_admin', 'auth_role', 'log_audit');
+-- Esperado: postgres en las cuatro.
+
+-- e) log_audit sigue cerrada (0022 no la toca).
+SELECT p.proacl::text FROM pg_proc p
+WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'log_audit';
+-- Esperado: {postgres=X/postgres,service_role=X/postgres}
+
+-- f) El índice único.
+SELECT i.indisunique, pg_get_indexdef(i.indexrelid) AS def
+FROM pg_index i
+JOIN pg_class c ON c.oid = i.indexrelid
+WHERE c.relname = 'profiles_email_normalizado_unique';
+-- Esperado (1 fila): indisunique = true,
+--   def = CREATE UNIQUE INDEX profiles_email_normalizado_unique ON public.profiles USING btree (lower(btrim(email)))
+
+-- g) Delta puro: nada más cambió en rotation_assignments ni en los datos.
+SELECT (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.rotation_assignments'::regclass AND NOT tgisinternal) AS triggers,
+       (SELECT count(*) FROM public.rotation_assignments) AS filas_calendario,
+       (SELECT count(*) FROM public.audit_log) AS filas_audit;
+-- Esperado: 0 | 0 | 19 (o lo que haya en el momento: el push no escribe datos)
+```
+
+Si me pasás la salida del push, corro yo las queries (a)–(g) por MCP en solo lectura y documento el resultado en `FB-PI-11-RUN-VERIF`.
+
+### 6.3 Si el push falla a mitad
+
+**Qué es atómico.** La CLI aplica cada archivo de migración como **un batch transaccional**, junto con el `INSERT` en `supabase_migrations.schema_migrations`. 0022 no tiene ninguna sentencia no transaccional: no usa `CREATE INDEX CONCURRENTLY`, ni `VACUUM`, ni `ALTER TYPE … ADD VALUE`. Por eso, si cualquier sentencia falla (el índice por un duplicado, un error de sintaxis, un timeout), **se revierte el archivo entero**: ni el índice, ni la función, ni el registro de la versión. Producción queda exactamente como antes, en `0021`.
+
+**Qué hacer:**
+
+1. **No reintentar a ciegas.** Guardar la salida completa del error.
+2. **Confirmar el estado real**, sin suponerlo (solo lectura):
+   ```sql
+   SELECT max(version) FROM supabase_migrations.schema_migrations;                                  -- esperado tras un fallo: 0021
+   SELECT count(*) FROM pg_proc    WHERE proname   = 'importar_calendario';                          -- esperado: 0
+   SELECT count(*) FROM pg_indexes WHERE indexname = 'profiles_email_normalizado_unique';            -- esperado: 0
+   ```
+3. **Según lo que muestren:**
+   - **Todo en 0 y versión `0021`** (el caso esperado): no hay nada que revertir. Se diagnostica la causa, se corrige el archivo en el PR (eso vuelve a auditoría si toca la migración) y se repite el runbook desde el paso 1.
+   - **Si la causa fue un email duplicado:** se corrige el dato **antes** de repetir. Decidir cuál perfil queda es decisión de Luciano. No se cambia la migración.
+   - **Estado mixto** (no debería ocurrir; indicaría que el batch no fue transaccional): frenar y avisar antes de tocar nada. La reversión manual está en el bloque siguiente.
+
+**Reversión manual** (solo si hay que deshacer 0022 ya aplicada, total o parcialmente; lo decide Luciano):
+
+```sql
+BEGIN;
+DROP FUNCTION IF EXISTS public.importar_calendario(jsonb, jsonb);
+DROP INDEX    IF EXISTS public.profiles_email_normalizado_unique;
+COMMIT;
+```
+```bash
+# Solo si 0022 quedó registrada en schema_migrations:
+supabase migration repair --status reverted 0022
+supabase migration list   # 0022 vuelve a aparecer solo en Local
+```
+
+Ninguno de los dos objetos tiene dependientes en producción: la app todavía no llama a la función y el índice no tiene FKs. La reversión no toca datos. Si para entonces ya se importó algo, las filas de `rotation_assignments` y de `audit_log` **quedan**: borrar la función no deshace un import, y el `audit_log` es la bitácora.
+
+### 6.4 Después del push
+
+Verificación de catálogo documentada → regen de tipos → **merge autorizado por Luciano** → recién ahí, la carga del historial de 3 meses desde la app. Después, la migración aparte de las 9 funciones (`recfamWK93drsaCiQ`).
 
 ## 7. Correcciones de FB-PI-11-C (hallazgos de `FB-PI-AUD-11`)
 
