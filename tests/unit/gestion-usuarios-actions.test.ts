@@ -56,9 +56,15 @@ function mockSessionClient(role = 'admin', userId = 'admin-1') {
 // ─── Mock del admin client (service_role) ──────────────────────
 
 type AdminOptions = {
-  createUserError?: { message: string } | null;
+  createUserError?: { message: string; code?: string } | null;
+  // FB-PI-11-B/C: perfiles que ya existen (el chequeo de duplicado los lee
+  // todos y compara la clave del índice). `perfilesTrasCrear`: lo que ve una
+  // segunda lectura (simula un alta concurrente entre el chequeo y Auth).
+  perfiles?: { id: string; email: string }[];
+  perfilesTrasCrear?: { id: string; email: string }[];
+  emailLookupError?: { message: string } | null;
   updateUserByIdError?: { message: string } | null;
-  profileUpdateError?: { message: string } | null;
+  profileUpdateError?: { message: string; code?: string } | null;
   auditInsertError?: { message: string } | null;
   // FB-F5-09 Hallazgo 3: existencia del perfil objetivo y filas afectadas
   // por el update — ambos simulables para probar el hardening.
@@ -74,6 +80,9 @@ function mockAdminClient(opts: AdminOptions = {}) {
     auditInsertError = null,
     targetProfileExists = true,
     updatedRows = 1,
+    perfiles = [{ id: 'p-otro', email: 'otro@test.com' }],
+    perfilesTrasCrear,
+    emailLookupError = null,
   } = opts;
 
   // El código real encadena `.update(...).eq(...)` sin `.select()` en
@@ -97,12 +106,22 @@ function mockAdminClient(opts: AdminOptions = {}) {
   });
 
   // Releer el perfil objetivo (Hallazgo 3): `.select('id').eq('id', x).maybeSingle()`.
+  // Chequeo de email duplicado del alta (FB-PI-11-C): lectura paginada de
+  // todos los perfiles — `.select('id, email').order('id').range(a, b)`.
+  let lecturasPerfiles = 0;
+  const perfilesRangeMock = vi.fn((from: number, to: number) => {
+    if (from === 0) lecturasPerfiles++;
+    if (emailLookupError) return Promise.resolve({ data: null, error: emailLookupError });
+    const fuente = lecturasPerfiles > 1 && perfilesTrasCrear ? perfilesTrasCrear : perfiles;
+    return Promise.resolve({ data: fuente.slice(from, to + 1), error: null });
+  });
   const profileSelectMock = vi.fn().mockReturnValue({
     eq: vi.fn().mockReturnValue({
       maybeSingle: vi.fn().mockResolvedValue(
         targetProfileExists ? { data: { id: 'target-id' }, error: null } : { data: null, error: null }
       ),
     }),
+    order: vi.fn().mockReturnValue({ range: perfilesRangeMock }),
   });
 
   const auditInsertMock = vi.fn().mockResolvedValue({ error: auditInsertError });
@@ -119,6 +138,7 @@ function mockAdminClient(opts: AdminOptions = {}) {
       throw new Error(`tabla no mockeada en el test: ${table}`);
     }),
     __profileSelectMock: profileSelectMock,
+    __perfilesRangeMock: perfilesRangeMock,
     __profileUpdateMock: profileUpdateMock,
     __auditInsertMock: auditInsertMock,
     __createUserMock: createUserMock,
@@ -182,6 +202,87 @@ describe('createUser', () => {
     });
 
     expect(result).toEqual({ ok: false, error: 'email ya registrado' });
+  });
+
+  // FB-PI-11-B/C: la migración 0022 crea un índice único sobre
+  // lower(btrim(email)). Cambio de comportamiento del alta: un email con la
+  // misma clave que uno existente se rechaza con copy es-AR, antes de crear
+  // el usuario de Auth (no un error crudo de base). La clave es EXACTAMENTE
+  // la del índice (normalizarEmail), también sobre el valor almacenado.
+  it.each([
+    ['mayúsculas en el input', 'Ana.Perez@Test.com', 'ana.perez@test.com'],
+    ['espacios en el input', '  ana.perez@test.com ', 'ana.perez@test.com'],
+    ['mayúsculas y espacios en el valor ALMACENADO', 'ana.perez@test.com', '  Ana.Perez@TEST.com '],
+  ])('email duplicado por la clave del índice (%s): error es-AR, sin crear el usuario de Auth', async (_c, input, almacenado) => {
+    mockSessionClient('admin');
+    const admin = mockAdminClient({ perfiles: [{ id: 'p-ana', email: almacenado }] });
+
+    const result = await createUser({ email: input, full_name: 'Ana', role: 'empleado', initial_password: VALID_PASSWORD });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.emailDuplicado });
+    expect(admin.__createUserMock).not.toHaveBeenCalled();
+  });
+
+  it('un tab NO es espacio para btrim: misma decisión que el índice (no es duplicado)', async () => {
+    mockSessionClient('admin');
+    const admin = mockAdminClient({ perfiles: [{ id: 'p-ana', email: 'ana@test.com\t' }] });
+
+    const result = await createUser({ email: 'ana@test.com', full_name: 'Ana', role: 'empleado', initial_password: VALID_PASSWORD });
+
+    expect(result).toEqual({ ok: true, id: 'new-user-id' });
+    expect(admin.__createUserMock).toHaveBeenCalled();
+  });
+
+  it('lee TODOS los perfiles paginando (fetchAllRows), no solo la primera página', async () => {
+    mockSessionClient('admin');
+    const muchos = Array.from({ length: 1500 }, (_, i) => ({ id: `p-${i}`, email: `u${i}@test.com` }));
+    const admin = mockAdminClient({ perfiles: [...muchos, { id: 'p-ultimo', email: 'Tarde@Test.com' }] });
+
+    const result = await createUser({ email: 'tarde@test.com', full_name: 'T', role: 'empleado', initial_password: VALID_PASSWORD });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.emailDuplicado });
+    expect(admin.__perfilesRangeMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('carrera: Auth responde email_exists → mismo error es-AR', async () => {
+    mockSessionClient('admin');
+    mockAdminClient({ createUserError: { message: 'A user with this email address has already been registered', code: 'email_exists' } });
+
+    const result = await createUser({ email: 'dup@test.com', full_name: 'Dup', role: 'empleado', initial_password: VALID_PASSWORD });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.emailDuplicado });
+  });
+
+  it('carrera: el trigger choca con el índice y Auth devuelve un error genérico de base → se re-chequea la clave → error es-AR', async () => {
+    mockSessionClient('admin');
+    mockAdminClient({
+      perfiles: [],
+      perfilesTrasCrear: [{ id: 'p-concurrente', email: 'DUP@test.com' }],
+      createUserError: { message: 'Database error creating new user', code: 'unexpected_failure' },
+    });
+
+    const result = await createUser({ email: 'dup@test.com', full_name: 'Dup', role: 'empleado', initial_password: VALID_PASSWORD });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.emailDuplicado });
+  });
+
+  it('violación de unicidad (23505) al completar el perfil → error es-AR, no el crudo de base', async () => {
+    mockSessionClient('admin');
+    mockAdminClient({ profileUpdateError: { message: 'duplicate key value violates unique constraint "profiles_email_normalizado_unique"', code: '23505' } });
+
+    const result = await createUser({ email: 'nuevo@test.com', full_name: 'N', role: 'empleado', initial_password: VALID_PASSWORD });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.errors.emailDuplicado });
+  });
+
+  it('falla la lectura del chequeo de duplicado: { ok: false } con copy es-AR, sin crear', async () => {
+    mockSessionClient('admin');
+    const admin = mockAdminClient({ emailLookupError: { message: 'db caída' } });
+
+    const result = await createUser({ email: 'nuevo@test.com', full_name: 'Nuevo', role: 'empleado', initial_password: VALID_PASSWORD });
+
+    expect(result).toEqual({ ok: false, error: copy.gestionUsuarios.messages.createError });
+    expect(admin.__createUserMock).not.toHaveBeenCalled();
   });
 });
 
