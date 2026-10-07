@@ -64,14 +64,18 @@ El índice nuevo es `UNIQUE (lower(btrim(email)))`. Si hubiera dos perfiles que 
 | Molde §6.1 | `SECURITY DEFINER` · `SET search_path = public` · guarda `auth.uid() IS NULL OR NOT is_admin()` → `42501` · `REVOKE ALL … FROM PUBLIC` · `REVOKE ALL … FROM anon` · `GRANT EXECUTE … TO authenticated` |
 | Auditoría | Solo `PERFORM public.log_audit(...)`, sin `INSERT` directo a `audit_log` (el drift detector lo verifica sobre `pg_get_functiondef`) |
 | Atomicidad | Una llamada = una transacción, sin loteo. Cualquier `RAISE` o error de cast revierte todo |
-| Concurrencia | `LOCK TABLE rotation_assignments IN SHARE ROW EXCLUSIVE MODE`, recálculo del plan dentro de la transacción y `40001` si los conteos no coinciden con `p_esperado` |
+| Concurrencia | `LOCK TABLE rotation_assignments IN SHARE ROW EXCLUSIVE MODE`, recálculo del plan dentro de la transacción y SQLSTATE propio `FBC01` si los conteos no coinciden con `p_esperado` (ver nota abajo) |
 | Validación en la base | Email resuelve a exactamente un empleado o supervisor activo · sin `(email, fecha)` repetido · rango ≤ 366 días · forma estado/motivo/detalle/notas (la base no tiene CHECK para eso) · detalle ≤ 80 · casts de fecha y enums |
 | Escritura | Por conjunto: un `INSERT … ON CONFLICT (user_id, fecha) DO UPDATE` para crear y modificar, un `DELETE` para borrar. Las filas sin cambios no se tocan. `es_estimado = fecha > hoy (AR)` |
 | No toca | `ausencia_requests`, `pasaje_requests`, tablas, columnas, enums, RLS |
 
+### Nota: por qué `FBC01` y no `40001`
+
+La primera versión abortaba con `40001` (serialization_failure). En CI, el test de concurrencia **se colgó** (timeout de 30 s): PostgREST trata la clase 40 como transitoria y **reintenta la transacción sin fin**. Es un bug conocido de PostgREST 14, corregido en 16 ([Supabase: infinite transaction retries con 40001 en RPC](https://supabase.com/docs/guides/troubleshooting/high-cpu-and-infinite-transaction-retries-when-using-custom-error-codes-in-rpc-functions-77326b)). Producción corre PostgREST 14.x (`supabase/types.ts`: `PostgrestVersion: "14.15"`), así que el bucle con CPU alta habría pasado en producción en cada confirmación desactualizada. Se cambió a un SQLSTATE propio fuera de la clase 40 (`FBC01`), que PostgREST no reintenta y devuelve tal cual en `error.code`. El test de integración lo cubre: la RPC responde con `FBC01` y no deja nada escrito.
+
 ### Verificación local antes de CI
 
-No hay Docker en la máquina de desarrollo. La función se ejecutó en **PGlite** (Postgres 17 en WASM) contra un stub mínimo de las tablas involucradas: guardas (sin sesión y empleado → `42501`), cada validación (`22023`/`22P02`/`22008`), aborto por conteos (`40001`) con la tabla intacta, escritura y auditoría híbrida (1 resumen + 1 por día pisado, la solicitud intacta), ida y vuelta sin diferencias, 2300 filas en ~70 ms y reimportadas en ~100 ms, e índice → `23505`. La verificación que vale es la de CI, contra Supabase local con todas las migraciones (`tests/integration/calendario-import.test.ts` y `migration.test.ts`).
+No hay Docker en la máquina de desarrollo. La función se ejecutó en **PGlite** (Postgres 17 en WASM) contra un stub mínimo de las tablas involucradas: guardas (sin sesión y empleado → `42501`), cada validación (`22023`/`22P02`/`22008`), aborto por conteos con la tabla intacta, escritura y auditoría híbrida (1 resumen + 1 por día pisado, la solicitud intacta), ida y vuelta sin diferencias, 2300 filas en ~70 ms y reimportadas en ~100 ms, e índice → `23505`. La verificación que vale es la de CI, contra Supabase local con todas las migraciones (`tests/integration/calendario-import.test.ts` y `migration.test.ts`).
 
 ## 4. Cambio de comportamiento del alta de usuarios (decisión 3)
 

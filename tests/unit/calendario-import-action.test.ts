@@ -337,7 +337,7 @@ describe('confirmarImportCalendario: la previsualización no se puede saltear', 
   });
 
   it.each([
-    ['40001 (el calendario cambió dentro de la transacción)', { message: 'cambió', code: '40001' }, { ok: false, error: E.desactualizado, desactualizado: true }],
+    ['FBC01 (el calendario cambió dentro de la transacción)', { message: 'cambió', code: 'FBC01' }, { ok: false, error: E.desactualizado, desactualizado: true }],
     ['42501 (guarda de admin)', { message: 'no', code: '42501' }, { ok: false, error: E.escritura }],
     ['22023 (validación de la RPC)', { message: 'fila', code: '22023' }, { ok: false, error: E.escritura }],
   ])('error de la RPC %s: se lee como valor y se traduce, sin revalidar', async (_c, rpcError, expected) => {

@@ -245,7 +245,8 @@ export async function confirmarImportCalendario(formData: FormData): Promise<Con
 
   if (error) {
     console.error('[confirmarImportCalendario] error de la RPC:', error.code, error.message);
-    if (error.code === '40001') return { ok: false, error: E.desactualizado, desactualizado: true };
+    // FBC01: SQLSTATE propio de 0022 (no 40001, que PostgREST reintenta).
+    if (error.code === 'FBC01') return { ok: false, error: E.desactualizado, desactualizado: true };
     return { ok: false, error: E.escritura };
   }
 

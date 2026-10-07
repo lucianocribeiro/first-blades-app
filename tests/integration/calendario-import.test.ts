@@ -23,7 +23,8 @@
  *  4. Atomicidad: una fila inválida en el lote → nada escrito, nada
  *     auditado.
  *  5. Concurrencia: si el calendario cambió desde la previsualización, la
- *     RPC aborta (40001) sin escribir.
+ *     RPC aborta (SQLSTATE propio FBC01, no 40001: PostgREST reintenta la
+ *     clase 40 sin fin) sin escribir — y responde, no se cuelga.
  *  6. Límite de rol: empleado, supervisor y anon no pueden importar.
  *  7. Matcheo de email sin distinguir mayúsculas/espacios; admin, inactivo
  *     e inexistente rechazados también en la base.
@@ -343,7 +344,7 @@ describe.skipIf(!dbAvailable)('import del calendario: atomicidad y concurrencia 
     expect(await snapshotCalendario()).toEqual([]);
   });
 
-  it('el calendario cambió entre la previsualización y la confirmación → 40001, nada escrito', async () => {
+  it('el calendario cambió entre la previsualización y la confirmación → FBC01, nada escrito (sin reintentos de PostgREST)', async () => {
     await limpiar();
     const archivo = await editar(await exportar(), { [`${EMP1}|${dia(-20)}`]: { estado: L.trabajando } });
     const { validacion, plan } = await previsualizar(archivo);
@@ -354,7 +355,7 @@ describe.skipIf(!dbAvailable)('import del calendario: atomicidad y concurrencia 
     const antes = await snapshotCalendario();
 
     const { error } = await confirmar(validacion.filas, plan!.conteos);
-    expect(error?.code).toBe('40001');
+    expect(error?.code).toBe('FBC01');
     expect(await snapshotCalendario()).toEqual(antes);
     expect(await contarAudit('calendario_importado')).toBe(0);
   });

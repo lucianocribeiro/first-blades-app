@@ -1368,6 +1368,16 @@ describe.skipIf(!dbAvailable)('migraciones 0001+0002+0003+0004: aplican limpias 
     expect(rows[0].def).not.toMatch(/INSERT INTO public\.audit_log/i);
   });
 
+  it("importar_calendario: el aborto por previsualización desactualizada NO usa la clase 40 (PostgREST 14 la reintenta sin fin) — usa FBC01 (0022)", async () => {
+    const { rows } = await client.query(`
+      SELECT pg_get_functiondef(p.oid) AS def
+      FROM pg_proc p
+      WHERE p.proname = 'importar_calendario' AND p.pronamespace = 'public'::regnamespace
+    `);
+    expect(rows[0].def).toMatch(/ERRCODE = 'FBC01'/);
+    expect(rows[0].def).not.toMatch(/ERRCODE = '40/);
+  });
+
   it('log_audit() sigue cerrada tras 0022: sin EXECUTE para authenticated/anon/PUBLIC', async () => {
     const { rows } = await client.query(`
       SELECT

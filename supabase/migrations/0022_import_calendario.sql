@@ -286,7 +286,12 @@ BEGIN
   -- ─── Concurrencia (decisión 1): la previsualización es una foto ───────
   -- Si entre la foto y la confirmación cambió algo, los conteos no
   -- coinciden y no se escribe nada: el admin vuelve a previsualizar.
-  -- 40001 (serialization_failure): la app lo traduce a ese mensaje.
+  -- SQLSTATE propio FBC01 ("First Blades, calendario cambió"): la app lo
+  -- traduce a ese mensaje. NO 40001 (serialization_failure): PostgREST 14
+  -- toma la clase 40 como transitoria y reintenta la transacción sin fin
+  -- (bug conocido, corregido en PostgREST 16 — ver
+  -- docs/audits/FB-PI-11-SCHEMA-PREPUSH.md §3). Este aborto es
+  -- determinístico: reintentarlo es un bucle infinito.
   IF (p_esperado ->> 'crear')::int       IS DISTINCT FROM v_crear
      OR (p_esperado ->> 'modificar')::int   IS DISTINCT FROM v_modificar
      OR (p_esperado ->> 'borrar')::int      IS DISTINCT FROM v_borrar
@@ -294,7 +299,7 @@ BEGIN
      OR (p_esperado ->> 'pisados')::int     IS DISTINCT FROM v_pisados THEN
     RAISE EXCEPTION 'El calendario cambió desde la previsualización (esperado %, actual crear=% modificar=% borrar=% sin_cambios=% pisados=%)',
       p_esperado, v_crear, v_modificar, v_borrar, v_sin_cambios, v_pisados
-      USING ERRCODE = '40001';
+      USING ERRCODE = 'FBC01';
   END IF;
 
   -- ─── audit_log por-día: SOLO los días pisados (antes de escribir, con
