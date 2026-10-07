@@ -14,7 +14,7 @@
 // (hasta +18 meses en calendario-celda-estimada), así que esta spec no pisa
 // días de otras. Limpia su rango antes y después.
 import { test, expect } from '@playwright/test';
-import { login, credentialsFor, resolveUserId, seedRotationAssignment, clearRotationAssignments } from './helpers';
+import { login, credentialsFor, resolveUserId, seedRotationAssignment, clearRotationAssignments, abrirSeccionExcel } from './helpers';
 import { createAdminClient } from '../../lib/supabase/admin';
 import { buildCalendarioWorkbook } from '../../lib/rotation/calendario-excel';
 import { copy } from '../../lib/copy';
@@ -80,6 +80,8 @@ test.describe('Calendario: import desde Excel', () => {
 
     await login(page, 'admin');
     await page.goto('/calendario');
+    // FB-PI-12: el panel vive en un bloque colapsable, cerrado al cargar.
+    await abrirSeccionExcel(page);
     await expect(page.getByRole('heading', { name: t.panel.title })).toBeVisible();
 
     await page.getByLabel(t.panel.archivo).setInputFiles(
@@ -119,6 +121,8 @@ test.describe('Calendario: import desde Excel', () => {
   test('con errores de validación la confirmación queda bloqueada y no se escribe nada', async ({ page }) => {
     await login(page, 'admin');
     await page.goto('/calendario');
+    // FB-PI-12: el panel vive en un bloque colapsable, cerrado al cargar.
+    await abrirSeccionExcel(page);
 
     await page.getByLabel(t.panel.archivo).setInputFiles(
       await archivo('nadie@firstblades.test', [{ fecha: D1, estado: 'trabajando' }])
@@ -138,6 +142,8 @@ test.describe('Calendario: import desde Excel', () => {
       await page.goto('/calendario');
 
       await expect(page.getByRole('heading', { name: copy.calendario.title }).first()).toBeVisible();
+      // FB-PI-12: tampoco reciben el bloque colapsable.
+      await expect(page.getByRole('button', { name: copy.calendario.excel.seccion.title })).toHaveCount(0);
       await expect(page.getByRole('heading', { name: t.panel.title })).toHaveCount(0);
       await expect(page.getByRole('button', { name: t.panel.previsualizar, exact: true })).toHaveCount(0);
     });

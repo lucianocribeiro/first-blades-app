@@ -987,6 +987,11 @@ export const copy = {
     // estado/motivo de acá son las que lee el import (FB-PI-05) — el mapeo
     // etiqueta↔enum vive en lib/rotation/calendario-excel-mapping.ts.
     excel: {
+      // FB-PI-12: bloque colapsable que agrupa export e import (solo admin).
+      seccion: {
+        title:    'Importar / Exportar Excel',
+        subtitle: 'Descargá el calendario para completarlo fuera de la app y volvé a subirlo para aplicar los cambios.',
+      },
       panel: {
         title:    'Exportar a Excel',
         subtitle: 'Descargá el calendario de los empleados y supervisores activos para completarlo fuera de la app.',

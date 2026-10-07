@@ -315,3 +315,23 @@ export async function seedApprovedPasaje(opts: {
   if (error || !data) throw new Error(`[e2e] no se pudo sembrar el pasaje aprobado: ${error?.message}`);
   return data.id;
 }
+
+// FB-PI-12: los paneles de export e import de Excel viven dentro de un
+// bloque colapsable que SIEMPRE arranca cerrado. Este helper verifica que
+// está cerrado (encabezado con aria-expanded="false" y sin paneles) y lo
+// abre. Con `teclado: true` lo abre con foco + Enter, sin mouse.
+export async function abrirSeccionExcel(page: Page, opts: { teclado?: boolean } = {}): Promise<void> {
+  const header = page.getByRole('button', { name: copy.calendario.excel.seccion.title });
+  await expect(header).toBeVisible();
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('heading', { name: copy.calendario.excel.panel.title })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: copy.calendario.excel.importar.panel.title })).toHaveCount(0);
+
+  if (opts.teclado) {
+    await header.focus();
+    await page.keyboard.press('Enter');
+  } else {
+    await header.click();
+  }
+  await expect(header).toHaveAttribute('aria-expanded', 'true');
+}

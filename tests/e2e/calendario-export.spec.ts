@@ -11,7 +11,7 @@
 // Solo lectura: no escribe nada en la base, así que no pisa otras specs.
 import { test, expect } from '@playwright/test';
 import ExcelJS from 'exceljs';
-import { login, credentialsFor, exactLabel } from './helpers';
+import { login, credentialsFor, exactLabel, abrirSeccionExcel } from './helpers';
 import { createAdminClient } from '../../lib/supabase/admin';
 import { copy } from '../../lib/copy';
 
@@ -35,6 +35,8 @@ test.describe('Calendario: export a Excel', () => {
   test('admin exporta un rango y se descarga el .xlsx', async ({ page }) => {
     await login(page, 'admin');
     await page.goto('/calendario');
+    // FB-PI-12: el panel vive en un bloque colapsable, cerrado al cargar.
+    await abrirSeccionExcel(page);
 
     await expect(page.getByRole('heading', { name: t.title })).toBeVisible();
     await page.getByLabel(exactLabel(t.desde)).fill(DESDE);
@@ -68,6 +70,8 @@ test.describe('Calendario: export a Excel', () => {
   test('rango invertido: mensaje es-AR, sin descarga', async ({ page }) => {
     await login(page, 'admin');
     await page.goto('/calendario');
+    // FB-PI-12: esta vez abierto con teclado (foco + Enter).
+    await abrirSeccionExcel(page, { teclado: true });
 
     await page.getByLabel(exactLabel(t.desde)).fill(HASTA);
     await page.getByLabel(exactLabel(t.hasta)).fill(DESDE);
@@ -83,6 +87,8 @@ test.describe('Calendario: export a Excel', () => {
       await page.goto('/calendario');
 
       await expect(page.getByRole('heading', { name: copy.calendario.title }).first()).toBeVisible();
+      // FB-PI-12: tampoco reciben el bloque colapsable.
+      await expect(page.getByRole('button', { name: copy.calendario.excel.seccion.title })).toHaveCount(0);
       await expect(page.getByRole('heading', { name: t.title })).toHaveCount(0);
       await expect(page.getByRole('button', { name: t.exportar, exact: true })).toHaveCount(0);
     });
