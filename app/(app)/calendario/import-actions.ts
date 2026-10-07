@@ -48,9 +48,11 @@ const E = copy.calendario.excel.importar.errores;
 // toca): un año entero de la nómina actual pesa ~216 KB (INSPECT §6).
 const MAX_IMPORT_BYTES = 1_000_000;
 
-// Topes de lo que viaja a la pantalla. Los conteos son siempre completos.
-const MAX_ERRORES_PREVIEW = 200;
-const MAX_LISTA_PREVIEW = 500;
+// Sin topes en lo que viaja a la pantalla (FB-PI-AUD-11, hallazgo 3): una
+// lista cortada en silencio parece completa y el admin confirmaría sobre
+// días que nunca vio — la misma familia que el truncado de PostgREST de
+// FB-PI-05. Los datos ya están en memoria y el tope de 366 días × la nómina
+// los acota (una fila de preview pesa ~150 bytes).
 
 export type DiaPreview = {
   fila: number;
@@ -155,7 +157,7 @@ async function prepararImport(supabase: Supabase, file: unknown): Promise<Prepar
     desde: validacion.desde,
     hasta: validacion.hasta,
     totalFilas: parsed.rows.length,
-    errores: validacion.errores.slice(0, MAX_ERRORES_PREVIEW),
+    errores: validacion.errores,
     erroresTotal: validacion.errores.length,
   };
 
@@ -181,8 +183,8 @@ async function prepararImport(supabase: Supabase, file: unknown): Promise<Prepar
     preview: {
       ...base,
       conteos: plan.conteos,
-      borrados: plan.filas.filter((f) => f.accion === 'borrar').slice(0, MAX_LISTA_PREVIEW).map(aDiaPreview),
-      pisados: plan.filas.filter((f) => f.pisado).slice(0, MAX_LISTA_PREVIEW).map(aDiaPreview),
+      borrados: plan.filas.filter((f) => f.accion === 'borrar').map(aDiaPreview),
+      pisados: plan.filas.filter((f) => f.pisado).map(aDiaPreview),
       saldo: calcularImpactoSaldo(plan.filas, contexto.diasTramite),
     },
   };

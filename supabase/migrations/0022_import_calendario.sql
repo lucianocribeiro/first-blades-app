@@ -12,6 +12,9 @@
 -- 0 emails con mayúsculas o espacios, 0 nulos. No existe ninguna función
 -- importar_calendario ni índice profiles_email_normalizado_unique.
 --
+-- FB-PI-11-C (re-auditoría FB-PI-AUD-11): guarda afirmativa
+-- (is_admin() IS NOT TRUE), ventana de fechas revalidada en la base.
+--
 -- Delta real de esta migración:
 --   1. Índice único profiles_email_normalizado_unique sobre
 --      lower(btrim(email)) — la clave de identificación del import (PRD §3).
@@ -101,10 +104,14 @@ DECLARE
   v_fecha       DATE;
   v_dia         RECORD;
 BEGIN
-  -- Guarda de admin (§6.1). auth.uid() IS NULL se chequea explícito:
-  -- is_admin() da NULL (no false) sin sesión, y `IF NOT NULL` no dispara
-  -- el RAISE en plpgsql.
-  IF auth.uid() IS NULL OR NOT public.is_admin() THEN
+  -- Guarda de admin (§6.1, §12.6: NULL = no-admin), AFIRMATIVA: solo se
+  -- continúa si is_admin() es exactamente TRUE. No `NOT is_admin()`: sin
+  -- perfil (JWT authenticated cuyo sub no está en profiles, p. ej. un
+  -- usuario purgado con el token todavía vigente) is_admin() da NULL,
+  -- `NOT NULL` es NULL y el RAISE no dispararía (FB-PI-AUD-11, hallazgo 1).
+  -- `IS NOT TRUE` cubre FALSE y NULL; auth.uid() IS NULL queda explícito
+  -- para el caso sin sesión.
+  IF auth.uid() IS NULL OR public.is_admin() IS NOT TRUE THEN
     RAISE EXCEPTION 'Solo un administrador puede importar el calendario'
       USING ERRCODE = '42501';
   END IF;
@@ -166,6 +173,17 @@ BEGIN
   FROM jsonb_to_recordset(v_entrada) AS x(fecha DATE);
   IF v_hasta - v_desde + 1 > 366 THEN
     RAISE EXCEPTION 'El rango del lote (% a %) supera los 366 días', v_desde, v_hasta USING ERRCODE = '22023';
+  END IF;
+
+  -- Ventana razonable de fechas (INSPECT D6), mismos límites que la app
+  -- (lib/rotation/calendario-import.ts: FECHA_MIN_IMPORT y hoy + 2 años).
+  -- La RPC es el control autoritativo: lo que solo valida la app se
+  -- saltea invocando la RPC directo (FB-PI-AUD-11, hallazgo 2).
+  IF v_desde < DATE '2020-01-01' THEN
+    RAISE EXCEPTION 'El lote tiene fechas anteriores a 2020-01-01 (%)', v_desde USING ERRCODE = '22023';
+  END IF;
+  IF v_hasta > (v_hoy + INTERVAL '2 years')::date THEN
+    RAISE EXCEPTION 'El lote tiene fechas posteriores a hoy + 2 años (%)', v_hasta USING ERRCODE = '22023';
   END IF;
 
   -- Cada email resuelve a EXACTAMENTE un perfil, y ese perfil está en el

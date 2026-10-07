@@ -5,6 +5,8 @@ import { requireAdmin } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validatePassword } from '@/lib/password';
 import { copy } from '@/lib/copy';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
+import { normalizarEmail } from '@/lib/normalizar-email';
 import type { UserRole } from '@/lib/roles';
 
 // Contrato return-based (constitución §2.5): nunca throw para un error
@@ -18,6 +20,22 @@ export type CreateUserResult = { ok: true; id: string } | { ok: false; error: st
 // procedimientos/actions.ts, FB-F5-AUD-05 Hallazgo 3). El contrato { ok }
 // aplica a partir de ahí, a los errores de negocio de una llamada ya
 // autorizada.
+
+const UNIQUE_VIOLATION = '23505';
+
+// true / false, o null si la lectura falló (ya logueada por fetchAllRows).
+async function existeEmailNormalizado(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string
+): Promise<boolean | null> {
+  const { data, error } = await fetchAllRows(
+    () => admin.from('profiles').select('id, email').order('id', { ascending: true }),
+    { label: '[createUser] chequeo de email duplicado:' }
+  );
+  if (error) return null;
+  const clave = normalizarEmail(email);
+  return (data as { email: string }[]).some((p) => normalizarEmail(p.email) === clave);
+}
 
 export type CreateUserInput = {
   email: string;
@@ -35,25 +53,18 @@ export async function createUser(input: CreateUserInput): Promise<CreateUserResu
 
   const admin = createAdminClient();
 
-  // FB-PI-11-B (migración 0022): el índice único profiles_email_normalizado_unique
-  // hace imposibles dos perfiles cuyo email difiera solo en mayúsculas o
-  // espacios. Se chequea ANTES de crear el usuario de Auth para devolver un
-  // error legible en es-AR y no dejar un usuario de Auth huérfano por el
-  // fallo del trigger handle_new_user (que daría un error crudo de base).
-  // ilike sin comodines = igualdad sin distinguir mayúsculas; se escapan
-  // `%`, `_` y `\`, que en un email son caracteres literales.
+  // FB-PI-11-B / FB-PI-11-C (migración 0022): el índice único
+  // profiles_email_normalizado_unique hace imposibles dos perfiles con la
+  // misma clave lower(btrim(email)). Se chequea ANTES de crear el usuario de
+  // Auth, con EXACTAMENTE esa clave (normalizarEmail, la misma que usa el
+  // import), para devolver un error legible en es-AR en vez del error crudo
+  // de base que daría el trigger handle_new_user. PostgREST no filtra por
+  // una expresión, así que se comparan las claves de todos los perfiles
+  // (nómina chica; fetchAllRows por si crece).
   const email = input.email.trim();
-  const emailLike = email.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const { data: existentes, error: dupError } = await admin
-    .from('profiles')
-    .select('id')
-    .ilike('email', emailLike)
-    .limit(1);
-
-  if (dupError) return { ok: false, error: copy.gestionUsuarios.messages.createError };
-  if (existentes && existentes.length > 0) {
-    return { ok: false, error: copy.gestionUsuarios.errors.emailDuplicado };
-  }
+  const duplicado = await existeEmailNormalizado(admin, email);
+  if (duplicado === null) return { ok: false, error: copy.gestionUsuarios.messages.createError };
+  if (duplicado) return { ok: false, error: copy.gestionUsuarios.errors.emailDuplicado };
 
   const { data, error: authError } = await admin.auth.admin.createUser({
     email,
@@ -63,9 +74,11 @@ export async function createUser(input: CreateUserInput): Promise<CreateUserResu
   });
 
   if (authError) {
-    // Carrera con otra alta del mismo email entre el chequeo y la creación:
-    // Auth lo rechaza con email_exists.
-    if (authError.code === 'email_exists') {
+    // Colisión de unicidad entre el chequeo y la creación (otra alta
+    // concurrente): Auth responde email_exists, o el trigger choca con el
+    // índice y Auth lo devuelve como un error genérico de base. En los dos
+    // casos, si la clave ya existe, es un duplicado → copy es-AR.
+    if (authError.code === 'email_exists' || (await existeEmailNormalizado(admin, email))) {
       return { ok: false, error: copy.gestionUsuarios.errors.emailDuplicado };
     }
     return { ok: false, error: authError.message };
@@ -85,7 +98,10 @@ export async function createUser(input: CreateUserInput): Promise<CreateUserResu
     })
     .eq('id', data.user.id);
 
-  if (profileError) return { ok: false, error: profileError.message };
+  if (profileError) {
+    if (profileError.code === UNIQUE_VIOLATION) return { ok: false, error: copy.gestionUsuarios.errors.emailDuplicado };
+    return { ok: false, error: profileError.message };
+  }
 
   revalidatePath('/gestion-usuarios');
   return { ok: true, id: data.user.id };

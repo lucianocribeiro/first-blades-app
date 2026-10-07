@@ -61,11 +61,11 @@ El índice nuevo es `UNIQUE (lower(btrim(email)))`. Si hubiera dos perfiles que 
 |---|---|
 | Índice | `CREATE UNIQUE INDEX profiles_email_normalizado_unique ON public.profiles (lower(btrim(email)))` |
 | Función | `public.importar_calendario(p_filas jsonb, p_esperado jsonb) RETURNS jsonb` |
-| Molde §6.1 | `SECURITY DEFINER` · `SET search_path = public` · guarda `auth.uid() IS NULL OR NOT is_admin()` → `42501` · `REVOKE ALL … FROM PUBLIC` · `REVOKE ALL … FROM anon` · `GRANT EXECUTE … TO authenticated` |
+| Molde §6.1 | `SECURITY DEFINER` · `SET search_path = public` · guarda **afirmativa** `auth.uid() IS NULL OR is_admin() IS NOT TRUE` → `42501` (NULL = no-admin; corregido en FB-PI-11-C) · `REVOKE ALL … FROM PUBLIC` · `REVOKE ALL … FROM anon` · `GRANT EXECUTE … TO authenticated` |
 | Auditoría | Solo `PERFORM public.log_audit(...)`, sin `INSERT` directo a `audit_log` (el drift detector lo verifica sobre `pg_get_functiondef`) |
 | Atomicidad | Una llamada = una transacción, sin loteo. Cualquier `RAISE` o error de cast revierte todo |
 | Concurrencia | `LOCK TABLE rotation_assignments IN SHARE ROW EXCLUSIVE MODE`, recálculo del plan dentro de la transacción y SQLSTATE propio `FBC01` si los conteos no coinciden con `p_esperado` (ver nota abajo) |
-| Validación en la base | Email resuelve a exactamente un empleado o supervisor activo · sin `(email, fecha)` repetido · rango ≤ 366 días · forma estado/motivo/detalle/notas (la base no tiene CHECK para eso) · detalle ≤ 80 · casts de fecha y enums |
+| Validación en la base | Email resuelve a exactamente un empleado o supervisor activo · sin `(email, fecha)` repetido · rango ≤ 366 días · ventana `2020-01-01` a hoy + 2 años (FB-PI-11-C) · forma estado/motivo/detalle/notas (la base no tiene CHECK para eso) · detalle ≤ 80 · casts de fecha y enums |
 | Escritura | Por conjunto: un `INSERT … ON CONFLICT (user_id, fecha) DO UPDATE` para crear y modificar, un `DELETE` para borrar. Las filas sin cambios no se tocan. `es_estimado = fecha > hoy (AR)` |
 | No toca | `ausencia_requests`, `pasaje_requests`, tablas, columnas, enums, RLS |
 
@@ -117,3 +117,21 @@ Queda registrada en el encabezado de la migración 0022, en este informe y en la
    ```
 4. **`supabase migration list`:** Local = Remote hasta `0022`.
 5. **Regen de tipos, siempre:** `supabase gen types typescript --linked > supabase/types.ts`. En este PR la entrada de `importar_calendario` en `types.ts` está **agregada a mano**, siguiendo el precedente de 0020 / FB-F5-05: `Args: { p_esperado: Json; p_filas: Json }`, `Returns: Json`. La regen tiene que dar **diff cero** contra esa entrada; si no, el diff se commitea y se reporta.
+
+## 7. Correcciones de FB-PI-11-C (hallazgos de `FB-PI-AUD-11`)
+
+| # | Hallazgo | Corrección | Prueba |
+|---|---|---|---|
+| 1 (bloqueante) | La guarda `NOT is_admin()` dejaba pasar `is_admin()` NULL (JWT `authenticated` sin perfil) | Guarda afirmativa: `auth.uid() IS NULL OR is_admin() IS NOT TRUE`. Verificado en PGlite: con la guarda vieja, un `sub` sin perfil **importaba**; con la nueva, `42501` | Integración: JWT sin perfil → `42501` por PostgREST y por Postgres directo, nada escrito |
+| 2 | La RPC no revalidaba la ventana de fechas | `v_desde < 2020-01-01` o `v_hasta > hoy + 2 años` → `22023`. La app calcula hoy + 2 años igual que Postgres (`sumarAnios`: 29/02 → 28/02) | Integración: cada límite rechazado llamando a la RPC directo; los bordes son válidos |
+| 3 | `borrados` y `pisados` se cortaban en 500 sin aviso | Sin topes: las listas viajan completas, también los errores, y se recorren con scroll dentro de cada bloque | Unit: 600 borrados y 600 pisados vuelven completos |
+| 4 | El test del `40001` era textual | Se reemplazó por la ruta de aborto **ejercitada** contra Postgres directo (código `FBC01`, nunca clase 40), además del test por PostgREST | Integración |
+| 5 | El alta no usaba la normalización del índice | `lib/normalizar-email.ts`: espejo exacto de `lower(btrim())`, que **solo recorta espacios**, no tabs (el `trim()` anterior no era equivalente). Lo usan el alta y el import. El alta compara la clave contra todos los perfiles (`fetchAllRows`), mapea `email_exists`, el error genérico del trigger (re-chequeando la clave) y `23505` a `emailDuplicado` | Unit (mayúsculas y espacios en input y en valor almacenado, tab, paginación, carreras, `23505`) + integración (paridad contra `lower(btrim())` de Postgres real) |
+
+### Hallazgo 1, fuera de 0022: el mismo patrón en 9 funciones ya en producción
+
+`IF auth.uid() IS NULL OR NOT public.is_admin()` está en **9 funciones vivas** (catálogo de producción, solo lectura): `resolver_ausencia_request`, `resolver_pasaje_request`, `cancelar_editar_ausencia_aprobada`, `cancelar_editar_pasaje_aprobado`, `crear_aprobar_ausencia_admin`, `crear_aprobar_pasaje_admin`, `crear_procedimiento`, `actualizar_procedimiento` y `archivar_procedimiento` (0013–0020).
+
+- **Hoy no es explotable:** hay 0 usuarios de Auth sin perfil, y `handle_new_user` crea el perfil en cada alta.
+- **Ventana real:** un usuario purgado (perfil y Auth borrados, como en FB-PI-06) cuyo JWT siga vigente, hasta 1 h. Durante esa ventana podría invocar esas RPCs de admin.
+- **No se tocó:** esas funciones no son parte de este trabajo, y corregirlas amplía el alcance de 0022. Queda como decisión de Luciano: sumarlas a 0022 antes del push, o hacer una migración aparte.

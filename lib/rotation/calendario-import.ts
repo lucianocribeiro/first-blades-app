@@ -19,6 +19,7 @@
 import ExcelJS from 'exceljs';
 import { copy } from '@/lib/copy';
 import { getBusinessToday } from '@/lib/business-date';
+import { normalizarEmail } from '@/lib/normalizar-email';
 import type { EmployeeStatus, EstadoDia, MotivoAusencia, PostAprobacionTipo, UserRole } from '@/lib/db-types';
 import { CALENDARIO_EXCEL_COLUMNS, type CalendarioExcelColumnKey } from './calendario-excel';
 import {
@@ -47,11 +48,9 @@ export const MAX_FILAS_IMPORT = 50_000;
 
 // ─── Normalización (espejo de 0022) ──────────────────────────────────────
 
-// Mismo criterio que el índice profiles_email_normalizado_unique:
-// lower(btrim(email)).
-export function normalizarEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
+// Clave del índice profiles_email_normalizado_unique, lower(btrim(email)):
+// la misma función que usa el alta de usuarios (lib/normalizar-email.ts).
+export { normalizarEmail };
 
 // btrim + vacío = NULL, igual que NULLIF(btrim(x), '') en la RPC.
 export function normalizarTexto(value: string | null | undefined): string | null {
@@ -203,8 +202,13 @@ export type ValidacionImport = {
   hasta: string | null;
 };
 
-function sumarAnios(fecha: string, anios: number): string {
-  return `${Number(fecha.slice(0, 4)) + anios}${fecha.slice(4)}`;
+// Igual que (fecha + INTERVAL 'n years')::date en Postgres (límite que
+// revalida la RPC): un 29/02 que cae en año no bisiesto pasa a 28/02.
+export function sumarAnios(fecha: string, anios: number): string {
+  const y = Number(fecha.slice(0, 4)) + anios;
+  const md = fecha.slice(5);
+  const bisiesto = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  return `${y}-${md === '02-29' && !bisiesto ? '02-28' : md}`;
 }
 
 export function validarFilasImport(
@@ -228,6 +232,9 @@ export function validarFilasImport(
     const errs: string[] = [];
 
     // Email: existe, es único y está en el alcance del export (decisión 2).
+    // Dos pasos distintos: normalizarTexto limpia la CELDA (Excel puede
+    // dejar tabs o saltos de línea al pegar); normalizarEmail produce la
+    // clave del índice, la misma con la que se indexan los perfiles arriba.
     const emailTexto = normalizarTexto(raw.email);
     let profile: ImportProfile | null = null;
     if (!emailTexto) {

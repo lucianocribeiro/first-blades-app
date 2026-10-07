@@ -30,13 +30,17 @@
  *     e inexistente rechazados también en la base.
  *  8. Volumen realista: ~2300 filas en una sola llamada, dentro del
  *     statement_timeout (8 s en producción).
+ *  9. FB-PI-11-C (FB-PI-AUD-11): JWT authenticated SIN perfil rechazado
+ *     (guarda afirmativa); ventana de fechas revalidada en la base; la ruta
+ *     de aborto ejercitada contra Postgres directo (código FBC01, nunca de
+ *     la clase 40); paridad de normalizarEmail con lower(btrim()).
  */
 
 import { Client } from 'pg';
 import ExcelJS from 'exceljs';
 import { createClient } from '@supabase/supabase-js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { setupTestDb, storageClientForUser, IDS } from './helpers';
+import { setupTestDb, storageClientForUser, IDS, DB_URL } from './helpers';
 import { fetchCalendarioExportData } from '@/lib/rotation/calendario-export';
 import { buildCalendarioWorkbook } from '@/lib/rotation/calendario-excel';
 import {
@@ -44,12 +48,14 @@ import {
   calcularPlanImport,
   filasParaRpc,
   parseCalendarioWorkbook,
+  sumarAnios,
   validarFilasImport,
   type ImportConteos,
   type ImportRow,
 } from '@/lib/rotation/calendario-import';
 import { fetchImportContext, fetchImportProfiles } from '@/lib/rotation/calendario-import-data';
 import { getBusinessToday } from '@/lib/business-date';
+import { normalizarEmail } from '@/lib/normalizar-email';
 import { copy } from '@/lib/copy';
 
 type XlsxInput = Parameters<ExcelJS.Xlsx['load']>[0];
@@ -480,4 +486,89 @@ describe.skipIf(!dbAvailable)('import del calendario: volumen realista (DB-backe
     expect(error2).toBeNull();
     expect(await snapshotCalendario()).toEqual(antes);
   }, 120_000);
+});
+
+describe.skipIf(!dbAvailable)('import del calendario: FB-PI-11-C — hallazgos de FB-PI-AUD-11 (DB-backed)', () => {
+  const fila = (email: string, fecha: string) => ({ email, fecha, estado_dia: 'trabajando', motivo_ausencia: null, motivo_otros_texto: null, notas: null });
+  const UNO = { crear: 1, modificar: 0, borrar: 0, sin_cambios: 0, pisados: 0 };
+
+  /** Conexión directa a Postgres (sin PostgREST) como `authenticated` con el sub dado. */
+  async function rpcDirecta(sub: string, filas: unknown[], esperado: unknown): Promise<{ code?: string }> {
+    const c = new Client({ connectionString: DB_URL });
+    await c.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query(`SELECT set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub, role: 'authenticated' })]);
+      await c.query('SET LOCAL ROLE authenticated');
+      try {
+        await c.query('SELECT public.importar_calendario($1::jsonb, $2::jsonb)', [JSON.stringify(filas), JSON.stringify(esperado)]);
+        return {};
+      } catch (err) {
+        return { code: (err as { code?: string }).code };
+      }
+    } finally {
+      await c.query('ROLLBACK').catch(() => undefined);
+      await c.end();
+    }
+  }
+
+  // Hallazgo 1 (bloqueante): con la guarda por negación, is_admin() NULL
+  // (sub sin perfil) dejaba pasar. Ahora la condición es afirmativa.
+  it('JWT authenticated SIN perfil (p. ej. usuario purgado con token vigente): 42501 por PostgREST y por Postgres directo, nada escrito', async () => {
+    await limpiar();
+    const sinPerfil = 'dead0000-0000-0000-0000-000000000000';
+    const { rows } = await db.query(`SELECT count(*)::int AS n FROM profiles WHERE id = $1`, [sinPerfil]);
+    expect(rows[0].n).toBe(0);
+
+    const { error } = await confirmar([fila(EMP1, dia(-20))] as never, UNO, sinPerfil);
+    expect(error?.code).toBe('42501');
+
+    expect(await rpcDirecta(sinPerfil, [fila(EMP1, dia(-20))], UNO)).toEqual({ code: '42501' });
+
+    expect(await snapshotCalendario()).toEqual([]);
+    expect(await contarAudit('calendario_importado')).toBe(0);
+  });
+
+  // Hallazgo 2: la ventana la revalida la base, no solo la app.
+  it.each([
+    ['anterior a 2020-01-01', '2019-12-31'],
+    ['posterior a hoy + 2 años', (() => {
+      const max = sumarAnios(HOY, 2);
+      const [y, m, d] = max.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d) + 86_400_000).toISOString().slice(0, 10);
+    })()],
+  ])('fecha %s llamando a la RPC directo (saltea la app): 22023, nada escrito', async (_c, fecha) => {
+    await limpiar();
+    const { error } = await confirmar([fila(EMP1, fecha)] as never, UNO);
+    expect(error?.code).toBe('22023');
+    expect(await snapshotCalendario()).toEqual([]);
+  });
+
+  it('los bordes de la ventana (2020-01-01 y hoy + 2 años) son válidos', async () => {
+    await limpiar();
+    const { error: e1 } = await confirmar([fila(EMP1, '2020-01-01')] as never, UNO);
+    expect(e1).toBeNull();
+    const { error: e2 } = await confirmar([fila(EMP2, sumarAnios(HOY, 2))] as never, UNO);
+    expect(e2).toBeNull();
+    expect(await snapshotCalendario()).toHaveLength(2);
+  });
+
+  // Hallazgo 4: la ruta de aborto, ejercitada (no el texto del SQL). Contra
+  // Postgres directo, sin PostgREST de por medio, así el código que se
+  // verifica es el que levanta la función — cualquiera sea la sintaxis.
+  it('previsualización desactualizada: la función aborta con FBC01, nunca con la clase 40 (PostgREST 14 la reintenta sin fin)', async () => {
+    await limpiar();
+    const res = await rpcDirecta(IDS.admin, [fila(EMP1, dia(-20))], { ...UNO, crear: 0, sin_cambios: 1 });
+    expect(res.code).toBe('FBC01');
+    expect(res.code?.startsWith('40')).toBe(false);
+    expect(await snapshotCalendario()).toEqual([]);
+  });
+
+  // Hallazgo 5: la normalización de la app es la del índice, comprobada
+  // contra Postgres real (no contra lo que creemos que hace btrim).
+  it('normalizarEmail coincide con lower(btrim(email)) de Postgres', async () => {
+    const muestras = ['ana@test.com', '  Ana@Test.COM  ', 'ANA@TEST.COM', '\tana@test.com', 'ana@test.com\n', ' \t ana@test.com', 'a.b+c_d%e@sub.test.com '];
+    const { rows } = await db.query(`SELECT x, lower(btrim(x)) AS clave FROM unnest($1::text[]) AS x`, [muestras]);
+    for (const r of rows) expect(normalizarEmail(r.x)).toBe(r.clave);
+  });
 });

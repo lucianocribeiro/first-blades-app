@@ -1098,8 +1098,6 @@ export const copy = {
             aviso:      'Con errores no se puede confirmar. Corregí el archivo y volvé a subirlo.',
             ninguno:    'Sin errores de validación.',
             archivo:    'Archivo',
-            mostrando:  'Se muestran los primeros',
-            de:         'de',
           },
           columnas: {
             fila:       'Fila',

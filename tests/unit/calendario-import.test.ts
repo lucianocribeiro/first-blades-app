@@ -20,6 +20,7 @@ import {
   filasParaRpc,
   normalizarEmail,
   parseCalendarioWorkbook,
+  sumarAnios,
   validarFilasImport,
   type CurrentAssignment,
   type ImportProfile,
@@ -200,8 +201,21 @@ describe('validarFilasImport', () => {
     expect(v.hasta).toBe('2026-07-01');
   });
 
-  it('normalizarEmail: mismo criterio que el índice lower(btrim(email))', () => {
+  it('normalizarEmail: mismo criterio que el índice lower(btrim(email)) — btrim recorta SOLO espacios', () => {
     expect(normalizarEmail('  Ana@FB.Test ')).toBe('ana@fb.test');
+    expect(normalizarEmail('\tana@fb.test\n')).toBe('\tana@fb.test\n');
+  });
+
+  it('una celda de email con tab o salto de línea (pegado desde Excel) se limpia y matchea', () => {
+    const v = validarFilasImport([raw({ email: 'ana@fb.test\t\n' })], PROFILES, TODAY);
+    expect(v.errores).toEqual([]);
+    expect(v.filas[0].user_id).toBe('u-ana');
+  });
+
+  it('sumarAnios: igual que (fecha + INTERVAL) en Postgres, 29/02 → 28/02 en año no bisiesto', () => {
+    expect(sumarAnios('2026-10-07', 2)).toBe('2028-10-07');
+    expect(sumarAnios('2024-02-29', 2)).toBe('2026-02-28');
+    expect(sumarAnios('2024-02-29', 4)).toBe('2028-02-29');
   });
 
   it.each([

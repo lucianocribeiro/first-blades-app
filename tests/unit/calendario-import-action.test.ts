@@ -237,6 +237,30 @@ describe('previsualizarImportCalendario', () => {
     expect(result.preview.pisados).toEqual([esperadoDia]);
   });
 
+  it('listas largas (> 500) vuelven COMPLETAS: sin truncado silencioso (FB-PI-AUD-11, hallazgo 3)', async () => {
+    // 2 empleados × 300 días con asignación; el archivo los trae vacíos →
+    // 600 días a borrar, todos dentro de una ausencia aprobada → 600 pisados.
+    const dias = Array.from({ length: 300 }, (_, i) => new Date(Date.UTC(2026, 0, 1) + i * 86_400_000).toISOString().slice(0, 10));
+    const actuales = ['u-ana', 'u-beto'].flatMap((user_id) =>
+      dias.map((fecha) => ({ id: `${user_id}-${fecha}`, user_id, fecha, estado_dia: 'trabajando', motivo_ausencia: null, motivo_otros_texto: null, notas: null, es_estimado: false }))
+    );
+    mockClient({
+      role: 'admin',
+      actuales,
+      ausencias: ['u-ana', 'u-beto'].map((user_id) => ({ id: `aus-${user_id}`, user_id, fecha_inicio: dias[0], fecha_fin: dias[299], post_aprobacion_tipo: null })),
+    });
+    const buffer = await buildCalendarioWorkbook({ ...EXPORT_DATA, assignments: [] }, dias[0], dias[299]);
+    const file = new File([new Uint8Array(buffer)], 'calendario.xlsx');
+
+    const result = await previsualizarImportCalendario(form({ file }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.preview.conteos).toMatchObject({ borrar: 600, pisados: 600 });
+    expect(result.preview.borrados).toHaveLength(600);
+    expect(result.preview.pisados).toHaveLength(600);
+  });
+
   it('con errores de validación: devuelve los errores con fila y sin conteos (no hay qué confirmar)', async () => {
     mockClient({ role: 'admin' });
     const file = await archivoExportado({

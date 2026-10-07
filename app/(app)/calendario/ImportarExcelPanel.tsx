@@ -37,27 +37,35 @@ function Bloque({ titulo, children, tono = 'normal' }: { titulo: string; childre
   );
 }
 
+// Listas completas, nunca recortadas (FB-PI-AUD-11, hallazgo 3): si son
+// largas, se recorren con scroll dentro del bloque.
+function Scroll({ children }: { children: React.ReactNode }) {
+  return <div className="max-h-96 overflow-y-auto">{children}</div>;
+}
+
 function TablaDias({ dias, conSolicitud }: { dias: DiaPreview[]; conSolicitud: boolean }) {
   const c = p.columnas;
   return (
-    <Table
-      rows={dias}
-      keyExtractor={(d) => `${d.fila}`}
-      columns={[
-        { key: 'fila', header: c.fila, render: (d) => d.fila },
-        { key: 'empleado', header: c.empleado, render: (d) => d.nombre },
-        { key: 'fecha', header: c.fecha, render: (d) => d.fecha },
-        { key: 'actual', header: c.actual, render: (d) => estadoLabel(d.actual) },
-        { key: 'nuevo', header: c.nuevo, render: (d) => estadoLabel(d.nuevo) },
-        ...(conSolicitud
-          ? [{
-              key: 'solicitud',
-              header: c.solicitud,
-              render: (d: DiaPreview) => d.solicitudes.map((s) => p.pisados[s.tipo]).join(', '),
-            }]
-          : []),
-      ]}
-    />
+    <Scroll>
+      <Table
+        rows={dias}
+        keyExtractor={(d) => `${d.fila}`}
+        columns={[
+          { key: 'fila', header: c.fila, render: (d) => d.fila },
+          { key: 'empleado', header: c.empleado, render: (d) => d.nombre },
+          { key: 'fecha', header: c.fecha, render: (d) => d.fecha },
+          { key: 'actual', header: c.actual, render: (d) => estadoLabel(d.actual) },
+          { key: 'nuevo', header: c.nuevo, render: (d) => estadoLabel(d.nuevo) },
+          ...(conSolicitud
+            ? [{
+                key: 'solicitud',
+                header: c.solicitud,
+                render: (d: DiaPreview) => d.solicitudes.map((s) => p.pisados[s.tipo]).join(', '),
+              }]
+            : []),
+        ]}
+      />
+    </Scroll>
   );
 }
 
@@ -186,23 +194,20 @@ export function ImportarExcelPanel() {
           </div>
 
           {/* Bloque: errores de validación (bloquean la confirmación) */}
-          <Bloque titulo={p.errores.titulo} tono={conErrores ? 'alerta' : 'normal'}>
+          <Bloque titulo={conErrores ? `${p.errores.titulo} (${preview.erroresTotal})` : p.errores.titulo} tono={conErrores ? 'alerta' : 'normal'}>
             {conErrores ? (
               <>
                 <p className="text-sm text-error font-medium">{p.errores.aviso}</p>
-                {preview.erroresTotal > preview.errores.length && (
-                  <p className="text-xs text-neutral">
-                    {p.errores.mostrando} {preview.errores.length} {p.errores.de} {preview.erroresTotal}.
-                  </p>
-                )}
-                <Table
-                  rows={preview.errores}
-                  keyExtractor={(e) => `${e.fila}-${e.mensaje}`}
-                  columns={[
-                    { key: 'fila', header: c.fila, render: (e) => e.fila ?? p.errores.archivo },
-                    { key: 'motivo', header: c.motivo, render: (e) => e.mensaje },
-                  ]}
-                />
+                <Scroll>
+                  <Table
+                    rows={preview.errores}
+                    keyExtractor={(e) => `${e.fila}-${e.mensaje}`}
+                    columns={[
+                      { key: 'fila', header: c.fila, render: (e) => e.fila ?? p.errores.archivo },
+                      { key: 'motivo', header: c.motivo, render: (e) => e.mensaje },
+                    ]}
+                  />
+                </Scroll>
               </>
             ) : (
               <p className="text-sm text-neutral">{p.errores.ninguno}</p>
@@ -257,26 +262,28 @@ export function ImportarExcelPanel() {
               <Bloque titulo={p.saldo.titulo} tono={preview.saldo.some((s) => s.excedido) ? 'alerta' : 'normal'}>
                 <p className="text-sm text-secondary">{p.saldo.aviso}</p>
                 {preview.saldo.length > 0 ? (
-                  <Table
-                    rows={preview.saldo}
-                    keyExtractor={(s) => `${s.employeeId}-${s.anio}`}
-                    columns={[
-                      { key: 'empleado', header: c.empleado, render: (s) => s.nombre || s.email },
-                      { key: 'anio', header: c.anio, render: (s) => s.anio },
-                      { key: 'antes', header: c.antes, render: (s) => s.antes },
-                      {
-                        key: 'despues',
-                        header: c.despues,
-                        render: (s) => (
-                          <span className={s.excedido ? 'text-error font-semibold' : ''}>
-                            {s.despues}
-                            {s.excedido && ` · ${p.saldo.excedido}`}
-                          </span>
-                        ),
-                      },
-                      { key: 'tope', header: c.tope, render: (s) => s.tope },
-                    ]}
-                  />
+                  <Scroll>
+                    <Table
+                      rows={preview.saldo}
+                      keyExtractor={(s) => `${s.employeeId}-${s.anio}`}
+                      columns={[
+                        { key: 'empleado', header: c.empleado, render: (s) => s.nombre || s.email },
+                        { key: 'anio', header: c.anio, render: (s) => s.anio },
+                        { key: 'antes', header: c.antes, render: (s) => s.antes },
+                        {
+                          key: 'despues',
+                          header: c.despues,
+                          render: (s) => (
+                            <span className={s.excedido ? 'text-error font-semibold' : ''}>
+                              {s.despues}
+                              {s.excedido && ` · ${p.saldo.excedido}`}
+                            </span>
+                          ),
+                        },
+                        { key: 'tope', header: c.tope, render: (s) => s.tope },
+                      ]}
+                    />
+                  </Scroll>
                 ) : (
                   <p className="text-sm text-neutral">{p.saldo.ninguno}</p>
                 )}
