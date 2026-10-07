@@ -553,6 +553,36 @@ describe.skipIf(!dbAvailable)('import del calendario: FB-PI-11-C — hallazgos d
     expect(await snapshotCalendario()).toHaveLength(2);
   });
 
+  // FB-PI-AUD-11-B (hallazgo único): el tope de 366 días de la RPC, probado
+  // contra la base y no solo en la app. Las dos fechas están DENTRO de la
+  // ventana [2020-01-01, hoy + 2 años], así que lo único que puede
+  // rechazarlas es el tope de duración. Se verificó que este test se pone
+  // ROJO si se saca `v_hasta - v_desde + 1 > 366` de la función (FB-PI-11-E).
+  it('rango de 367 días llamando a la RPC directo (saltea la app): 22023 y NINGUNA fila escrita, ni auditoría', async () => {
+    await limpiar();
+    const desde = dia(-366);
+    const hasta = dia(0); // 367 días contando ambos extremos
+    expect(desde >= '2020-01-01' && hasta <= sumarAnios(HOY, 2)).toBe(true);
+
+    const { error } = await confirmar([fila(EMP1, desde), fila(EMP1, hasta)] as never, { ...UNO, crear: 2 });
+
+    expect(error?.code).toBe('22023');
+    expect(await snapshotCalendario()).toEqual([]);
+    expect(await contarAudit('calendario_importado')).toBe(0);
+  });
+
+  it('borde válido: 366 días exactos pasan y se escriben las dos filas', async () => {
+    await limpiar();
+    const desde = dia(-365);
+    const hasta = dia(0); // 366 días contando ambos extremos
+
+    const { error } = await confirmar([fila(EMP1, desde), fila(EMP1, hasta)] as never, { ...UNO, crear: 2 });
+
+    expect(error).toBeNull();
+    const { rows } = await db.query(`SELECT fecha::text AS fecha FROM rotation_assignments ORDER BY fecha`);
+    expect(rows.map((r) => r.fecha)).toEqual([desde, hasta]);
+  });
+
   // Hallazgo 4: la ruta de aborto, ejercitada (no el texto del SQL). Contra
   // Postgres directo, sin PostgREST de por medio, así el código que se
   // verifica es el que levanta la función — cualquiera sea la sintaxis.

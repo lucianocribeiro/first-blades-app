@@ -171,9 +171,7 @@ BEGIN
 
   SELECT min(x.fecha), max(x.fecha), count(*) INTO v_desde, v_hasta, v_total
   FROM jsonb_to_recordset(v_entrada) AS x(fecha DATE);
-  IF v_hasta - v_desde + 1 > 366 THEN
-    RAISE EXCEPTION 'El rango del lote (% a %) supera los 366 días', v_desde, v_hasta USING ERRCODE = '22023';
-  END IF;
+  -- MUTANTE FB-PI-11-E: validación de 366 días REMOVIDA a propósito (probe, no mergear).
 
   -- Ventana razonable de fechas (INSPECT D6), mismos límites que la app
   -- (lib/rotation/calendario-import.ts: FECHA_MIN_IMPORT y hoy + 2 años).
