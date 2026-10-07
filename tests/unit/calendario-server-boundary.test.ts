@@ -35,6 +35,7 @@ import CalendarioPage from '@/app/(app)/calendario/page';
 import { CalendarioSections } from '@/app/(app)/calendario/CalendarioSections';
 import { ExportarExcelPanel } from '@/app/(app)/calendario/ExportarExcelPanel';
 import { ImportarExcelPanel } from '@/app/(app)/calendario/ImportarExcelPanel';
+import { ExcelImportExportSection } from '@/app/(app)/calendario/ExcelImportExportSection';
 import { copy } from '@/lib/copy';
 
 // FB-F3-11: page.tsx lee la cookie de colapsado con `await cookies()`
@@ -171,7 +172,9 @@ type ElementLike = { type?: unknown; props?: Record<string, unknown> };
 // que le llegan ya alcanzan para verificar el branch de rol sin necesidad
 // de bajar más. ExportarExcelPanel (FB-PI-04) es la otra: también usa
 // hooks, y se la busca por tipo sin renderizarla. ImportarExcelPanel
-// (FB-PI-11), igual.
+// (FB-PI-11), igual. ExcelImportExportSection (FB-PI-12) también usa hooks:
+// no se invoca, pero se baja por sus children (los paneles se los pasa
+// page.tsx), así los tests de los paneles siguen encontrándolos.
 function findElement(node: unknown, type: unknown): ElementLike | undefined {
   if (!node) return undefined;
   if (Array.isArray(node)) {
@@ -185,6 +188,9 @@ function findElement(node: unknown, type: unknown): ElementLike | undefined {
   const el = node as ElementLike;
   if (el.type === type) return el;
   if (el.type === CalendarioSections || el.type === ExportarExcelPanel || el.type === ImportarExcelPanel) return undefined;
+  if (el.type === ExcelImportExportSection) {
+    return findElement((el.props as { children?: unknown } | undefined)?.children, type);
+  }
   if (typeof el.type === 'function') {
     const rendered = (el.type as (props: unknown) => unknown)(el.props);
     return findElement(rendered, type);
@@ -567,5 +573,35 @@ describe('CalendarioPage: panel de import desde Excel por rol', () => {
     const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
 
     expect(findElement(result, ImportarExcelPanel)).toBeUndefined();
+  });
+});
+
+// FB-PI-12: los dos paneles de Excel viven dentro de un bloque colapsable,
+// solo para admin. Supervisor y empleado no reciben ni el bloque.
+describe('CalendarioPage: bloque colapsable de Importar / Exportar Excel por rol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('admin: el bloque existe y contiene los dos paneles', async () => {
+    mockProfileRole('admin');
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    const section = findElement(result, ExcelImportExportSection);
+    expect(section).toBeTruthy();
+    const children = (section?.props as { children?: unknown }).children;
+    expect(findElement(children, ExportarExcelPanel)).toBeTruthy();
+    expect(findElement(children, ImportarExcelPanel)).toBeTruthy();
+  });
+
+  it.each(['supervisor', 'empleado'] as const)('%s: NO recibe el bloque', async (role) => {
+    mockProfileRole(role);
+    mockEmptyProfilesQuery();
+
+    const result = await CalendarioPage({ searchParams: Promise.resolve({}) });
+
+    expect(findElement(result, ExcelImportExportSection)).toBeUndefined();
   });
 });

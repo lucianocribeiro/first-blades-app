@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { CalendarioSections } from './CalendarioSections';
 import { ExportarExcelPanel } from './ExportarExcelPanel';
 import { ImportarExcelPanel } from './ImportarExcelPanel';
+import { ExcelImportExportSection } from './ExcelImportExportSection';
 import { getCurrentYearMonth, getDaysInMonth, computeMotivoDashboard } from './utils';
 import {
   computeFrancoAlerts,
@@ -64,13 +65,17 @@ function RosterView({
         <p className="text-sm text-neutral mt-0.5">{copy.calendario.subtitle}</p>
       </div>
 
-      {/* FB-PI-04: export a Excel, solo admin. El control real es el
-          requireAdmin() de la action, no este condicional. */}
-      {showExport && <ExportarExcelPanel defaultDesde={days[0]} defaultHasta={days[days.length - 1]} />}
-
-      {/* FB-PI-11: import desde Excel, solo admin. El control real es el
-          requireAdmin() de las actions y la guarda de la RPC. */}
-      {showExport && <ImportarExcelPanel />}
+      {/* FB-PI-04 / FB-PI-11 / FB-PI-12: export e import de Excel, solo
+          admin, dentro de un bloque colapsable cerrado por defecto.
+          Supervisor y empleado no reciben ni el bloque. El control real es
+          el requireAdmin() de las actions y la guarda de la RPC, no este
+          condicional. */}
+      {showExport && (
+        <ExcelImportExportSection>
+          <ExportarExcelPanel defaultDesde={days[0]} defaultHasta={days[days.length - 1]} />
+          <ImportarExcelPanel />
+        </ExcelImportExportSection>
+      )}
 
       <CalendarioSections
         year={year}
