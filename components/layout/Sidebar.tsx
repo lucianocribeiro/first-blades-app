@@ -93,7 +93,10 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
     return pathname === href || pathname.startsWith(href + '/');
   }
 
-  const sidebarContent = (
+  // closeOnNavigate: sólo el drawer mobile se cierra al navegar (tapa el
+  // contenido). En desktop el sidebar queda abierto y se colapsa únicamente
+  // con la hamburguesa.
+  const renderSidebarContent = (closeOnNavigate: boolean) => (
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="flex items-center justify-center h-16 bg-white shrink-0 px-4">
@@ -132,7 +135,7 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
             <Link
               key={item.key}
               href={item.href}
-              onClick={onClose}
+              onClick={closeOnNavigate ? onClose : undefined}
               className={[
                 'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
                 active
@@ -176,7 +179,7 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
           open ? 'w-60' : 'w-0 overflow-hidden',
         ].join(' ')}
       >
-        {sidebarContent}
+        {renderSidebarContent(false)}
       </aside>
 
       {/* Mobile drawer */}
@@ -188,7 +191,7 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
             aria-hidden="true"
           />
           <aside className="relative z-10 w-60 bg-secondary h-full flex flex-col">
-            {sidebarContent}
+            {renderSidebarContent(true)}
           </aside>
         </div>
       )}
